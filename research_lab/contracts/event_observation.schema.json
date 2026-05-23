@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "confidence_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "unknown"
+      ]
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "research_priority": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "watchlist"
+      ]
+    },
+    "source_type": {
+      "enum": [
+        "operator_observation",
+        "news_article",
+        "social_media_claim",
+        "market_data_scan",
+        "research_note",
+        "manual_import",
+        "recovered_artifact"
+      ]
+    },
+    "symbols_mentioned": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "event_observation_id",
+    "event_family_id",
+    "title",
+    "description",
+    "observed_at",
+    "observed_by",
+    "source_type",
+    "source_ref",
+    "symbols_mentioned",
+    "market_context",
+    "suspected_mechanism",
+    "confidence_level",
+    "research_priority",
+    "notes",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "EventObservation",
+  "type": "object"
+}

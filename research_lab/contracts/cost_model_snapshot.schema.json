@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "asset_costs": {
+      "type": "object"
+    },
+    "assumptions": {
+      "type": "object"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "cost_model_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "cost_model_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "cost_model_snapshot_id",
+    "name",
+    "cost_model_version",
+    "created_at",
+    "created_by",
+    "assumptions",
+    "asset_costs",
+    "content_hash",
+    "schema_version"
+  ],
+  "title": "CostModelSnapshot",
+  "type": "object"
+}

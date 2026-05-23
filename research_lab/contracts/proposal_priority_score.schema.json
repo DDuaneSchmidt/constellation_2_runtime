@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "priority_bucket": {
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        "blocked",
+        "watchlist"
+      ]
+    },
+    "score": {
+      "type": "number"
+    },
+    "score_components": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "proposal_priority_score_id",
+    "hypothesis_proposal_id",
+    "scored_at",
+    "score",
+    "priority_bucket",
+    "score_components",
+    "reason",
+    "recommended_next_action",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "ProposalPriorityScore",
+  "type": "object"
+}

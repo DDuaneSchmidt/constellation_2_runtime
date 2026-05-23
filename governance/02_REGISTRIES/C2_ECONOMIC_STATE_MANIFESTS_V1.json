@@ -1,102 +1,113 @@
-
 {
   "manifests": {
     "fresh_paper_entry_v1": {
-      "operation_type": "fresh_paper_entry_v1",
-      "description": "Bundle C economic closure manifest for governed PAPER entry context using authoritative Bundle A and Bundle B truth.",
       "dependencies": [
         {
-          "dependency_id": "global_context_package_v1",
-          "stage_id": "GLOBAL_CONTEXT",
-          "role_class": "SEALED_CONTEXT_PACKAGE",
-          "owner_ref": "global_context_authority_v1.py",
-          "producer_ref": "global_context_authority_v1",
-          "path_pattern": "{execution_truth_root}/global_context_package_v1/{day_utc}/{global_context_hash}/global_context_package.v1.json",
-          "blocking_build_path_pattern": "{canonical_truth_root}/reports/global_context_build_v1/{day_utc}/{global_context_hash}/global_context_build.v1.json",
-          "required": true,
           "advisory_only": false,
-          "post_submit_only": false,
-          "reusable": true,
+          "blocking_build_path_pattern": "{canonical_truth_root}/reports/global_context_build_v1/{day_utc}/{global_context_hash}/global_context_build.v1.json",
+          "dependency_id": "global_context_package_v1",
           "fresh_materialization_required": false,
+          "owner_ref": "global_context_authority_v1.py",
+          "path_pattern": "{execution_truth_root}/global_context_package_v1/{day_utc}/{global_context_hash}/global_context_package.v1.json",
+          "post_submit_only": false,
+          "producer_ref": "global_context_authority_v1",
+          "required": true,
+          "reusable": true,
+          "role_class": "SEALED_CONTEXT_PACKAGE",
           "semantic_validation": "sealed_package_context_match",
+          "stage_id": "GLOBAL_CONTEXT",
           "upstream_dependency_ids": []
         },
         {
+          "advisory_only": false,
           "dependency_id": "cash_ledger_snapshot_v1",
-          "stage_id": "STATE_BASELINE",
-          "role_class": "TRUTH_OWNER",
+          "fresh_materialization_required": false,
           "owner_ref": "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
-          "producer_ref": "cash_ledger_snapshot_day_v1",
           "path_pattern": "{canonical_truth_root}/cash_ledger_v1/snapshots/{day_utc}/cash_ledger_snapshot.v1.json",
-          "required": true,
-          "advisory_only": false,
           "post_submit_only": false,
+          "producer_ref": "cash_ledger_snapshot_day_v1",
+          "required": true,
           "reusable": true,
-          "fresh_materialization_required": false,
+          "role_class": "TRUTH_OWNER",
           "semantic_validation": "day_match_and_status_ok",
-          "upstream_dependency_ids": ["global_context_package_v1"]
+          "stage_id": "STATE_BASELINE",
+          "upstream_dependency_ids": [
+            "global_context_package_v1"
+          ]
         },
         {
+          "advisory_only": false,
           "dependency_id": "positions_snapshot_v5",
-          "stage_id": "STATE_BASELINE",
-          "role_class": "TRUTH_OWNER",
+          "fresh_materialization_required": false,
           "owner_ref": "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
-          "producer_ref": "positions_snapshot_day_v5",
           "path_pattern": "{canonical_truth_root}/positions_v1/snapshots/{day_utc}/positions_snapshot.v5.json",
-          "required": true,
-          "advisory_only": false,
           "post_submit_only": false,
+          "producer_ref": "positions_snapshot_day_v5",
+          "required": true,
           "reusable": true,
-          "fresh_materialization_required": false,
+          "role_class": "TRUTH_OWNER",
           "semantic_validation": "day_match_and_status_ok",
-          "upstream_dependency_ids": ["cash_ledger_snapshot_v1"]
-        },
-        {
-          "dependency_id": "position_lifecycle_snapshot_v2",
           "stage_id": "STATE_BASELINE",
-          "role_class": "TRUTH_OWNER",
+          "upstream_dependency_ids": [
+            "cash_ledger_snapshot_v1"
+          ]
+        },
+        {
+          "advisory_only": false,
+          "dependency_id": "position_lifecycle_snapshot_v2",
+          "fresh_materialization_required": false,
           "owner_ref": "ops/tools/run_position_lifecycle_snapshot_v2.py",
-          "producer_ref": "position_lifecycle_snapshot_v2",
           "path_pattern": "{canonical_truth_root}/position_lifecycle_v2/{day_utc}/position_lifecycle_snapshot.v2.json",
-          "required": true,
-          "advisory_only": false,
           "post_submit_only": false,
+          "producer_ref": "position_lifecycle_snapshot_v2",
+          "required": true,
           "reusable": true,
-          "fresh_materialization_required": false,
+          "role_class": "TRUTH_OWNER",
           "semantic_validation": "day_match_and_status_ok",
-          "upstream_dependency_ids": ["positions_snapshot_v5"]
+          "stage_id": "STATE_BASELINE",
+          "upstream_dependency_ids": [
+            "positions_snapshot_v5"
+          ]
         },
         {
+          "advisory_only": false,
           "dependency_id": "accounting_nav_v2",
-          "stage_id": "MEASUREMENT",
-          "role_class": "TRUTH_OWNER",
-          "owner_ref": "ops/tools/run_accounting_nav_v2_day_v1.py",
-          "producer_ref": "accounting_nav_v2_day_v1",
-          "path_pattern": "{canonical_truth_root}/accounting_v2/nav/{day_utc}/nav.v2.json",
-          "required": true,
-          "advisory_only": false,
-          "post_submit_only": false,
-          "reusable": true,
           "fresh_materialization_required": false,
+          "owner_ref": "ops/tools/run_accounting_nav_v2_day_v1.py",
+          "path_pattern": "{canonical_truth_root}/accounting_v2/nav/{day_utc}/nav.v2.json",
+          "post_submit_only": false,
+          "producer_ref": "accounting_nav_v2_day_v1",
+          "required": true,
+          "reusable": true,
+          "role_class": "TRUTH_OWNER",
           "semantic_validation": "day_match_and_nav_total",
-          "upstream_dependency_ids": ["cash_ledger_snapshot_v1", "positions_snapshot_v5"]
+          "stage_id": "MEASUREMENT",
+          "upstream_dependency_ids": [
+            "cash_ledger_snapshot_v1",
+            "positions_snapshot_v5"
+          ]
         },
         {
-          "dependency_id": "capital_authority_allocation_v1",
-          "stage_id": "MEASUREMENT",
-          "role_class": "TRUTH_OWNER",
-          "owner_ref": "ops/tools/run_capital_authority_allocation_day_v1.py",
-          "producer_ref": "capital_authority_allocation_day_v1",
-          "path_pattern": "{execution_truth_root}/allocation_v1/capital_authority_allocation_v1/{day_utc}/capital_authority_allocation.v1.json",
-          "required": true,
           "advisory_only": false,
-          "post_submit_only": false,
-          "reusable": true,
+          "dependency_id": "capital_authority_allocation_v1",
           "fresh_materialization_required": false,
+          "owner_ref": "ops/tools/run_capital_authority_allocation_day_v1.py",
+          "path_pattern": "{canonical_truth_root}/allocation_v1/capital_authority_allocation_v1/{day_utc}/capital_authority_allocation.v1.json",
+          "post_submit_only": false,
+          "producer_ref": "capital_authority_allocation_day_v1",
+          "required": true,
+          "reusable": true,
+          "role_class": "TRUTH_OWNER",
           "semantic_validation": "day_match_and_bundle_b_decision_chain",
-          "upstream_dependency_ids": ["positions_snapshot_v5", "accounting_nav_v2"]
+          "stage_id": "MEASUREMENT",
+          "upstream_dependency_ids": [
+            "positions_snapshot_v5",
+            "accounting_nav_v2"
+          ]
         }
       ],
+      "description": "Bundle C economic closure manifest for governed PAPER entry context using authoritative Bundle A and Bundle B truth.",
+      "operation_type": "fresh_paper_entry_v1",
       "seal_requires": [
         "global_context_package_v1",
         "cash_ledger_snapshot_v1",

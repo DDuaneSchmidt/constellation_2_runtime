@@ -1,50 +1,213 @@
 {
-  "schema_id": "C2_RISK_POLICY_REGISTRY_SCHEMA_V1",
-  "title": "C2 Risk Policy Registry V1",
-  "type": "object",
+  "$defs": {
+    "policy": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_entry_only_paper_test": {
+          "const": false,
+          "type": "boolean"
+        },
+        "broker_execution_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "capital_allocation_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "contract_ref": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "estimated_notional_risk_pct_method": {
+          "const": "max_loss_estimate_over_suggested_notional",
+          "type": "string"
+        },
+        "expected_holding_days_default": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "hard_stop": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "const": true,
+              "type": "boolean"
+            },
+            "long_formula": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "rounding": {
+              "const": "currency_cents_half_up",
+              "type": "string"
+            },
+            "short_formula": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "long_formula",
+            "short_formula",
+            "rounding"
+          ],
+          "type": "object"
+        },
+        "invalidation_policy": {
+          "additionalProperties": false,
+          "properties": {
+            "policy_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "rules": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "expected_holding_days": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "rule_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "rule_id",
+                  "description"
+                ],
+                "type": "object"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "policy_id",
+            "rules"
+          ],
+          "type": "object"
+        },
+        "live_trading_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "order_routing_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "paper_only_today": {
+          "const": true,
+          "type": "boolean"
+        },
+        "paper_submit_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "per_trade_notional_pct_max": {
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "risk_estimate_method": {
+          "const": "entry_minus_stop_times_quantity",
+          "type": "string"
+        },
+        "stop_loss_bps_default": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "target_notional_pct_default": {
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy_id",
+        "contract_ref",
+        "target_notional_pct_default",
+        "per_trade_notional_pct_max",
+        "stop_loss_bps_default",
+        "expected_holding_days_default",
+        "risk_estimate_method",
+        "estimated_notional_risk_pct_method",
+        "hard_stop",
+        "invalidation_policy",
+        "allow_entry_only_paper_test",
+        "paper_only_today",
+        "broker_execution_allowed",
+        "live_trading_allowed",
+        "order_routing_allowed",
+        "capital_allocation_allowed",
+        "paper_submit_allowed"
+      ],
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
+  "properties": {
+    "policies": {
+      "additionalProperties": false,
+      "properties": {
+        "C2_CROSS_ASSET_TREND_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_DEFENSIVE_TAIL_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_EVENT_DISLOCATION_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_MARKET_NEUTRAL_SPREAD_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_MEAN_REVERSION_EQ_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_TREND_EQ_PRIMARY_V1": {
+          "$ref": "#/$defs/policy"
+        },
+        "C2_VOL_INCOME_DEFINED_RISK_V1": {
+          "$ref": "#/$defs/policy"
+        }
+      },
+      "required": [
+        "C2_CROSS_ASSET_TREND_V1",
+        "C2_DEFENSIVE_TAIL_V1",
+        "C2_EVENT_DISLOCATION_V1",
+        "C2_MARKET_NEUTRAL_SPREAD_V1",
+        "C2_MEAN_REVERSION_EQ_V1",
+        "C2_TREND_EQ_PRIMARY_V1",
+        "C2_VOL_INCOME_DEFINED_RISK_V1"
+      ],
+      "type": "object"
+    },
+    "schema_id": {
+      "const": "C2_RISK_POLICY_REGISTRY_V1",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "v1",
+      "type": "string"
+    }
+  },
   "required": [
     "schema_id",
     "schema_version",
     "policies"
   ],
-  "properties": {
-    "schema_id": { "type": "string", "const": "C2_RISK_POLICY_REGISTRY_V1" },
-    "schema_version": { "type": "string", "const": "v1" },
-    "policies": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["C2_TREND_EQ_PRIMARY_V1"],
-      "properties": {
-        "C2_TREND_EQ_PRIMARY_V1": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "target_notional_pct_default",
-            "per_trade_notional_pct_max",
-            "stop_loss_bps_default",
-            "allow_entry_only_paper_test"
-          ],
-          "properties": {
-            "target_notional_pct_default": {
-              "type": "string",
-              "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
-            },
-            "per_trade_notional_pct_max": {
-              "type": "string",
-              "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
-            },
-            "stop_loss_bps_default": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 10000
-            },
-            "allow_entry_only_paper_test": {
-              "type": "boolean"
-            }
-          }
-        }
-      }
-    }
-  }
+  "schema_id": "C2_RISK_POLICY_REGISTRY_SCHEMA_V1",
+  "title": "C2 Risk Policy Registry V1",
+  "type": "object"
 }

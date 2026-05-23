@@ -3,7 +3,7 @@
   "$id": "risk_definition_contract_v1",
   "title": "Risk Definition Contract v1",
   "type": "object",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "required": [
     "schema_id",
     "schema_version",
@@ -23,94 +23,438 @@
     "blockers"
   ],
   "properties": {
-    "schema_id": { "const": "risk_definition_contract_v1" },
-    "schema_version": { "const": "v1" },
-    "contract_id": { "type": "string", "minLength": 16 },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "sleeve_id": { "type": "string", "minLength": 1 },
-    "intent_id": { "type": "string", "minLength": 1 },
-    "intent_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schema_id": {
+      "const": "risk_definition_contract_v1"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "contract_id": {
+      "type": "string",
+      "minLength": 16
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "sleeve_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intent_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "instrument": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["symbol"],
+      "required": [
+        "symbol"
+      ],
       "properties": {
-        "symbol": { "type": "string", "minLength": 1 },
-        "currency": { "type": "string" },
-        "kind": { "type": "string" }
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
       }
     },
-    "contract_type": { "enum": ["STOP_BASED", "DEFINED_RISK"] },
-    "risk_type": { "enum": ["STOP_BASED", "DEFINED_RISK"] },
-    "source_intent_path": { "type": "string", "minLength": 1 },
-    "generated_at": { "type": "string", "minLength": 1 },
-    "git_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
-    "truth_root": { "type": "string", "minLength": 1 },
+    "contract_type": {
+      "enum": [
+        "STOP_BASED",
+        "DEFINED_RISK"
+      ]
+    },
+    "risk_type": {
+      "enum": [
+        "STOP_BASED",
+        "DEFINED_RISK"
+      ]
+    },
+    "source_intent_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "truth_root": {
+      "type": "string",
+      "minLength": 1
+    },
     "producer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repo", "module", "git_sha"],
+      "required": [
+        "repo",
+        "module",
+        "git_sha"
+      ],
       "properties": {
-        "repo": { "type": "string", "minLength": 1 },
-        "module": { "type": "string", "minLength": 1 },
-        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        }
       }
     },
-    "validation_status": { "enum": ["PASS", "FAIL"] },
-    "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-    "stop_loss_bps": { "type": ["integer", "null"], "minimum": 1, "maximum": 10000 },
-    "stop_loss_price": { "type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-    "reference_price_source": { "type": ["string", "null"] },
-    "reference_price": { "type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-    "risk_per_unit": { "type": ["integer", "null"], "minimum": 1 },
+    "validation_status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stop_loss_bps": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "stop_loss_price": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
+    "reference_price_source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reference_price": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
+    "risk_per_unit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "quantity_basis": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": true,
       "properties": {
-        "basis": { "type": "string" },
-        "quantity": { "type": "integer", "minimum": 1 }
+        "basis": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
-    "structure_type": { "type": ["string", "null"] },
-    "strikes": { "type": ["array", "null"], "items": { "type": "object" } },
-    "expiry": { "type": ["string", "null"] },
-    "max_loss": { "type": ["integer", "null"], "minimum": 1 },
-    "max_gain": { "type": ["integer", "null"], "minimum": 0 },
-    "breakeven": { "type": ["string", "null"] },
-    "options_chain_ref": { "type": ["string", "null"] },
+    "structure_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "strikes": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      }
+    },
+    "expiry": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "max_loss": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_gain": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "breakeven": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "options_chain_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "order_plan_ref": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["path", "plan_id", "sha256"],
+      "required": [
+        "path",
+        "plan_id",
+        "sha256"
+      ],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "plan_id": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
       }
     },
     "defined_risk_proof": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["source", "defined_risk_proven", "max_loss_usd", "contracts", "width_points", "multiplier"],
+      "required": [
+        "source",
+        "defined_risk_proven",
+        "max_loss_usd",
+        "contracts",
+        "width_points",
+        "multiplier"
+      ],
       "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "defined_risk_proven": { "type": "boolean" },
-        "max_loss_usd": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-        "contracts": { "type": "integer", "minimum": 1 },
-        "width_points": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-        "multiplier": { "type": "integer", "minimum": 1 }
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defined_risk_proven": {
+          "type": "boolean"
+        },
+        "max_loss_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "contracts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width_points": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "multiplier": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
-    "canonical_json_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+    "canonical_json_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "artifact_id": {
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "type": "string"
+    },
+    "runtime_evaluation_hash": {
+      "type": "string"
+    },
+    "runtime_evaluation_path": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "side": {
+      "type": "string"
+    },
+    "exposure_id": {
+      "type": "string"
+    },
+    "ticket_id": {
+      "type": "string"
+    },
+    "risk_model_version": {
+      "type": "string"
+    },
+    "risk_measure": {
+      "type": "string"
+    },
+    "risk_measure_definition": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "max_risk": {
+      "type": "string"
+    },
+    "max_risk_cents": {
+      "type": "integer"
+    },
+    "requested_risk": {
+      "type": "string"
+    },
+    "requested_notional": {
+      "type": "string"
+    },
+    "requested_quantity": {
+      "type": "integer"
+    },
+    "stop_loss_definition": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "sizing_method": {
+      "type": "string"
+    },
+    "construction_contract_id": {
+      "type": "string"
+    },
+    "construction_contract_hash": {
+      "type": "string"
+    },
+    "paper_trade_construction_id": {
+      "type": "string"
+    },
+    "paper_trade_construction_path": {
+      "type": "string"
+    },
+    "paper_trade_construction_hash": {
+      "type": "string"
+    },
+    "capital_allocation_path": {
+      "type": "string"
+    },
+    "capital_allocation_hash": {
+      "type": "string"
+    },
+    "capital_allocation_status": {
+      "type": "string"
+    },
+    "allocation_limit_used": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "input_hashes": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "output_hash": {
+      "type": "string"
+    },
+    "broker_execution_allowed": {
+      "type": "boolean"
+    },
+    "broker_submit_transmit_allowed": {
+      "type": "boolean"
+    },
+    "order_routing_allowed": {
+      "type": "boolean"
+    },
+    "autonomous_execution_allowed": {
+      "type": "boolean"
+    },
+    "trade_advice_allowed": {
+      "type": "boolean"
+    }
   },
   "allOf": [
     {
-      "if": { "properties": { "risk_type": { "const": "STOP_BASED" }, "validation_status": { "const": "PASS" } } },
-      "then": { "required": ["stop_loss_bps", "reference_price_source", "reference_price", "risk_per_unit", "quantity_basis"] }
+      "if": {
+        "properties": {
+          "risk_type": {
+            "const": "STOP_BASED"
+          },
+          "validation_status": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "stop_loss_bps",
+          "reference_price_source",
+          "reference_price",
+          "risk_per_unit",
+          "quantity_basis"
+        ]
+      }
     },
     {
-      "if": { "properties": { "risk_type": { "const": "DEFINED_RISK" }, "validation_status": { "const": "PASS" } } },
-      "then": { "required": ["structure_type", "strikes", "expiry", "max_loss", "options_chain_ref", "order_plan_ref", "defined_risk_proof", "quantity_basis"] }
+      "if": {
+        "properties": {
+          "risk_type": {
+            "const": "DEFINED_RISK"
+          },
+          "validation_status": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "structure_type",
+          "strikes",
+          "expiry",
+          "max_loss",
+          "options_chain_ref",
+          "order_plan_ref",
+          "defined_risk_proof",
+          "quantity_basis"
+        ]
+      }
     }
   ]
 }

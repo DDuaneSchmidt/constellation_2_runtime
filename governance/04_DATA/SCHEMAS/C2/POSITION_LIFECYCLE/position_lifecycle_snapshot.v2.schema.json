@@ -1,58 +1,47 @@
 {
-  "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_id",
-    "schema_version",
-    "day_utc",
-    "produced_utc",
-    "producer",
-    "status",
-    "reason_codes",
-    "items",
-    "canonical_json_hash"
-  ],
   "properties": {
-    "schema_id": { "const": "C2_POSITION_LIFECYCLE_SNAPSHOT" },
-    "schema_version": { "const": 2 },
-    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
-    "produced_utc": { "type": "string", "minLength": 20 },
-    "producer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
-      "properties": {
-        "repo": { "type": "string", "minLength": 1 },
-        "git_sha": { "type": "string", "minLength": 7 },
-        "module": { "type": "string", "minLength": 1 }
-      }
+    "canonical_json_hash": {
+      "maxLength": 64,
+      "minLength": 64,
+      "type": "string"
     },
-    "status": { "type": "string", "enum": ["OK", "FAIL"] },
-    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "day_utc": {
+      "maxLength": 10,
+      "minLength": 10,
+      "type": "string"
+    },
     "items": {
-      "type": "array",
       "items": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "position_id",
-          "engine_id",
-          "source_intent_id",
-          "intent_sha256",
-          "lifecycle_state",
-          "lifecycle_reason_code",
-          "opened_day_utc",
-          "last_transition_utc",
-          "kill_switch_override"
-        ],
         "properties": {
-          "position_id": { "type": "string", "minLength": 1 },
-          "engine_id": { "type": "string", "minLength": 1 },
-          "source_intent_id": { "type": "string", "minLength": 1 },
-          "intent_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
-
+          "engine_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "exit_policy_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "type": "string"
+          },
+          "kill_switch_override": {
+            "type": "boolean"
+          },
+          "last_transition_utc": {
+            "minLength": 20,
+            "type": "string"
+          },
+          "lifecycle_reason_code": {
+            "minLength": 1,
+            "type": "string"
+          },
           "lifecycle_state": {
-            "type": "string",
             "enum": [
               "OPEN",
               "MANAGING",
@@ -64,19 +53,126 @@
               "FORCED_CLOSE_PENDING",
               "FORCED_CLOSED",
               "ORPHANED"
+            ],
+            "type": "string"
+          },
+          "opened_day_utc": {
+            "maxLength": 10,
+            "minLength": 10,
+            "type": "string"
+          },
+          "position_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "regime_snapshot_ref": {
+            "type": [
+              "string",
+              "null"
             ]
           },
-          "lifecycle_reason_code": { "type": "string", "minLength": 1 },
-          "opened_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
-          "last_transition_utc": { "type": "string", "minLength": 20 },
-
-          "exit_policy_ref": { "type": ["string", "null"] },
-          "regime_snapshot_ref": { "type": ["string", "null"] },
-          "kill_switch_override": { "type": "boolean" }
-        }
-      }
+          "source_intent_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "position_id",
+          "engine_id",
+          "source_intent_id",
+          "intent_sha256",
+          "lifecycle_state",
+          "lifecycle_reason_code",
+          "opened_day_utc",
+          "last_transition_utc",
+          "kill_switch_override"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
-    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
-  }
+    "output_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "produced_utc": {
+      "minLength": 20,
+      "type": "string"
+    },
+    "producer": {
+      "additionalProperties": false,
+      "properties": {
+        "git_sha": {
+          "minLength": 7,
+          "type": "string"
+        },
+        "module": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "repo": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "git_sha",
+        "module"
+      ],
+      "type": "object"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "runtime_evaluation_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "C2_POSITION_LIFECYCLE_SNAPSHOT"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "source_positions_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "source_type": {
+      "enum": [
+        "BROKER_EXPORT",
+        "MANUAL_DECLARATION",
+        "SIMULATION_LEDGER",
+        "STATIC_RISK_BUDGET",
+        "STATIC_RISK_BUDGET_BOOTSTRAP",
+        "ACCOUNT_EVIDENCE",
+        "POSITIONS_SNAPSHOT_V5",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "FAIL"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "items",
+    "canonical_json_hash"
+  ],
+  "type": "object"
 }
-

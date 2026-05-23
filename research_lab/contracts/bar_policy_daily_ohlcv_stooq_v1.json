@@ -1,0 +1,13 @@
+{
+  "bar_policy_version": "bp_daily_ohlcv_stooq_v1",
+  "calendar": "exchange trading days inferred from available bars",
+  "interval": "1d",
+  "missing_data_policy": "warn_not_fill",
+  "price_adjustment": {
+    "adj_close": "equal to close because Stooq daily bootstrap data is treated as unadjusted",
+    "open_high_low_close": "raw provider OHLC"
+  },
+  "split_dividend_policy": "not adjusted unless provider supplies adjusted data",
+  "timezone": "America/New_York",
+  "volume": "provider volume"
+}

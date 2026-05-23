@@ -7,129 +7,176 @@
   "notes": [
     "Governance-owned policy manifest for Bundle A (Capital Authority Layer).",
     "Constellation 2.0 canonical engine_ids ONLY (no legacy sleeve codes).",
-    "6 engines ACTIVE, 2 engines INACTIVE per ENGINE_MODEL_REGISTRY_V1.",
-    "Inactive engines are hard-capped (max_capital_at_risk_cents=0; notional caps=0).",
+    "8 engines ACTIVE per ENGINE_MODEL_REGISTRY_V1.",
+    "Paper authority is explicitly scoped to PAPER mode only; live trading, broker execution, real capital allocation, and paper submit automation remain disabled here.",
     "All numeric values are interpreted as decimal strings or integer cents by runtime code; no floats are authoritative."
   ],
   "sleeves": [
     {
       "sleeve_id": "C2_TREND_EQ_PRIMARY",
       "display_name": "Trend Sleeve (Equity Primary)",
-      "engine_ids": ["C2_TREND_EQ_PRIMARY_V1", "C2_INTENT_SIMULATOR_V1"],
+      "engine_ids": [
+        "C2_TREND_EQ_PRIMARY_V1",
+        "C2_INTENT_SIMULATOR_V1"
+      ],
       "priority_rank": 10,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
+        "max_gross_notional_usd": "120000.00",
+        "max_net_notional_usd": "120000.00",
         "max_capital_at_risk_cents": 120005,
         "max_symbols": 25,
         "max_sector_concentration_pct": "0.25",
         "max_single_name_notional_pct": "0.10",
         "max_beta_gross_proxy": "1.50",
-        "max_beta_net_proxy": "0.80"
+        "max_beta_net_proxy": "0.80",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "25000.00",
+        "max_risk_per_trade": "1200.05"
       }
     },
     {
       "sleeve_id": "C2_VOL_INCOME_DEFINED_RISK",
       "display_name": "Volatility Income Sleeve (Defined Risk Options)",
-      "engine_ids": ["C2_VOL_INCOME_DEFINED_RISK_V1"],
+      "engine_ids": [
+        "C2_VOL_INCOME_DEFINED_RISK_V1"
+      ],
       "priority_rank": 20,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
+        "max_gross_notional_usd": "80000.00",
+        "max_net_notional_usd": "80000.00",
         "max_capital_at_risk_cents": 80000,
         "max_symbols": 15,
         "max_sector_concentration_pct": "0.35",
         "max_single_name_notional_pct": "0.12",
         "max_beta_gross_proxy": "1.20",
-        "max_beta_net_proxy": "0.60"
+        "max_beta_net_proxy": "0.60",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "20000.00",
+        "max_risk_per_trade": "800.00"
       }
     },
     {
       "sleeve_id": "C2_MEAN_REVERSION_EQ",
       "display_name": "Mean Reversion Sleeve (Equity)",
-      "engine_ids": ["C2_MEAN_REVERSION_EQ_V1"],
+      "engine_ids": [
+        "C2_MEAN_REVERSION_EQ_V1"
+      ],
       "priority_rank": 30,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
+        "max_gross_notional_usd": "60000.00",
+        "max_net_notional_usd": "60000.00",
         "max_capital_at_risk_cents": 30000,
         "max_symbols": 20,
         "max_sector_concentration_pct": "0.30",
         "max_single_name_notional_pct": "0.10",
         "max_beta_gross_proxy": "1.50",
-        "max_beta_net_proxy": "0.80"
+        "max_beta_net_proxy": "0.80",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "15000.00",
+        "max_risk_per_trade": "300.00"
       }
     },
     {
       "sleeve_id": "C2_EVENT_DISLOCATION",
       "display_name": "Event Dislocation Sleeve",
-      "engine_ids": ["C2_EVENT_DISLOCATION_V1"],
+      "engine_ids": [
+        "C2_EVENT_DISLOCATION_V1"
+      ],
       "priority_rank": 40,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
+        "max_gross_notional_usd": "30000.00",
+        "max_net_notional_usd": "30000.00",
         "max_capital_at_risk_cents": 7000,
         "max_symbols": 10,
         "max_sector_concentration_pct": "0.35",
         "max_single_name_notional_pct": "0.10",
         "max_beta_gross_proxy": "1.20",
-        "max_beta_net_proxy": "0.70"
+        "max_beta_net_proxy": "0.70",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "10000.00",
+        "max_risk_per_trade": "70.00"
       }
     },
     {
       "sleeve_id": "C2_DEFENSIVE_TAIL",
       "display_name": "Defensive Tail Sleeve",
-      "engine_ids": ["C2_DEFENSIVE_TAIL_V1"],
+      "engine_ids": [
+        "C2_DEFENSIVE_TAIL_V1"
+      ],
       "priority_rank": 50,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
+        "max_gross_notional_usd": "15000.00",
+        "max_net_notional_usd": "15000.00",
         "max_capital_at_risk_cents": 3000,
         "max_symbols": 5,
         "max_sector_concentration_pct": "0.50",
         "max_single_name_notional_pct": "0.10",
         "max_beta_gross_proxy": "1.00",
-        "max_beta_net_proxy": "0.50"
+        "max_beta_net_proxy": "0.50",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "7500.00",
+        "max_risk_per_trade": "30.00"
       }
     },
     {
       "sleeve_id": "C2_CROSS_ASSET_TREND",
-      "display_name": "Cross-Asset Trend (INACTIVE)",
-      "engine_ids": ["C2_CROSS_ASSET_TREND_V1"],
+      "display_name": "Cross-Asset Trend",
+      "engine_ids": [
+        "C2_CROSS_ASSET_TREND_V1"
+      ],
       "priority_rank": 60,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
-        "max_capital_at_risk_cents": 0,
-        "max_symbols": 0,
-        "max_sector_concentration_pct": "0.00",
-        "max_single_name_notional_pct": "0.00",
-        "max_beta_gross_proxy": "0.00",
-        "max_beta_net_proxy": "0.00"
+        "max_gross_notional_usd": "100000.00",
+        "max_net_notional_usd": "100000.00",
+        "max_capital_at_risk_cents": 100000,
+        "max_symbols": 20,
+        "max_sector_concentration_pct": "0.35",
+        "max_single_name_notional_pct": "0.12",
+        "max_beta_gross_proxy": "1.50",
+        "max_beta_net_proxy": "1.00",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "25000.00",
+        "max_risk_per_trade": "1000.00"
       }
     },
     {
       "sleeve_id": "C2_MARKET_NEUTRAL_SPREAD",
-      "display_name": "Market Neutral Spread (INACTIVE)",
-      "engine_ids": ["C2_MARKET_NEUTRAL_SPREAD_V1"],
+      "display_name": "Market Neutral Spread",
+      "engine_ids": [
+        "C2_MARKET_NEUTRAL_SPREAD_V1"
+      ],
       "priority_rank": 70,
       "limits": {
-        "max_gross_notional_usd": "0",
-        "max_net_notional_usd": "0",
-        "max_capital_at_risk_cents": 0,
-        "max_symbols": 0,
-        "max_sector_concentration_pct": "0.00",
-        "max_single_name_notional_pct": "0.00",
-        "max_beta_gross_proxy": "0.00",
-        "max_beta_net_proxy": "0.00"
+        "max_gross_notional_usd": "70000.00",
+        "max_net_notional_usd": "70000.00",
+        "max_capital_at_risk_cents": 70000,
+        "max_symbols": 10,
+        "max_sector_concentration_pct": "0.35",
+        "max_single_name_notional_pct": "0.10",
+        "max_beta_gross_proxy": "1.00",
+        "max_beta_net_proxy": "0.50",
+        "paper_enabled": true,
+        "paper_test_capital_base": "300000.00",
+        "max_notional_per_trade": "20000.00",
+        "max_risk_per_trade": "700.00"
       }
     }
   ],
   "portfolio_limits": {
-    "max_gross_notional_usd": "0",
-    "max_net_notional_usd": "0",
-    "max_capital_at_risk_cents": 200000,
-    "max_symbols": 40,
+    "paper_enabled": true,
+    "paper_test_capital_base": "300000.00",
+    "max_gross_notional_usd": "300000.00",
+    "max_net_notional_usd": "300000.00",
+    "max_capital_at_risk_cents": 600000,
+    "max_notional_per_trade": "50000.00",
+    "max_risk_per_trade": "2500.00",
+    "max_symbols": 80,
     "max_sector_concentration_pct": "0.40",
     "max_single_name_notional_pct": "0.12",
     "max_pairwise_correlation_proxy": "0.75"
@@ -159,5 +206,13 @@
     "CAPAUTH_CONFLICT_RESOLUTION_BLOCK",
     "CAPAUTH_AUTHORIZED",
     "CAPAUTH_REJECTED"
-  ]
+  ],
+  "scope": {
+    "environment": "PAPER",
+    "paper_enabled": true,
+    "live_trading_allowed": false,
+    "broker_execution_allowed": false,
+    "real_capital_allocation_allowed": false,
+    "paper_submit_allowed": false
+  }
 }

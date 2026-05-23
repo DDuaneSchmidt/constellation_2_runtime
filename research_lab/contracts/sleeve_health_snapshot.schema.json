@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "attribution_health": {
+      "enum": [
+        "healthy",
+        "watch",
+        "challenged",
+        "insufficient_data",
+        "retire_candidate"
+      ]
+    },
+    "backtest_health": {
+      "enum": [
+        "healthy",
+        "watch",
+        "challenged",
+        "insufficient_data",
+        "retire_candidate"
+      ]
+    },
+    "candidate_health": {
+      "enum": [
+        "healthy",
+        "watch",
+        "challenged",
+        "insufficient_data",
+        "retire_candidate"
+      ]
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "overall_health": {
+      "enum": [
+        "healthy",
+        "watch",
+        "challenged",
+        "insufficient_data",
+        "retire_candidate"
+      ]
+    },
+    "regime_health": {
+      "enum": [
+        "healthy",
+        "watch",
+        "challenged",
+        "insufficient_data",
+        "retire_candidate"
+      ]
+    }
+  },
+  "required": [
+    "sleeve_health_snapshot_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "as_of_date",
+    "linked_evidence_package_ids",
+    "linked_candidate_batch_ids",
+    "linked_attribution_report_ids",
+    "evidence_quality",
+    "backtest_health",
+    "candidate_health",
+    "attribution_health",
+    "regime_health",
+    "overall_health",
+    "health_reasons",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveHealthSnapshot",
+  "type": "object"
+}

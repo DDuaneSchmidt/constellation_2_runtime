@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "dataset_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "evidence_quality": {
+      "enum": [
+        "insufficient_sample",
+        "preliminary",
+        "moderate"
+      ]
+    },
+    "research_plan_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "summary_metrics": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "research_plan_id",
+    "dataset_snapshot_id",
+    "event_count",
+    "evidence_quality",
+    "summary_metrics",
+    "schema_version"
+  ],
+  "title": "EventStudyResult",
+  "type": "object"
+}

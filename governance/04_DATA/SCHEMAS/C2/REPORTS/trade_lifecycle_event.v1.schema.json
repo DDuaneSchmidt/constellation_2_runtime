@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/trade_lifecycle_event.v1.schema.json",
+  "title": "TradeLifecycleEvent v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "event_id",
+    "trade_lifecycle_case_id",
+    "event_type",
+    "source_day",
+    "created_at",
+    "immutable_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "trade_lifecycle_event" },
+    "schema_version": { "const": "v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "trade_lifecycle_case_id": { "type": "string", "minLength": 1 },
+    "event_type": {
+      "enum": [
+        "CASE_OPENED",
+        "CONSTRUCTION_ATTACHED",
+        "CONSTRUCTION_BLOCKED",
+        "CAPTURE_READY",
+        "MANUAL_CAPTURE_RECORDED",
+        "SKIPPED",
+        "EXPIRED",
+        "CLOSED"
+      ]
+    },
+    "source_day": { "type": "string" },
+    "created_at": { "type": "string" },
+    "immutable_hash": { "type": "string", "minLength": 1 }
+  }
+}

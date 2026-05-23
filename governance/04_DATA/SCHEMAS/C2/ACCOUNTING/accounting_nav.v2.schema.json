@@ -1,9 +1,91 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "C2_ACCOUNTING_NAV_V2",
-  "title": "C2 Accounting NAV v2 (supports broker marks)",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "properties": {
+    "cash_hash": {
+      "type": "string"
+    },
+    "day0_bootstrap_classification": {
+      "type": "string"
+    },
+    "day_utc": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
+    },
+    "history": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "input_manifest": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "nav": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "positions_hash": {
+      "type": "string"
+    },
+    "produced_utc": {
+      "type": "string"
+    },
+    "producer": {
+      "additionalProperties": false,
+      "properties": {
+        "git_sha": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "git_sha",
+        "module"
+      ],
+      "type": "object"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "runtime_evaluation_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "C2_ACCOUNTING_NAV_V2"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "source_type": {
+      "enum": [
+        "BROKER_EXPORT",
+        "MANUAL_DECLARATION",
+        "SIMULATION_LEDGER",
+        "STATIC_RISK_BUDGET",
+        "STATIC_RISK_BUDGET_BOOTSTRAP",
+        "ACCOUNT_EVIDENCE",
+        "POSITIONS_SNAPSHOT_V5",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
   "required": [
     "schema_id",
     "schema_version",
@@ -16,31 +98,6 @@
     "nav",
     "history"
   ],
-  "properties": {
-    "schema_id": { "const": "C2_ACCOUNTING_NAV_V2" },
-    "schema_version": { "const": 2 },
-    "produced_utc": { "type": "string" },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "producer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
-      "properties": {
-        "repo": { "type": "string" },
-        "git_sha": { "type": "string" },
-        "module": { "type": "string" }
-      }
-    },
-    "status": { "type": "string" },
-    "reason_codes": { "type": "array", "items": { "type": "string" } },
-    "input_manifest": { "type": "array", "items": { "type": "object" } },
-    "nav": {
-      "type": "object",
-      "additionalProperties": true
-    },
-    "history": {
-      "type": "object",
-      "additionalProperties": true
-    }
-  }
+  "title": "C2 Accounting NAV v2 (supports broker marks)",
+  "type": "object"
 }

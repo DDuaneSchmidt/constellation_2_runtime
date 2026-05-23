@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "actionability_status": {
+          "const": "non_actionable_research_only"
+        },
+        "allowed_next_research_actions": {
+          "items": {
+            "enum": [
+              "collect_more_observations",
+              "enable_market_data",
+              "resolve_integrity_blocker",
+              "run_system_research_review",
+              "eligible_for_hypothesis_activation_packet"
+            ]
+          },
+          "type": "array"
+        },
+        "blockers": {
+          "type": "array"
+        },
+        "content_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "disallowed_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "eligibility_snapshot": {
+          "type": "object"
+        },
+        "generated_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "hypothesis_proposal_batch_id": {
+          "type": "string"
+        },
+        "hypothesis_proposal_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "hypothesis_proposal_review_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "immutable_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "latest_integrity_report_id": {
+          "type": "string"
+        },
+        "latest_research_os_status_report_id": {
+          "type": "string"
+        },
+        "no_lifecycle_mutation_assertion": {
+          "type": "object"
+        },
+        "non_actionable_research_only_assertion": {
+          "type": "object"
+        },
+        "research_label": {
+          "const": "RESEARCH_ONLY"
+        },
+        "review_decision": {
+          "enum": [
+            "reject_proposal",
+            "defer_until_more_observation",
+            "mark_system_research_item",
+            "request_data_enablement",
+            "approve_for_future_hypothesis_activation"
+          ]
+        },
+        "review_rationale": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "review_status": {
+          "enum": [
+            "recorded",
+            "blocked",
+            "invalid"
+          ]
+        },
+        "review_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "reviewer_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_artifact_hashes": {
+          "type": "object"
+        },
+        "source_artifact_ids": {
+          "type": "object"
+        },
+        "source_observation_candidate_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_observation_cluster_id": {
+          "type": "string"
+        },
+        "source_proposal_family": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_proposal_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "source_proposal_status": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_proposal_review_id",
+        "generated_at",
+        "review_version",
+        "hypothesis_proposal_id",
+        "hypothesis_proposal_batch_id",
+        "reviewer_id",
+        "review_decision",
+        "review_rationale",
+        "review_status",
+        "source_proposal_status",
+        "source_proposal_family",
+        "source_proposal_hash",
+        "source_observation_cluster_id",
+        "source_observation_candidate_ids",
+        "latest_integrity_report_id",
+        "latest_research_os_status_report_id",
+        "eligibility_snapshot",
+        "blockers",
+        "allowed_next_research_actions",
+        "disallowed_actions",
+        "no_lifecycle_mutation_assertion",
+        "non_actionable_research_only_assertion",
+        "source_artifact_ids",
+        "source_artifact_hashes",
+        "immutable_hash"
+      ],
+      "title": "HypothesisProposalReview",
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "allowed_next_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "content_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "next_status": {
+          "enum": [
+            "accepted_for_research",
+            "watchlist",
+            "rejected",
+            "archived",
+            "needs_data",
+            "needs_revision"
+          ]
+        },
+        "review_decision": {
+          "enum": [
+            "accept_for_research",
+            "watchlist",
+            "reject",
+            "archive",
+            "needs_data",
+            "needs_revision"
+          ]
+        }
+      },
+      "required": [
+        "hypothesis_proposal_review_id",
+        "hypothesis_proposal_id",
+        "review_decision",
+        "review_reason",
+        "reviewed_by",
+        "reviewed_at",
+        "next_status",
+        "allowed_next_actions",
+        "schema_version",
+        "content_hash"
+      ],
+      "title": "ResearchIntakeHypothesisProposalReview",
+      "type": "object"
+    }
+  ],
+  "title": "HypothesisProposalReview"
+}

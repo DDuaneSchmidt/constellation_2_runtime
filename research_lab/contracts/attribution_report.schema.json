@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "candidate_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "measured_candidate_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unavailable_candidate_count": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "attribution_report_id",
+    "candidate_batch_id",
+    "dataset_snapshot_id",
+    "cost_model_snapshot_id",
+    "candidate_count",
+    "measured_candidate_count",
+    "unavailable_candidate_count",
+    "metrics",
+    "decision_quality_summary",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "AttributionReport",
+  "type": "object"
+}

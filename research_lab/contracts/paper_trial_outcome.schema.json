@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "measured",
+        "unavailable"
+      ]
+    }
+  },
+  "required": [
+    "paper_trial_outcome_id",
+    "paper_trial_id",
+    "paper_trial_observation_id",
+    "candidate_batch_id",
+    "outcome_windows",
+    "outcome_record_count",
+    "measured_candidate_count",
+    "unavailable_candidate_count",
+    "attribution_report_id",
+    "status",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "PaperTrialOutcome",
+  "type": "object"
+}

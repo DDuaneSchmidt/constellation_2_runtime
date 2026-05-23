@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "active_trials": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cancelled_trials": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "completed_trials": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "paused_trials": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "trials": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "paper_trial_inventory_id",
+    "created_at",
+    "active_trials",
+    "paused_trials",
+    "completed_trials",
+    "cancelled_trials",
+    "trials",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "PaperTrialInventory",
+  "type": "object"
+}

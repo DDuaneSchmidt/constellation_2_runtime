@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "blocked_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_proposal_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_proposal_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "non_actionable_research_only_assertion": {
+      "type": "object"
+    },
+    "proposal_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "proposal_engine_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "proposal_family_counts": {
+      "type": "object"
+    },
+    "proposal_status_counts": {
+      "type": "object"
+    },
+    "proposed_for_review_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_observation_cluster_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "system_research_only_count": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "hypothesis_proposal_batch_id",
+    "generated_at",
+    "proposal_engine_version",
+    "source_observation_cluster_batch_id",
+    "hypothesis_proposal_ids",
+    "proposal_count",
+    "proposal_status_counts",
+    "proposal_family_counts",
+    "blocked_count",
+    "proposed_for_review_count",
+    "system_research_only_count",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "non_actionable_research_only_assertion",
+    "immutable_hash"
+  ],
+  "title": "HypothesisProposalBatch",
+  "type": "object"
+}

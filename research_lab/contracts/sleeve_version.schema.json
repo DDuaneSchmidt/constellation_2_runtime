@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    }
+  },
+  "required": [
+    "sleeve_version_id",
+    "sleeve_id",
+    "version",
+    "hypothesis_id",
+    "linked_evidence_package_ids",
+    "linked_backtest_evidence_package_id",
+    "linked_event_study_evidence_package_id",
+    "linked_candidate_batch_ids",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "candidate_generator_version",
+    "ranking_policy_version",
+    "signal_rule",
+    "execution_model",
+    "portfolio_model",
+    "risk_notes",
+    "limitations",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveVersion",
+  "type": "object"
+}

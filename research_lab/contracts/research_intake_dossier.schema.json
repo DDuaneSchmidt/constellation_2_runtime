@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "research_label": {
+      "const": "Research intake only. No broker execution. No live trading. No autonomous trading. No sleeve creation. No investment recommendation."
+    }
+  },
+  "required": [
+    "research_intake_dossier_id",
+    "hypothesis_proposal_id",
+    "event_observation_ids",
+    "event_cluster_id",
+    "intent_candidate_id",
+    "hypothesis",
+    "event_family_id",
+    "confidence_level",
+    "governance_classification",
+    "data_requirement_status",
+    "readiness_assessment_id",
+    "proposal_priority_score_id",
+    "proposal_status",
+    "recommended_next_action",
+    "human_review_required",
+    "research_label",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "ResearchIntakeDossier",
+  "type": "object"
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "recommended_next_action": {
+      "enum": [
+        "measure_due_outcomes",
+        "record_more_observations",
+        "continue_paper_trial",
+        "review_paper_trial"
+      ]
+    }
+  },
+  "required": [
+    "paper_trial_id",
+    "status",
+    "observation_count",
+    "candidate_count_total",
+    "zero_candidate_observation_count",
+    "pending_due_outcomes",
+    "due_outcomes",
+    "measured_due_outcomes",
+    "unavailable_due_outcomes",
+    "measured_candidate_count",
+    "latest_observation_date",
+    "latest_outcome_measurement_date",
+    "latest_review_decision",
+    "recommended_next_action",
+    "next_allowed_actions",
+    "research_label",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "PaperTrialOperationsReport",
+  "type": "object"
+}

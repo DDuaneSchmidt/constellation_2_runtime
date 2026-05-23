@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "event_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_types": {
+      "items": {
+        "enum": [
+          "FOMC",
+          "CPI",
+          "NFP",
+          "OPEX",
+          "TREASURY_AUCTION",
+          "EARNINGS_SEASON",
+          "GEOPOLITICAL",
+          "ENERGY_SHOCK",
+          "RATE_SHOCK",
+          "CREDIT_STRESS",
+          "OTHER"
+        ]
+      },
+      "type": "array"
+    },
+    "macro_event_calendar_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "source_path": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "macro_event_calendar_snapshot_id",
+    "source_path",
+    "event_count",
+    "event_types",
+    "start_date",
+    "end_date",
+    "storage_uri",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "MacroEventCalendarSnapshot",
+  "type": "object"
+}

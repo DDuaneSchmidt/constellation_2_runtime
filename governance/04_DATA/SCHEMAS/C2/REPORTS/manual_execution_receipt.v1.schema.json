@@ -4,41 +4,322 @@
   "title": "manual_execution_receipt.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "schema_version", "artifact_id", "receipt_id", "recommended_trade_id", "actual_symbol", "actual_side", "actual_quantity", "suggested_quantity", "quantity_override", "expected_risk", "actual_risk", "operator_override_reason", "sizing_quality", "order_type", "fill_price", "fill_timestamp", "stop_order_entered", "stop_price", "operator_notes", "deviations_from_recommendation", "deviations_from_aegis_recommendation", "source_packet_type", "alert_id", "source_packet_id", "event_id", "event_run_id", "fill_timestamp_utc", "deviation_from_entry_reference_price", "fill_before_valid_until", "max_entry_slippage_respected", "manual_observation_only", "broker_submit_required", "canonical_json_hash"],
   "properties": {
-    "schema_id": { "const": "manual_execution_receipt" },
-    "schema_version": { "const": "v1" },
-    "artifact_id": { "const": "manual_execution_receipt_v1" },
-    "receipt_id": { "type": "string" },
-    "recommended_trade_id": { "type": "string" },
-    "actual_symbol": { "type": "string" },
-    "actual_side": { "type": "string" },
-    "actual_quantity": { "type": "integer", "minimum": 0 },
-    "suggested_quantity": { "type": "integer", "minimum": 0 },
-    "quantity_override": { "type": "boolean" },
-    "expected_risk": { "type": "string" },
-    "actual_risk": { "type": "string" },
-    "operator_override_reason": { "type": "string" },
-    "sizing_quality": { "type": "string" },
-    "order_type": { "type": "string" },
-    "fill_price": { "type": "string" },
-    "fill_timestamp": { "type": "string" },
-    "stop_order_entered": { "type": "boolean" },
-    "stop_price": { "type": "string" },
-    "operator_notes": { "type": "string" },
-    "deviations_from_recommendation": { "type": "array", "items": { "type": "string" } },
-    "deviations_from_aegis_recommendation": { "type": "array", "items": { "type": "string" } },
-    "source_packet_type": { "type": "string", "enum": ["EOD_MANUAL_PACKET", "EVENT_TACTICAL_PACKET"] },
-    "alert_id": { "type": "string" },
-    "source_packet_id": { "type": "string" },
-    "event_id": { "type": "string" },
-    "event_run_id": { "type": "string" },
-    "fill_timestamp_utc": { "type": "string" },
-    "deviation_from_entry_reference_price": { "type": "string" },
-    "fill_before_valid_until": { "type": "boolean" },
-    "max_entry_slippage_respected": { "type": "boolean" },
-    "manual_observation_only": { "const": true },
-    "broker_submit_required": { "const": false },
-    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-  }
+    "schema_id": {
+      "const": "manual_execution_receipt"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "const": "manual_execution_receipt_v1"
+    },
+    "receipt_id": {
+      "type": "string"
+    },
+    "recommended_trade_id": {
+      "type": "string"
+    },
+    "actual_symbol": {
+      "type": "string"
+    },
+    "actual_side": {
+      "type": "string"
+    },
+    "actual_quantity": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "suggested_quantity": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "quantity_override": {
+      "type": "boolean"
+    },
+    "expected_risk": {
+      "type": "string"
+    },
+    "actual_risk": {
+      "type": "string"
+    },
+    "operator_override_reason": {
+      "type": "string"
+    },
+    "sizing_quality": {
+      "type": "string"
+    },
+    "order_type": {
+      "type": "string"
+    },
+    "fill_price": {
+      "type": "string"
+    },
+    "fill_timestamp": {
+      "type": "string"
+    },
+    "stop_order_entered": {
+      "type": "boolean"
+    },
+    "stop_price": {
+      "type": "string"
+    },
+    "operator_notes": {
+      "type": "string"
+    },
+    "deviations_from_recommendation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deviations_from_aegis_recommendation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_packet_type": {
+      "type": "string",
+      "enum": [
+        "EOD_MANUAL_PACKET",
+        "EVENT_TACTICAL_PACKET"
+      ]
+    },
+    "alert_id": {
+      "type": "string"
+    },
+    "source_packet_id": {
+      "type": "string"
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "event_run_id": {
+      "type": "string"
+    },
+    "fill_timestamp_utc": {
+      "type": "string"
+    },
+    "deviation_from_entry_reference_price": {
+      "type": "string"
+    },
+    "fill_before_valid_until": {
+      "type": "boolean"
+    },
+    "max_entry_slippage_respected": {
+      "type": "boolean"
+    },
+    "manual_observation_only": {
+      "const": true
+    },
+    "broker_submit_required": {
+      "const": false
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 20
+    },
+    "receipt_type": {
+      "type": "string",
+      "enum": [
+        "NONE_DECLARED",
+        "MANUAL_FILL_RECORDED"
+      ]
+    },
+    "operator_declared_no_manual_execution": {
+      "type": "boolean"
+    },
+    "manual_fill_present": {
+      "type": "boolean"
+    },
+    "fill_details_present": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "operator_intent",
+        "manual_entry"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operator_intent": {
+      "type": "string",
+      "enum": [
+        "NONE_DECLARED"
+      ]
+    },
+    "operator_intent_event_id": {
+      "type": "string",
+      "pattern": "^ManualActionAccepted:.+"
+    },
+    "operator_intent_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime_evaluation_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "reason_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trade_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "result": {
+      "type": "string"
+    },
+    "manual_trade_execution_proven": {
+      "type": "boolean"
+    },
+    "broker_submission_by_aegis": {
+      "const": false
+    },
+    "autonomous_execution": {
+      "const": false
+    },
+    "trade_advice_allowed": {
+      "const": false
+    },
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "evidence_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "receipt_type"
+        ],
+        "properties": {
+          "receipt_type": {
+            "const": "NONE_DECLARED"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "schema_id",
+          "schema_version",
+          "artifact_id",
+          "day_utc",
+          "generated_at_utc",
+          "generated_at",
+          "receipt_type",
+          "operator_declared_no_manual_execution",
+          "manual_fill_present",
+          "fill_details_present",
+          "source",
+          "operator_id",
+          "operator_intent",
+          "operator_intent_event_id",
+          "operator_intent_hash",
+          "runtime_evaluation_hash",
+          "reason_hash",
+          "trade_ids",
+          "evidence_paths",
+          "result",
+          "manual_trade_execution_proven",
+          "broker_submission_by_aegis",
+          "autonomous_execution",
+          "broker_submit_required",
+          "trade_advice_allowed",
+          "autonomous_execution_allowed",
+          "evidence_hash"
+        ],
+        "properties": {
+          "receipt_type": {
+            "const": "NONE_DECLARED"
+          },
+          "operator_declared_no_manual_execution": {
+            "const": true
+          },
+          "manual_fill_present": {
+            "const": false
+          },
+          "fill_details_present": {
+            "const": false
+          },
+          "source": {
+            "const": "operator_intent"
+          },
+          "operator_intent": {
+            "const": "NONE_DECLARED"
+          },
+          "manual_trade_execution_proven": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "schema_id",
+          "schema_version",
+          "artifact_id",
+          "receipt_id",
+          "recommended_trade_id",
+          "actual_symbol",
+          "actual_side",
+          "actual_quantity",
+          "suggested_quantity",
+          "quantity_override",
+          "expected_risk",
+          "actual_risk",
+          "operator_override_reason",
+          "sizing_quality",
+          "order_type",
+          "fill_price",
+          "fill_timestamp",
+          "stop_order_entered",
+          "stop_price",
+          "operator_notes",
+          "deviations_from_recommendation",
+          "deviations_from_aegis_recommendation",
+          "source_packet_type",
+          "alert_id",
+          "source_packet_id",
+          "event_id",
+          "event_run_id",
+          "fill_timestamp_utc",
+          "deviation_from_entry_reference_price",
+          "fill_before_valid_until",
+          "max_entry_slippage_respected",
+          "manual_observation_only",
+          "broker_submit_required",
+          "canonical_json_hash"
+        ]
+      }
+    }
+  ]
 }

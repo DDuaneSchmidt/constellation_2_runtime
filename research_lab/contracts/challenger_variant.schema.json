@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_variant_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_sleeve_version_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "parameter_deltas": {
+      "type": "object"
+    },
+    "regime_constraints": {
+      "type": "object"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "rule_deltas": {
+      "type": "object"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "materialized",
+        "blocked"
+      ]
+    },
+    "variant_name": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "challenger_variant_id",
+    "challenger_track_id",
+    "incumbent_sleeve_id",
+    "incumbent_sleeve_version_id",
+    "hypothesis_id",
+    "variant_name",
+    "generated_at",
+    "schema_version",
+    "research_label",
+    "parameter_deltas",
+    "rule_deltas",
+    "regime_constraints",
+    "source_artifact_ids",
+    "immutable_hash",
+    "status"
+  ],
+  "title": "ChallengerVariant",
+  "type": "object"
+}

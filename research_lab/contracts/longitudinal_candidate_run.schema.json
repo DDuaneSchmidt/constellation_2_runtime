@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "frequency": {
+      "enum": [
+        "daily",
+        "weekly",
+        "monthly"
+      ]
+    }
+  },
+  "required": [
+    "longitudinal_run_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "hypothesis_id",
+    "source_evidence_package_id",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "start_date",
+    "end_date",
+    "frequency",
+    "candidate_generator_name",
+    "candidate_generator_version",
+    "ranking_policy_version",
+    "threshold",
+    "outcome_windows",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "LongitudinalCandidateRun",
+  "type": "object"
+}

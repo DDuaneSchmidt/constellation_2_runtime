@@ -1,0 +1,189 @@
+{
+  "$id": "https://constellation.local/schemas/canonical_universe_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Canonical Universe Authority v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "canonical_universe_authority_id",
+    "day_utc",
+    "source_day",
+    "source_run_id",
+    "authority_status",
+    "universe_type",
+    "writer_process",
+    "universe_symbol_count",
+    "universe_symbols",
+    "source_data_artifacts",
+    "generation_pipeline",
+    "generation_policy",
+    "discovery_targets",
+    "discovery_results",
+    "allowed_downstream_consumers",
+    "prohibited_writers",
+    "previous_canonical_universe_authority_id",
+    "previous_universe_symbol_count",
+    "shrink_percent",
+    "freshness_status",
+    "last_known_good_canonical_universe_authority_id",
+    "blocked_reason_codes",
+    "immutable_hash",
+    "generated_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "canonical_universe_authority"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "canonical_universe_authority_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "source_day": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "source_run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "authority_status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAILED"
+      ]
+    },
+    "universe_type": {
+      "type": "string",
+      "enum": [
+        "CANONICAL_DYNAMIC"
+      ]
+    },
+    "writer_process": {
+      "type": "string",
+      "enum": [
+        "canonical_market_data_refresh_v1",
+        "ranked_symbol_universe_v1"
+      ]
+    },
+    "universe_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "universe_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32
+      }
+    },
+    "source_data_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_type",
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "generation_pipeline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "generation_policy": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "discovery_targets": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "discovery_results": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "allowed_downstream_consumers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "prohibited_writers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "previous_canonical_universe_authority_id": {
+      "type": "string"
+    },
+    "previous_universe_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shrink_percent": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
+    "freshness_status": {
+      "type": "string",
+      "enum": [
+        "CURRENT",
+        "LAST_KNOWN_GOOD"
+      ]
+    },
+    "last_known_good_canonical_universe_authority_id": {
+      "type": "string"
+    },
+    "blocked_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "immutable_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  }
+}

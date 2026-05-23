@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/domain_snapshot.v1.schema.json",
+  "title": "domain_snapshot.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "snapshot_id",
+    "domain_id",
+    "day_utc",
+    "captured_at_utc",
+    "certification_status",
+    "completeness_score",
+    "provider_results",
+    "content_hash",
+    "lineage",
+    "safety"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_domain_snapshot" },
+    "schema_version": { "const": "v1" },
+    "snapshot_id": { "type": "string" },
+    "domain_id": {
+      "enum": [
+        "US_EQUITIES_EOD",
+        "US_EQUITIES_INTRADAY",
+        "VOLATILITY",
+        "RATES_BONDS",
+        "MACRO_CALENDAR",
+        "EARNINGS_EVENTS",
+        "CORPORATE_ACTIONS"
+      ]
+    },
+    "day_utc": { "type": "string" },
+    "captured_at_utc": { "type": "string" },
+    "certification_status": {
+      "enum": ["CERTIFIED", "PARTIAL", "DEGRADED", "DELAYED", "CONFLICTED", "FAILED"]
+    },
+    "completeness_score": { "type": "string", "pattern": "^[0-1]\\.[0-9]{6}$|^1\\.000000$|^0\\.000000$" },
+    "freshness_state": { "type": "string" },
+    "provider_results": { "type": "array" },
+    "single_provider_risk": { "type": "boolean" },
+    "quorum_state": { "type": "string" },
+    "lineage": { "type": "object" },
+    "content_hash": { "type": "string" },
+    "safety": {
+      "type": "object",
+      "required": ["broker_submit_transmit_allowed", "autonomous_execution_allowed", "trade_advice_allowed"],
+      "properties": {
+        "broker_submit_transmit_allowed": { "const": false },
+        "autonomous_execution_allowed": { "const": false },
+        "trade_advice_allowed": { "const": false }
+      }
+    }
+  }
+}

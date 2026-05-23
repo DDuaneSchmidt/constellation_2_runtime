@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "comparison_rows": {
+      "type": "array"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "sleeves_compared": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sleeve_comparison_report_id",
+    "created_at",
+    "sleeves_compared",
+    "comparison_rows",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveComparisonReport",
+  "type": "object"
+}

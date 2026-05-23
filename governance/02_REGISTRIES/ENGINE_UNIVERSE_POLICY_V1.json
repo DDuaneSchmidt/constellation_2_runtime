@@ -1,0 +1,266 @@
+{
+  "schema_id": "engine_universe_policy_registry",
+  "schema_version": "v1",
+  "produced_utc": "2026-03-11T00:00:00Z",
+  "producer": {
+    "repo": "constellation_2_runtime",
+    "module": "governance/02_REGISTRIES/ENGINE_UNIVERSE_POLICY_V1.json",
+    "git_sha": "6c1db7a1894d7ceb18c63d7b40cfc4afd627fec5"
+  },
+  "registry_version": 1,
+  "approved_git_sha": "6c1db7a1894d7ceb18c63d7b40cfc4afd627fec5",
+  "policies": [
+    {
+      "policy_id": "C2_INTENT_SIMULATOR_V1",
+      "engine_id": "C2_INTENT_SIMULATOR_V1",
+      "strategy_type": "STRUCTURAL_VALIDATION",
+      "universe_mode": "CURATED_SYMBOLS",
+      "symbol_source_class": "FIXED_STRUCTURAL",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ANY",
+      "curated_symbols": ["SPY"],
+      "require_all_symbols_present": true,
+      "liquidity_filters": null,
+      "ranking_mode": null,
+      "target_symbol_count": 1,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Structural validation engine remains single-symbol.",
+        "Universe still governed through policy instead of runner constants."
+      ]
+    },
+    {
+      "policy_id": "C2_MEAN_REVERSION_EQ_V1",
+      "engine_id": "C2_MEAN_REVERSION_EQ_V1",
+      "strategy_type": "MEAN_REVERSION",
+      "universe_mode": "LIQUIDITY_RANKED_SYMBOLS",
+      "symbol_source_class": "DYNAMIC_SAME_DAY",
+      "same_day_symbol_basis_required": true,
+      "fallback_allowed": false,
+      "security_scope": "ANY",
+      "curated_symbols": [],
+      "require_all_symbols_present": false,
+      "liquidity_filters": {
+        "price_min": "10",
+        "avg_volume_min": 1000000,
+        "avg_dollar_volume_min": "20000000",
+        "lookback_sessions": 5
+      },
+      "ranking_mode": "AVG_DOLLAR_VOLUME_DESC",
+      "target_symbol_count": 200,
+      "sector_cap": {
+        "enabled": true,
+        "max_fraction": "0.20",
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Broad liquid ranked universe.",
+        "Security scope remains ANY until authoritative equity-vs-ETF classification is governed."
+      ]
+    },
+    {
+      "policy_id": "C2_TREND_EQ_PRIMARY_V1",
+      "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+      "strategy_type": "MOMENTUM_TREND",
+      "universe_mode": "LIQUIDITY_RANKED_SYMBOLS",
+      "symbol_source_class": "DYNAMIC_SAME_DAY",
+      "same_day_symbol_basis_required": true,
+      "fallback_allowed": false,
+      "security_scope": "ANY",
+      "curated_symbols": [],
+      "require_all_symbols_present": false,
+      "liquidity_filters": {
+        "price_min": "10",
+        "avg_volume_min": 1000000,
+        "avg_dollar_volume_min": "20000000",
+        "lookback_sessions": 5
+      },
+      "ranking_mode": "AVG_DOLLAR_VOLUME_DESC",
+      "target_symbol_count": 100,
+      "sector_cap": {
+        "enabled": true,
+        "max_fraction": "0.20",
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Trend sleeve scans the most liquid names available in governed market data.",
+        "Sector cap is policy-enabled but becomes no-op without governed sector classification."
+      ]
+    },
+    {
+      "policy_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+      "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+      "strategy_type": "ETF_ROTATION",
+      "universe_mode": "CURATED_SYMBOLS",
+      "symbol_source_class": "GOVERNED_CURATED",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ETF_ONLY",
+      "curated_symbols": ["SPY", "QQQ", "IWM", "TLT", "GLD", "HYG"],
+      "require_all_symbols_present": false,
+      "liquidity_filters": {
+        "price_min": "10",
+        "avg_volume_min": 1000000,
+        "avg_dollar_volume_min": "20000000",
+        "lookback_sessions": 5
+      },
+      "ranking_mode": "AVG_DOLLAR_VOLUME_DESC",
+      "target_symbol_count": 6,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Major ETF list is governed here rather than inside sleeve code."
+      ]
+    },
+    {
+      "policy_id": "C2_EVENT_DISLOCATION_V1",
+      "engine_id": "C2_EVENT_DISLOCATION_V1",
+      "strategy_type": "VOLATILITY_BREAKOUT",
+      "universe_mode": "LIQUIDITY_RANKED_SYMBOLS",
+      "symbol_source_class": "DYNAMIC_SAME_DAY",
+      "same_day_symbol_basis_required": true,
+      "fallback_allowed": false,
+      "security_scope": "ANY",
+      "curated_symbols": [],
+      "require_all_symbols_present": false,
+      "liquidity_filters": {
+        "price_min": "10",
+        "avg_volume_min": 1000000,
+        "avg_dollar_volume_min": "20000000",
+        "lookback_sessions": 5
+      },
+      "ranking_mode": "AVG_DOLLAR_VOLUME_DESC",
+      "target_symbol_count": 100,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": true,
+        "min_percentile": "0.50",
+        "lookback_sessions": 5
+      },
+      "notes": [
+        "ATR percentile filter uses existing OHLC truth only."
+      ]
+    },
+    {
+      "policy_id": "C2_DEFENSIVE_TAIL_V1",
+      "engine_id": "C2_DEFENSIVE_TAIL_V1",
+      "strategy_type": "DEFENSIVE_TAIL",
+      "universe_mode": "CURATED_SYMBOLS",
+      "symbol_source_class": "FIXED_STRUCTURAL",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ETF_ONLY",
+      "curated_symbols": ["SPY"],
+      "require_all_symbols_present": true,
+      "liquidity_filters": null,
+      "ranking_mode": null,
+      "target_symbol_count": 1,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Configured to match the current defensive-tail implementation and tests."
+      ]
+    },
+    {
+      "policy_id": "C2_CROSS_ASSET_TREND_V1",
+      "engine_id": "C2_CROSS_ASSET_TREND_V1",
+      "strategy_type": "ETF_ROTATION",
+      "universe_mode": "CURATED_SYMBOLS",
+      "symbol_source_class": "GOVERNED_CURATED",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ETF_ONLY",
+      "curated_symbols": ["SPY", "QQQ", "IWM", "TLT", "GLD", "HYG", "IEF", "LQD", "UUP", "DBC"],
+      "require_all_symbols_present": true,
+      "liquidity_filters": null,
+      "ranking_mode": null,
+      "target_symbol_count": 10,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Inactive engine stays fail-closed until missing ETF data is added."
+      ]
+    },
+    {
+      "policy_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
+      "engine_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
+      "strategy_type": "MARKET_NEUTRAL_SPREAD",
+      "universe_mode": "CURATED_PAIRS",
+      "symbol_source_class": "GOVERNED_CURATED",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ETF_ONLY",
+      "curated_symbols": ["SPY", "QQQ", "IWM", "HYG", "LQD"],
+      "curated_pairs": [
+        ["SPY", "QQQ"],
+        ["IWM", "SPY"],
+        ["HYG", "LQD"]
+      ],
+      "require_all_symbols_present": true,
+      "liquidity_filters": null,
+      "ranking_mode": null,
+      "target_symbol_count": 5,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Pairs are governed here rather than in runner constants."
+      ]
+    }
+  ]
+}

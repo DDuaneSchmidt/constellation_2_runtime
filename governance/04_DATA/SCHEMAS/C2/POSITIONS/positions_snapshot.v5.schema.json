@@ -1,72 +1,42 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "C2_POSITIONS_SNAPSHOT_V5",
-  "title": "C2 Positions Snapshot v5 (Bundle A canonical account-position-lifecycle state)",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema_id",
-    "schema_version",
-    "day_utc",
-    "produced_utc",
-    "producer",
-    "status",
-    "reason_codes",
-    "input_manifest",
-    "accounts",
-    "items",
-    "reconciliation",
-    "canonical_json_hash"
-  ],
-  "properties": {
-    "schema_id": { "const": "C2_POSITIONS_SNAPSHOT_V5" },
-    "schema_version": { "const": 5 },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "produced_utc": { "type": "string", "minLength": 20 },
-    "producer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
-      "properties": {
-        "repo": { "type": "string", "minLength": 1 },
-        "git_sha": { "type": "string", "minLength": 7 },
-        "module": { "type": "string", "minLength": 1 }
-      }
-    },
-    "status": { "type": "string", "enum": ["OK", "FAIL"] },
-    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-    "input_manifest": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["type", "path", "sha256"],
-        "properties": {
-          "type": { "type": "string", "minLength": 1 },
-          "path": { "type": "string", "minLength": 1 },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "day_utc": { "type": ["string", "null"] },
-          "producer": { "type": ["string", "null"] }
-        }
-      }
-    },
-    "accounts": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/account_state" }
-    },
-    "items": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/position_item" }
-    },
-    "reconciliation": { "$ref": "#/$defs/reconciliation_summary" },
-    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
-  },
   "$defs": {
     "account_state": {
-      "type": "object",
       "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "broker_cash_cents": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cash_source": {
+          "enum": [
+            "CASH_LEDGER_ONLY",
+            "CASH_LEDGER_AND_BROKER_STATEMENT",
+            "BROKER_STATEMENT_ONLY"
+          ],
+          "type": "string"
+        },
+        "cash_total_cents": {
+          "type": "integer"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "required": [
         "account_id",
         "currency",
@@ -75,66 +45,108 @@
         "cash_source",
         "reason_codes"
       ],
-      "properties": {
-        "account_id": { "type": "string", "minLength": 1 },
-        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
-        "cash_total_cents": { "type": "integer" },
-        "broker_cash_cents": { "type": ["integer", "null"] },
-        "cash_source": {
-          "type": "string",
-          "enum": [
-            "CASH_LEDGER_ONLY",
-            "CASH_LEDGER_AND_BROKER_STATEMENT",
-            "BROKER_STATEMENT_ONLY"
-          ]
-        },
-        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
-      }
-    },
-    "position_lot": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "lot_id",
-        "direction",
-        "opened_day_utc",
-        "remaining_qty_abs",
-        "cost_basis_cents",
-        "source_kind",
-        "source_ref"
-      ],
-      "properties": {
-        "lot_id": { "type": "string", "minLength": 1 },
-        "direction": { "type": "string", "enum": ["LONG", "SHORT"] },
-        "opened_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-        "remaining_qty_abs": { "type": "integer", "minimum": 0 },
-        "cost_basis_cents": { "type": "integer", "minimum": 0 },
-        "source_kind": { "type": "string", "enum": ["NATIVE_FILL", "BROKER_AGGREGATE"] },
-        "source_ref": { "type": ["string", "null"] }
-      }
-    },
-    "position_reconciliation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "broker_position_present",
-        "broker_qty",
-        "status",
-        "reason_codes"
-      ],
-      "properties": {
-        "broker_position_present": { "type": "boolean" },
-        "broker_qty": { "type": ["string", "null"] },
-        "status": {
-          "type": "string",
-          "enum": ["MATCH", "MISMATCH", "BROKER_ONLY", "INTERNAL_ONLY", "UNKNOWN"]
-        },
-        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
-      }
+      "type": "object"
     },
     "position_item": {
-      "type": "object",
       "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "avg_cost_cents": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "engine_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "instrument": {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "intent_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "type": "string"
+        },
+        "last_transition_type": {
+          "enum": [
+            "OPEN",
+            "ADD",
+            "PARTIAL_CLOSE",
+            "FULL_CLOSE",
+            "IMPORTED_SNAPSHOT",
+            "CARRY_FORWARD",
+            "BROKER_RECONCILED"
+          ],
+          "type": "string"
+        },
+        "last_transition_utc": {
+          "minLength": 20,
+          "type": "string"
+        },
+        "lifecycle_reason_code": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "lifecycle_state": {
+          "enum": [
+            "OPEN",
+            "MANAGING",
+            "CLOSED"
+          ],
+          "type": "string"
+        },
+        "lots": {
+          "items": {
+            "$ref": "#/$defs/position_lot"
+          },
+          "type": "array"
+        },
+        "opened_day_utc": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "NATIVE",
+            "IMPORTED"
+          ],
+          "type": "string"
+        },
+        "position_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "qty": {
+          "type": "integer"
+        },
+        "reconciliation": {
+          "$ref": "#/$defs/position_reconciliation"
+        },
+        "source_intent_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "OPEN",
+            "CLOSED"
+          ],
+          "type": "string"
+        }
+      },
       "required": [
         "position_id",
         "account_id",
@@ -154,50 +166,170 @@
         "lots",
         "reconciliation"
       ],
+      "type": "object"
+    },
+    "position_lot": {
+      "additionalProperties": false,
       "properties": {
-        "position_id": { "type": "string", "minLength": 1 },
-        "account_id": { "type": "string", "minLength": 1 },
-        "origin": { "type": "string", "enum": ["NATIVE", "IMPORTED"] },
-        "engine_id": { "type": "string", "minLength": 1 },
-        "source_intent_id": { "type": "string", "minLength": 1 },
-        "intent_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
-        "instrument": {
-          "type": "object",
-          "required": ["kind"],
-          "properties": {
-            "kind": { "type": "string", "minLength": 1 }
-          },
-          "additionalProperties": true
+        "cost_basis_cents": {
+          "minimum": 0,
+          "type": "integer"
         },
-        "qty": { "type": "integer" },
-        "avg_cost_cents": { "type": "integer", "minimum": 0 },
-        "opened_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-        "last_transition_utc": { "type": "string", "minLength": 20 },
-        "last_transition_type": {
-          "type": "string",
+        "direction": {
           "enum": [
-            "OPEN",
-            "ADD",
-            "PARTIAL_CLOSE",
-            "FULL_CLOSE",
-            "IMPORTED_SNAPSHOT",
-            "CARRY_FORWARD",
-            "BROKER_RECONCILED"
+            "LONG",
+            "SHORT"
+          ],
+          "type": "string"
+        },
+        "lot_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "opened_day_utc": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        },
+        "remaining_qty_abs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_kind": {
+          "enum": [
+            "NATIVE_FILL",
+            "BROKER_AGGREGATE"
+          ],
+          "type": "string"
+        },
+        "source_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lot_id",
+        "direction",
+        "opened_day_utc",
+        "remaining_qty_abs",
+        "cost_basis_cents",
+        "source_kind",
+        "source_ref"
+      ],
+      "type": "object"
+    },
+    "position_reconciliation": {
+      "additionalProperties": false,
+      "properties": {
+        "broker_position_present": {
+          "type": "boolean"
+        },
+        "broker_qty": {
+          "type": [
+            "string",
+            "null"
           ]
         },
-        "lifecycle_state": { "type": "string", "enum": ["OPEN", "MANAGING", "CLOSED"] },
-        "lifecycle_reason_code": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] },
-        "lots": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/position_lot" }
+        "reason_codes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
         },
-        "reconciliation": { "$ref": "#/$defs/position_reconciliation" }
-      }
+        "status": {
+          "enum": [
+            "MATCH",
+            "MISMATCH",
+            "BROKER_ONLY",
+            "INTERNAL_ONLY",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "broker_position_present",
+        "broker_qty",
+        "status",
+        "reason_codes"
+      ],
+      "type": "object"
     },
     "reconciliation_summary": {
-      "type": "object",
       "additionalProperties": false,
+      "properties": {
+        "broker_statement_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "broker_statement_present": {
+          "type": "boolean"
+        },
+        "cash_delta_cents": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cash_status": {
+          "enum": [
+            "MATCH",
+            "MISMATCH",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        },
+        "position_mismatches": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "broker_qty": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "internal_qty": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "sec_type": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "symbol": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "symbol",
+              "sec_type",
+              "internal_qty",
+              "broker_qty"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "positions_status": {
+          "enum": [
+            "MATCH",
+            "MISMATCH",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "required": [
         "broker_statement_present",
         "broker_statement_path",
@@ -207,28 +339,183 @@
         "reason_codes",
         "position_mismatches"
       ],
-      "properties": {
-        "broker_statement_present": { "type": "boolean" },
-        "broker_statement_path": { "type": ["string", "null"] },
-        "cash_status": { "type": "string", "enum": ["MATCH", "MISMATCH", "UNKNOWN"] },
-        "cash_delta_cents": { "type": ["integer", "null"] },
-        "positions_status": { "type": "string", "enum": ["MATCH", "MISMATCH", "UNKNOWN"] },
-        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "position_mismatches": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["symbol", "sec_type", "internal_qty", "broker_qty"],
-            "properties": {
-              "symbol": { "type": "string", "minLength": 1 },
-              "sec_type": { "type": "string", "minLength": 1 },
-              "internal_qty": { "type": "string", "minLength": 1 },
-              "broker_qty": { "type": "string", "minLength": 1 }
-            }
-          }
-        }
-      }
+      "type": "object"
     }
-  }
+  },
+  "$id": "C2_POSITIONS_SNAPSHOT_V5",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accounts": {
+      "items": {
+        "$ref": "#/$defs/account_state"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "canonical_json_hash": {
+      "maxLength": 64,
+      "minLength": 64,
+      "type": "string"
+    },
+    "cash_ledger_source_type": {
+      "enum": [
+        "BROKER_EXPORT",
+        "MANUAL_DECLARATION",
+        "SIMULATION_LEDGER",
+        "STATIC_RISK_BUDGET",
+        "STATIC_RISK_BUDGET_BOOTSTRAP",
+        "ACCOUNT_EVIDENCE",
+        "POSITIONS_SNAPSHOT_V5",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "day_utc": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
+    },
+    "downstream_dependency_hashes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "input_manifest": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "day_utc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "producer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "path",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/position_item"
+      },
+      "type": "array"
+    },
+    "output_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "produced_utc": {
+      "minLength": 20,
+      "type": "string"
+    },
+    "producer": {
+      "additionalProperties": false,
+      "properties": {
+        "git_sha": {
+          "minLength": 7,
+          "type": "string"
+        },
+        "module": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "repo": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "git_sha",
+        "module"
+      ],
+      "type": "object"
+    },
+    "reason_codes": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reconciliation": {
+      "$ref": "#/$defs/reconciliation_summary"
+    },
+    "runtime_evaluation_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "C2_POSITIONS_SNAPSHOT_V5"
+    },
+    "schema_version": {
+      "const": 5
+    },
+    "source_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "source_type": {
+      "enum": [
+        "BROKER_EXPORT",
+        "MANUAL_DECLARATION",
+        "SIMULATION_LEDGER",
+        "STATIC_RISK_BUDGET",
+        "STATIC_RISK_BUDGET_BOOTSTRAP",
+        "ACCOUNT_EVIDENCE",
+        "POSITIONS_SNAPSHOT_V5",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "FAIL"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "accounts",
+    "items",
+    "reconciliation",
+    "canonical_json_hash"
+  ],
+  "title": "C2 Positions Snapshot v5 (Bundle A canonical account-position-lifecycle state)",
+  "type": "object"
 }

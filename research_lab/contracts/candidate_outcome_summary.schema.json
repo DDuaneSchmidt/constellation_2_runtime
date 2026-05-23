@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "required": [
+    "candidate_batch_id",
+    "candidate_count",
+    "measured_candidate_count",
+    "unavailable_candidate_count",
+    "windows_measured",
+    "mean_post_cost_return_by_window",
+    "win_rate_by_window",
+    "decision_quality_summary",
+    "schema_version"
+  ],
+  "title": "CandidateOutcomeSummary",
+  "type": "object"
+}

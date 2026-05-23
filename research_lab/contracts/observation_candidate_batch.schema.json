@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "non_actionable_research_only_assertion": {
+      "type": "object"
+    },
+    "observation_candidate_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observation_candidate_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "observation_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "observation_type_counts": {
+      "type": "object"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "scanner_run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "scanner_statuses": {
+      "type": "array"
+    },
+    "scanner_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "severity_counts": {
+      "type": "object"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "observation_candidate_batch_id",
+    "generated_at",
+    "scanner_run_id",
+    "scanner_version",
+    "observation_count",
+    "observation_candidate_ids",
+    "observation_type_counts",
+    "severity_counts",
+    "scanner_statuses",
+    "source_artifact_ids",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "non_actionable_research_only_assertion",
+    "immutable_hash"
+  ],
+  "title": "ObservationCandidateBatch",
+  "type": "object"
+}

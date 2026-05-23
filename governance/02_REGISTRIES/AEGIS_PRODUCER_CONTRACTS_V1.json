@@ -1,0 +1,1162 @@
+{
+  "contract_registry_version": "aegis_producer_contracts.v1",
+  "contracts": [
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "COMPATIBILITY_NON_CRITICAL",
+      "command": "python3 ops/tools/run_aegis_runtime_truth_kernel_v1.py --truth_root {truth_root} --day {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "legacy_report_artifact"
+      ],
+      "output_schema_id": "*",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/*/{day_utc}/*.json",
+        "reports/*/{day_utc}/**/*.json"
+      ],
+      "producer_id": "ops.aegis.runtime_truth_kernel_v1.artifact_scan",
+      "producer_version": "aegis_runtime_truth_kernel.v1",
+      "repair_class": "AUTO_SAFE",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_runtime_truth_kernel_v1.py --truth_root {truth_root} --day {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "DERIVED_VIEW",
+      "command": "python3 ops/tools/run_aegis_runtime_truth_kernel_v1.py --truth_root {truth_root} --day {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "evidence_events"
+      ],
+      "output_schema_id": "aegis_runtime_truth_kernel",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/aegis_runtime_truth_kernel_v1/{day_utc}/runtime_truth_kernel.v1.json"
+      ],
+      "producer_id": "ops.aegis.runtime_truth_kernel_v1",
+      "producer_version": "aegis_runtime_truth_kernel.v1",
+      "repair_class": "AUTO_SAFE",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/replay_aegis_runtime_v1.py --audit-bundle {audit_bundle}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "PRODUCER_BRIDGE",
+      "command": "shared writer",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "producer_payload"
+      ],
+      "output_schema_id": "*",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/*/{day_utc}/*.json",
+        "reports/*/{day_utc}/**/*.json"
+      ],
+      "producer_id": "ops.aegis.intelligence_common_v1.write_json_v1",
+      "producer_version": "write_json_v1",
+      "repair_class": "AUTO_SAFE",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "contract bridge validation"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_aegis_market_data_inputs_v1.py --truth-root {truth_root} --day-utc {day_utc} --emit-events",
+      "deprecated": false,
+      "determinism_class": "EXTERNAL_DATA_BOUNDED",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "sleeve_input_contracts",
+        "symbol_map",
+        "configured_market_data_source"
+      ],
+      "output_schema_id": "market_data_inputs",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/market_data_inputs_v1/{day_utc}/market_data_inputs.v1.json"
+      ],
+      "producer_id": "ops/tools/build_aegis_market_data_inputs_v1.py",
+      "producer_version": "v1",
+      "repair_class": "EXTERNAL_DATA_BOUNDED",
+      "replacement_producer_id": "",
+      "requires_external_source": true,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_aegis_market_data_inputs_v1.py --truth-root {truth_root} --day-utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_event_market_snapshot_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "EXTERNAL_DATA_BOUNDED",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "market_context_sources"
+      ],
+      "output_schema_id": "event_market_snapshot",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/event_market_snapshot_v1/{day_utc}/event_market_snapshot.v1.json"
+      ],
+      "producer_id": "ops/tools/build_event_market_snapshot_v1.py",
+      "producer_version": "v1",
+      "repair_class": "EXTERNAL_DATA_BOUNDED",
+      "replacement_producer_id": "",
+      "requires_external_source": true,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_event_market_snapshot_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "event_rules_inputs"
+      ],
+      "output_schema_id": "event_rules_registry",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/event_rules_registry_v1/{day_utc}/**/event_rules_registry.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_event_monitor_v1.py:event_rules_registry",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/write_event_validity_evidence_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "event_market_snapshot",
+        "event_rules_registry"
+      ],
+      "output_schema_id": "event_validity_gate",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/event_validity_gate_v1/{day_utc}/**/event_validity_gate.v1.json"
+      ],
+      "producer_id": "ops/tools/write_event_validity_evidence_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/write_event_validity_evidence_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/write_manual_intent_v1.py --truth-root {truth_root} --day-utc {day_utc} --operator-id {operator_id} --operator-intent NONE_DECLARED --reason {reason} --runtime-evaluation-hash {runtime_evaluation_hash} --intent-timestamp-utc {intent_timestamp_utc} --mode execute",
+      "deprecated": false,
+      "determinism_class": "MANUAL_DECLARATION",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "operator_intent",
+        "runtime_evaluation"
+      ],
+      "output_schema_id": "manual_execution_receipt",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/manual_execution_receipt_v1/{day_utc}/**/manual_execution_receipt.v1.json"
+      ],
+      "producer_id": "ops/tools/write_manual_intent_v1.py:manual_execution_receipt",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": true,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/write_manual_intent_v1.py --truth-root {truth_root} --day-utc {day_utc} --operator-id {operator_id} --operator-intent NONE_DECLARED --reason {reason} --runtime-evaluation-hash {runtime_evaluation_hash} --intent-timestamp-utc {intent_timestamp_utc} --mode dry-run"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "candidate_state",
+        "runtime_context"
+      ],
+      "output_schema_id": "operator_execution_queue",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/operator_execution_queue_v1/{day_utc}/**/operator_execution_queue.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_lite_eod_pipeline_v1.py:operator_execution_queue",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_ai_eod_feedback_review_v1.py --truth_root {truth_root} --day {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "ai_feedback_inputs"
+      ],
+      "output_schema_id": "ai_feedback_review",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/ai_feedback_review_v1/EOD/{day_utc}/ai_feedback_review.v1.json",
+        "reports/ai_feedback_review_v1/{day_utc}/**/ai_feedback_review.v1.json"
+      ],
+      "producer_id": "ops/tools/build_ai_eod_feedback_review_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_ai_eod_feedback_review_v1.py --truth_root {truth_root} --day {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/write_alert_transport_proof_v1.py --truth_root {truth_root} --day_utc {day_utc} --transport_mode GATE_ONLY",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "alert_gate_inputs"
+      ],
+      "output_schema_id": "alert_transport_proof",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/alert_transport_proof_v1/{day_utc}/**/alert_transport_proof.v1.json"
+      ],
+      "producer_id": "ops/tools/write_alert_transport_proof_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/write_alert_transport_proof_v1.py --truth_root {truth_root} --day_utc {day_utc} --transport_mode GATE_ONLY"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/audit_research_dataset_bindings_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "research_dataset_sources"
+      ],
+      "output_schema_id": "research_dataset_binding",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/research_dataset_gap_v1/{day_utc}/research_dataset_gap.v1.json"
+      ],
+      "producer_id": "ops/tools/audit_research_dataset_bindings_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/audit_research_dataset_bindings_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/write_manual_intent_v1.py --truth-root {truth_root} --day-utc {day_utc} --operator-id {operator_id} --operator-intent REPORT_ACKNOWLEDGED --reason {reason} --runtime-evaluation-hash {runtime_evaluation_hash} --intent-timestamp-utc {intent_timestamp_utc} --mode execute",
+      "deprecated": false,
+      "determinism_class": "MANUAL_DECLARATION",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "operator_intent",
+        "runtime_evaluation",
+        "aegis_lite_eod_report"
+      ],
+      "output_schema_id": "aegis_lite_eod_report",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/aegis_lite_eod_report_v1/{day_utc}/manual_acknowledgment/**/aegis_lite_eod_report.v1.json"
+      ],
+      "producer_id": "ops/tools/write_manual_intent_v1.py:aegis_lite_eod_report_acknowledgment",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": true,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/write_manual_intent_v1.py --truth-root {truth_root} --day-utc {day_utc} --operator-id {operator_id} --operator-intent REPORT_ACKNOWLEDGED --reason {reason} --runtime-evaluation-hash {runtime_evaluation_hash} --intent-timestamp-utc {intent_timestamp_utc} --mode dry-run"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "aegis_lite_eod_report",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/aegis_lite_eod_report_v1/{day_utc}/**/aegis_lite_eod_report.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_lite_eod_pipeline_v1.py:aegis_lite_eod_report",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_aegis_operator_status_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "aegis_lite_operating_status",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/aegis_lite_operating_status_v1/{day_utc}/aegis_lite_operating_status.v1.json"
+      ],
+      "producer_id": "ops/tools/build_aegis_operator_status_v1.py",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_aegis_operator_status_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "event_monitoring_status",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/event_monitoring_status_v1/{day_utc}/**/event_monitoring_status.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_event_monitor_v1.py:event_monitoring_status",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "manual_trade_packet",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/manual_trade_packet_v1/{day_utc}/**/manual_trade_packet.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_lite_eod_pipeline_v1.py:manual_trade_packet",
+      "producer_version": "v1",
+      "repair_class": "FORBIDDEN",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_candidate_to_production_promotion_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "promoted_candidate_evidence",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/promoted_sleeve_library_v1/**/promoted_sleeve_library.v1.json"
+      ],
+      "producer_id": "ops/tools/run_candidate_to_production_promotion_v1.py",
+      "producer_version": "v1",
+      "repair_class": "FORBIDDEN",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_candidate_to_production_promotion_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_research_test_queue_v1.py --truth_root {truth_root} --day_utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 604800,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "research_task_queue",
+      "output_schema_version": "v1",
+      "outputs": [
+        "research_lab/research_task_queue_v1/{day_utc}/**/research_task_queue.v1.json",
+        "reports/research_task_queue_v1/{day_utc}/**/research_task_queue.v1.json"
+      ],
+      "producer_id": "ops/tools/run_research_test_queue_v1.py",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/run_research_test_queue_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day_utc} --manual-only --allow-not-ready-exit-zero",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_inputs"
+      ],
+      "output_schema_id": "aegis_lite_operating_status",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/aegis_lite_operating_status_v1/{day_utc}/aegis_lite_operating_status.v1.json"
+      ],
+      "producer_id": "ops/tools/run_aegis_lite_eod_pipeline_v1.py:aegis_lite_operating_status",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_aegis_operator_status_v1.py --truth_root {truth_root} --day_utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_capital_authority_allocation_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "C2_CAPITAL_AUTHORITY_POLICY_V1",
+        "paper_trade_construction_v1",
+        "runtime_evaluation"
+      ],
+      "output_schema_id": "capital_authority_allocation",
+      "output_schema_version": "v1",
+      "outputs": [
+        "allocation_v1/capital_authority_allocation_v1/{day_utc}/capital_authority_allocation.v1.json"
+      ],
+      "producer_id": "ops/tools/build_capital_authority_allocation_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_capital_authority_allocation_v1.py --truth-root {truth_root} --day-utc {day_utc} --no-events"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_risk_definition_contract_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_evaluation",
+        "paper_trade_construction_v1",
+        "capital_authority_allocation",
+        "selected_exposure_intent"
+      ],
+      "output_schema_id": "risk_definition_contract_v1",
+      "output_schema_version": "v1",
+      "outputs": [
+        "risk_definition_contract_v1/{day_utc}/*/risk_definition_contract.v1.json"
+      ],
+      "producer_id": "ops/tools/build_risk_definition_contract_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_risk_definition_contract_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash} --no-events"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_candidate_identity_set_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "selected_intent_pointer",
+        "paper_trade_construction_v1",
+        "capital_authority_allocation",
+        "risk_definition_contract_v1",
+        "runtime_evaluation"
+      ],
+      "output_schema_id": "candidate_identity_set",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/candidate_identity_set_v1/{day_utc}/*/candidate_identity_set.v1.json"
+      ],
+      "producer_id": "ops/tools/build_candidate_identity_set_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": false,
+      "validation_command": "python3 ops/tools/build_candidate_identity_set_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash} --no-events"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_engine_activity_authorization_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "runtime_evaluation",
+        "selected_intent_pointer",
+        "candidate_identity_set",
+        "sleeve_readiness",
+        "market_data_inputs",
+        "engine_model_registry"
+      ],
+      "output_schema_id": "engine_activity_authorization",
+      "output_schema_version": "v1",
+      "outputs": [
+        "engine_activity_v1/authorization_v1/{day_utc}/*.authorization.v1.json"
+      ],
+      "producer_id": "ops/tools/build_engine_activity_authorization_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_engine_activity_authorization_v1.py --truth-root {truth_root} --day-utc {day_utc} --intent-hash {intent_hash} --no-events"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_target_day_admission_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "aegis_runtime_evaluation",
+        "selected_intent_pointer",
+        "market_data_inputs",
+        "sleeve_readiness"
+      ],
+      "output_schema_id": "target_day_admission",
+      "output_schema_version": "v1",
+      "outputs": [
+        "target_day_admission_v1/{day_utc}.json"
+      ],
+      "producer_id": "ops/tools/build_target_day_admission_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_target_day_admission_v1.py --truth-root {truth_root} --day-utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_day_activation_package_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "target_day_admission"
+      ],
+      "output_schema_id": "day_activation_package",
+      "output_schema_version": "v1",
+      "outputs": [
+        "../truth_sleeves/PRIMARY/PAPER/day_activation_package_v1/{day_utc}/*/day_activation_package.v1.json",
+        "reports/day_activation_build_v1/{day_utc}/*/day_activation_build.v1.json"
+      ],
+      "producer_id": "ops/tools/build_day_activation_package_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_day_activation_package_v1.py --truth-root {truth_root} --day-utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_global_context_package_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "day_activation_package"
+      ],
+      "output_schema_id": "global_context_package",
+      "output_schema_version": "v1",
+      "outputs": [
+        "../truth_sleeves/PRIMARY/PAPER/global_context_package_v1/{day_utc}/*/global_context_package.v1.json",
+        "reports/global_context_build_v1/{day_utc}/*/global_context_build.v1.json"
+      ],
+      "producer_id": "ops/tools/build_global_context_package_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_global_context_package_v1.py --truth-root {truth_root} --day-utc {day_utc}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 -m constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1 --day_utc {day_utc} --operator_statement_json <operator_statement> --producer_git_sha <git_sha>",
+      "deprecated": false,
+      "determinism_class": "MANUAL_DECLARATION",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "operator_statement_or_broker_source",
+        "runtime_evaluation"
+      ],
+      "output_schema_id": "C2_CASH_LEDGER_SNAPSHOT_V1",
+      "output_schema_version": "1",
+      "outputs": [
+        "cash_ledger_v1/snapshots/{day_utc}/cash_ledger_snapshot.v1.json"
+      ],
+      "producer_id": "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
+      "producer_version": "v1",
+      "repair_class": "MANUAL_REQUIRED",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 -m constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1 --day_utc {day_utc} --operator_statement_json <operator_statement> --producer_git_sha <git_sha>"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 -m constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5 --day_utc {day_utc} --truth_root {truth_root} --producer_git_sha <git_sha>",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "cash_ledger_snapshot_v1",
+        "broker_statement_or_internal_execution_ledger"
+      ],
+      "output_schema_id": "C2_POSITIONS_SNAPSHOT_V5",
+      "output_schema_version": "5",
+      "outputs": [
+        "positions_v1/snapshots/{day_utc}/positions_snapshot.v5.json"
+      ],
+      "producer_id": "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 -m constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5 --day_utc {day_utc} --truth_root {truth_root} --producer_git_sha <git_sha>"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_position_lifecycle_snapshot_v2.py --day_utc {day_utc} --truth_root {truth_root}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "positions_snapshot_v5"
+      ],
+      "output_schema_id": "C2_POSITION_LIFECYCLE_SNAPSHOT",
+      "output_schema_version": "2",
+      "outputs": [
+        "position_lifecycle_v2/{day_utc}/position_lifecycle_snapshot.v2.json"
+      ],
+      "producer_id": "ops/tools/run_position_lifecycle_snapshot_v2.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/run_position_lifecycle_snapshot_v2.py --day_utc {day_utc} --truth_root {truth_root}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_accounting_nav_v2_day_v1.py --day_utc {day_utc} --truth_root {truth_root} --producer_git_sha <git_sha>",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "cash_ledger_snapshot_v1",
+        "positions_snapshot_v5",
+        "broker_marks_if_positions_exist"
+      ],
+      "output_schema_id": "C2_ACCOUNTING_NAV_V2",
+      "output_schema_version": "2",
+      "outputs": [
+        "accounting_v2/nav/{day_utc}/nav.v2.json"
+      ],
+      "producer_id": "ops/tools/run_accounting_nav_v2_day_v1.py",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/run_accounting_nav_v2_day_v1.py --day_utc {day_utc} --truth_root {truth_root} --producer_git_sha <git_sha>"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_economic_state_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "global_context_package_v1",
+        "cash_ledger_snapshot_v1",
+        "positions_snapshot_v5",
+        "position_lifecycle_snapshot_v2",
+        "accounting_nav_v2",
+        "capital_authority_allocation_v1"
+      ],
+      "output_schema_id": "economic_state_build",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/economic_state_build_v1/{day_utc}/**/economic_state_build.v1.json"
+      ],
+      "producer_id": "constellation_2.common.economic_state_authority_v1",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/run_economic_state_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/run_economic_state_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "economic_state_build_v1"
+      ],
+      "output_schema_id": "economic_state_package",
+      "output_schema_version": "v1",
+      "outputs": [
+        "economic_state_package_v1/{day_utc}/**/economic_state_package.v1.json"
+      ],
+      "producer_id": "constellation_2.common.economic_state_authority_v1",
+      "producer_version": "v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/run_economic_state_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id {domain_id}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "governed_domain_source_contract_v1",
+        "configured_provider_or_source_file"
+      ],
+      "output_schema_id": "aegis_domain_source_artifact",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/final_eod_market_data_v1/{day_utc}/final_eod_market_data.v1.json",
+        "reports/macro_calendar_v1/{day_utc}/macro_calendar.v1.json",
+        "reports/earnings_events_v1/{day_utc}/earnings_events.v1.json",
+        "reports/corporate_actions_v1/{day_utc}/corporate_actions.v1.json"
+      ],
+      "producer_id": "ops.aegis.domain_source_builders_v1",
+      "producer_version": "domain_source_builders.v1",
+      "repair_class": "EXTERNAL_DATA_BOUNDED",
+      "replacement_producer_id": "",
+      "requires_external_source": true,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/validate_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id {domain_id}"
+    },
+    {
+      "allowed_days": [
+        "{day_utc}"
+      ],
+      "allowed_event_types": [
+        "EvidenceProduced",
+        "EvidenceValidated",
+        "EvidenceRejected"
+      ],
+      "authority_level": "CRITICAL",
+      "command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "deprecated": false,
+      "determinism_class": "INPUT_HASH_DETERMINISTIC",
+      "freshness_ttl_seconds": 86400,
+      "inputs": [
+        "market_data_inputs_v1",
+        "final_eod_market_data_v1",
+        "macro_calendar_v1",
+        "earnings_events_v1",
+        "corporate_actions_v1"
+      ],
+      "output_schema_id": "aegis_domain_certification",
+      "output_schema_version": "v1",
+      "outputs": [
+        "reports/domain_certification_v1/{day_utc}/domain_certification.v1.json",
+        "reports/domain_snapshot_v1/{day_utc}/**/*.json"
+      ],
+      "producer_id": "ops.aegis.domain_certification_v1",
+      "producer_version": "domain_certification.v1",
+      "repair_class": "AUTO_DETERMINISTIC",
+      "replacement_producer_id": "",
+      "requires_external_source": false,
+      "requires_operator_intent": false,
+      "source_hash_required": true,
+      "validation_command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}"
+    }
+  ],
+  "critical_output_schema_ids": [
+    "aegis_lite_eod_report",
+    "aegis_lite_operating_status",
+    "ai_feedback_review",
+    "alert_transport_proof",
+    "capital_authority_allocation",
+    "event_market_snapshot",
+    "event_monitoring_status",
+    "event_rules_registry",
+    "event_validity_gate",
+    "manual_execution_receipt",
+    "manual_trade_packet",
+    "market_data_inputs",
+    "operator_execution_queue",
+    "promoted_candidate_evidence",
+    "research_dataset_binding",
+    "research_task_queue",
+    "risk_definition_contract_v1",
+    "candidate_identity_set",
+    "engine_activity_authorization",
+    "aegis_domain_certification",
+    "aegis_domain_snapshot"
+  ],
+  "schema_id": "aegis_producer_contracts",
+  "schema_version": "v1"
+}

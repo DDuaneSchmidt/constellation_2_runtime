@@ -1,0 +1,101 @@
+{
+  "$id": "https://constellation.local/schemas/engine_universe_resolution.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Engine Universe Resolution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "engine_id",
+    "policy_id",
+    "status",
+    "configured_rule",
+    "symbols_considered",
+    "symbols_eligible",
+    "admitted_symbols",
+    "candidate_pairs",
+    "exclusions_by_reason",
+    "counters",
+    "selected_symbols",
+    "notes"
+  ],
+  "properties": {
+    "schema_id": { "const": "engine_universe_resolution" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "policy_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "configured_rule": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "symbols_considered": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+    },
+    "symbols_eligible": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+    },
+    "admitted_symbols": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+    },
+    "candidate_pairs": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+      }
+    },
+    "exclusions_by_reason": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason_code", "count", "examples"],
+        "properties": {
+          "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "count": { "type": "integer", "minimum": 1 },
+          "examples": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbols_scanned",
+        "symbols_eligible",
+        "signals_detected",
+        "signals_filtered",
+        "intents_created"
+      ],
+      "properties": {
+        "symbols_scanned": { "type": "integer", "minimum": 0 },
+        "symbols_eligible": { "type": "integer", "minimum": 0 },
+        "signals_detected": { "type": "integer", "minimum": 0 },
+        "signals_filtered": { "type": "integer", "minimum": 0 },
+        "intents_created": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "selected_symbols": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    }
+  }
+}

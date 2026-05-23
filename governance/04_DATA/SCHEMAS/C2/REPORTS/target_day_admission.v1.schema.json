@@ -3,7 +3,7 @@
   "$id": "https://constellation.local/schemas/c2/reports/target_day_admission.v1.schema.json",
   "title": "target_day_admission.v1",
   "type": "object",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "required": [
     "schema_id",
     "schema_version",

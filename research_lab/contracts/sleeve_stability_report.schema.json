@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "expectancy_drift_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "key_findings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "next_allowed_actions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "overall_stability_status": {
+      "enum": [
+        "insufficient_data",
+        "stable",
+        "watch",
+        "fragile",
+        "degrading"
+      ]
+    },
+    "recommended_action": {
+      "enum": [
+        "collect_more_candidates",
+        "continue_research",
+        "review_sleeve",
+        "revise_ranking_policy",
+        "revise_candidate_generator",
+        "challenge_sleeve"
+      ]
+    },
+    "regime_fragility_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "research_label": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "sleeve_stability_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "sleeve_version_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "sleeve_stability_report_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "created_at",
+    "created_by",
+    "expectancy_drift_report_id",
+    "regime_fragility_report_id",
+    "overall_stability_status",
+    "key_findings",
+    "recommended_action",
+    "next_allowed_actions",
+    "research_label",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveStabilityReport",
+  "type": "object"
+}

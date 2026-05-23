@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "created_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "created_by": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "selection_policy": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_notes": {
+      "type": "string"
+    },
+    "symbol_count": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "symbols": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "asset_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "category": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "min_start_date": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "symbol": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "asset_type",
+          "category",
+          "active",
+          "min_start_date",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "universe_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "universe_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "universe_version": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "universe_snapshot_id",
+    "universe_name",
+    "universe_version",
+    "created_at",
+    "created_by",
+    "symbols",
+    "symbol_count",
+    "selection_policy",
+    "source_notes",
+    "content_hash",
+    "schema_version"
+  ],
+  "title": "UniverseSnapshot",
+  "type": "object"
+}

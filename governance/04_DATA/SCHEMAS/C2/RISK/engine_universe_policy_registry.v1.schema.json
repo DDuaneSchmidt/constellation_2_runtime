@@ -1,0 +1,154 @@
+{
+  "$id": "https://constellation.local/schemas/engine_universe_policy_registry.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Engine Universe Policy Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "producer",
+    "registry_version",
+    "approved_git_sha",
+    "policies"
+  ],
+  "properties": {
+    "schema_id": { "const": "engine_universe_policy_registry" },
+    "schema_version": { "const": "v1" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "registry_version": { "type": "integer", "minimum": 1 },
+    "approved_git_sha": { "type": "string", "minLength": 1 },
+    "policies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy_id",
+          "engine_id",
+          "strategy_type",
+          "universe_mode",
+          "symbol_source_class",
+          "same_day_symbol_basis_required",
+          "fallback_allowed",
+          "security_scope",
+          "curated_symbols",
+          "require_all_symbols_present",
+          "liquidity_filters",
+          "ranking_mode",
+          "target_symbol_count",
+          "sector_cap",
+          "atr_filter",
+          "notes"
+        ],
+        "properties": {
+          "policy_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "strategy_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "universe_mode": {
+            "type": "string",
+            "enum": ["CURATED_SYMBOLS", "CURATED_PAIRS", "LIQUIDITY_RANKED_SYMBOLS"]
+          },
+          "symbol_source_class": {
+            "type": "string",
+            "enum": ["DYNAMIC_SAME_DAY", "GOVERNED_CURATED", "FIXED_STRUCTURAL"]
+          },
+          "same_day_symbol_basis_required": { "type": "boolean" },
+          "fallback_allowed": { "type": "boolean" },
+          "security_scope": {
+            "type": "string",
+            "enum": ["ANY", "ETF_ONLY", "EQUITY_ONLY"]
+          },
+          "curated_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+          },
+          "curated_pairs": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+            }
+          },
+          "require_all_symbols_present": { "type": "boolean" },
+          "liquidity_filters": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["price_min", "avg_volume_min", "avg_dollar_volume_min", "lookback_sessions"],
+                "properties": {
+                  "price_min": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+                  "avg_volume_min": { "type": "integer", "minimum": 0 },
+                  "avg_dollar_volume_min": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+                  "lookback_sessions": { "type": "integer", "minimum": 2, "maximum": 252 }
+                }
+              }
+            ]
+          },
+          "ranking_mode": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "enum": ["AVG_DOLLAR_VOLUME_DESC", "AVG_VOLUME_DESC"] }
+            ]
+          },
+          "target_symbol_count": { "type": "integer", "minimum": 1, "maximum": 500 },
+          "sector_cap": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["enabled", "max_fraction", "require_classification"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "max_fraction": {
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^0(\\.[0-9]+)?|1(\\.0+)?$" }
+                ]
+              },
+              "require_classification": { "type": "boolean" }
+            }
+          },
+          "atr_filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["enabled", "min_percentile", "lookback_sessions"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "min_percentile": {
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^0(\\.[0-9]+)?|1(\\.0+)?$" }
+                ]
+              },
+              "lookback_sessions": {
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "integer", "minimum": 2, "maximum": 252 }
+                ]
+              }
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      }
+    }
+  }
+}

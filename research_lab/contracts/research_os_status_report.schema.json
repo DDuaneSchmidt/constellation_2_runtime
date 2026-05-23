@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "active_challenger_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "blocked_challenger_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "candidate_generation_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "current_blockers": {
+      "type": "array"
+    },
+    "duplicate_registry_issue_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "evidence_materialization_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "governance_constraints": {
+      "type": "object"
+    },
+    "human_review_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "integrity_error_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "integrity_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "integrity_warning_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "latest_challenger_comparison_report_id": {
+      "type": "string"
+    },
+    "latest_challenger_evidence_batch_id": {
+      "type": "string"
+    },
+    "latest_human_review_decision_id": {
+      "type": "string"
+    },
+    "latest_human_review_dossier_id": {
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "lineage_warning_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "materialized_challenger_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "next_recommended_research_actions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "overall_status": {
+      "enum": [
+        "GREEN",
+        "YELLOW",
+        "RED"
+      ]
+    },
+    "paper_trial_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "paper_trial_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "readiness_level": {
+      "enum": [
+        "not_ready",
+        "research_ready_with_blockers",
+        "research_ready",
+        "paper_trial_ready",
+        "production_ready_blocked"
+      ]
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "research_os_status_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    },
+    "stability_status": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "research_os_status_report_id",
+    "generated_at",
+    "overall_status",
+    "readiness_level",
+    "latest_integrity_report_id",
+    "integrity_status",
+    "integrity_error_count",
+    "integrity_warning_count",
+    "current_blockers",
+    "latest_challenger_evidence_batch_id",
+    "latest_challenger_comparison_report_id",
+    "latest_human_review_dossier_id",
+    "latest_human_review_decision_id",
+    "active_challenger_count",
+    "blocked_challenger_count",
+    "materialized_challenger_count",
+    "paper_trial_count",
+    "duplicate_registry_issue_count",
+    "lineage_warning_count",
+    "candidate_generation_status",
+    "evidence_materialization_status",
+    "human_review_status",
+    "paper_trial_status",
+    "stability_status",
+    "next_recommended_research_actions",
+    "source_artifact_ids",
+    "immutable_hash"
+  ],
+  "title": "ResearchOSStatusReport",
+  "type": "object"
+}

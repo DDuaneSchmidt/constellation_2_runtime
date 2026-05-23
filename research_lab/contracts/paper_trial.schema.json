@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "observation_frequency": {
+      "enum": [
+        "manual",
+        "daily",
+        "weekly",
+        "monthly"
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "active",
+        "paused",
+        "completed",
+        "cancelled"
+      ]
+    }
+  },
+  "required": [
+    "paper_trial_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "hypothesis_id",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "source_evidence_package_ids",
+    "candidate_generator_name",
+    "candidate_generator_version",
+    "ranking_policy_version",
+    "threshold",
+    "observation_frequency",
+    "outcome_windows",
+    "status",
+    "started_at",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "PaperTrial",
+  "type": "object"
+}

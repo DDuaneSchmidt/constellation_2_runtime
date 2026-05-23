@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "challenge_type": {
+      "enum": [
+        "underperformance",
+        "insufficient_evidence",
+        "candidate_drought",
+        "poor_attribution",
+        "regime_fragility",
+        "cost_fragility",
+        "manual_review"
+      ]
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "recommended_action": {
+      "enum": [
+        "continue_research",
+        "revise_hypothesis",
+        "collect_more_candidates",
+        "paper_trial_blocked",
+        "retire_candidate",
+        "manual_review_required"
+      ]
+    }
+  },
+  "required": [
+    "sleeve_challenge_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "sleeve_health_snapshot_id",
+    "challenge_reason",
+    "challenge_type",
+    "recommended_action",
+    "evidence_refs",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveChallenge",
+  "type": "object"
+}

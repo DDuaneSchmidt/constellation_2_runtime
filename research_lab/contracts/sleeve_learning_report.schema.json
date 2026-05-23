@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    }
+  },
+  "required": [
+    "sleeve_learning_report_id",
+    "sleeve_id",
+    "sleeve_version_id",
+    "longitudinal_runs",
+    "total_candidate_batches",
+    "total_candidates",
+    "measured_candidates",
+    "zero_candidate_batches",
+    "ranking_quality_status",
+    "current_learning_status",
+    "recommended_next_action",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveLearningReport",
+  "type": "object"
+}

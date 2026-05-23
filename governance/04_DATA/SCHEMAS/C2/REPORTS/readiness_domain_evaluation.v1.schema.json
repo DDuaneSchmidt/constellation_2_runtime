@@ -1,0 +1,124 @@
+{
+  "$id": "https://constellation.local/schemas/C2/REPORTS/readiness_domain_evaluation.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "allowed_actions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "blocker_codes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "blocker_messages": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "disallowed_actions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "domain": {
+      "enum": [
+        "market_data",
+        "trade_construction",
+        "capital_authority",
+        "stop_risk",
+        "manual_capture",
+        "paper_submit",
+        "execution"
+      ]
+    },
+    "evaluated_at": {
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "missing_inputs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "readiness_domain_evaluation_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "required_inputs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "resolved_inputs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "readiness_domain_evaluation"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "selected_exposure_intent_id": {
+      "type": "string"
+    },
+    "source_artifacts": {
+      "type": "array"
+    },
+    "source_day": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "READY",
+        "BLOCKED",
+        "PARTIAL",
+        "DEGRADED",
+        "NOT_REQUIRED",
+        "NOT_ENABLED"
+      ]
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "trade_lifecycle_case_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "readiness_domain_evaluation_id",
+    "trade_lifecycle_case_id",
+    "selected_exposure_intent_id",
+    "symbol",
+    "source_day",
+    "domain",
+    "status",
+    "required_inputs",
+    "resolved_inputs",
+    "missing_inputs",
+    "blocker_codes",
+    "blocker_messages",
+    "allowed_actions",
+    "disallowed_actions",
+    "source_artifacts",
+    "evaluated_at",
+    "immutable_hash"
+  ],
+  "title": "ReadinessDomainEvaluation v1",
+  "type": "object"
+}

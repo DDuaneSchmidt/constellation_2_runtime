@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "dataset_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "date_range": {
+      "properties": {
+        "end": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "event_definition": {
+      "required": [
+        "type",
+        "params"
+      ],
+      "type": "object"
+    },
+    "forward_return_windows": {
+      "items": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "hypothesis": {
+      "type": "string"
+    },
+    "hypothesis_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "research_plan_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "runner_name": {
+      "enum": [
+        "event_study_v1"
+      ]
+    },
+    "runner_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "symbols": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "title": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "universe_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "research_plan_id",
+    "hypothesis_id",
+    "title",
+    "hypothesis",
+    "dataset_snapshot_id",
+    "universe_snapshot_id",
+    "symbols",
+    "date_range",
+    "event_definition",
+    "forward_return_windows",
+    "filters",
+    "success_criteria",
+    "runner_name",
+    "runner_version",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "ResearchPlan",
+  "type": "object"
+}

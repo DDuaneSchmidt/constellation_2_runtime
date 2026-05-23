@@ -1,0 +1,51 @@
+{
+  "schema_id": "deprecated_trade_capture_sources",
+  "schema_version": "v1",
+  "registry_id": "DEPRECATED_TRADE_CAPTURE_SOURCES_V1",
+  "status": "ACTIVE",
+  "canonical_trade_authority": "trade_candidate_projection_v1",
+  "canonical_manual_capture_authority": "manual_capture_record_v1",
+  "entries": [
+    {
+      "source_id": "manual_capture_candidate_v1",
+      "path": "operator_state_snapshot_v1.manual_capture_candidate_v1",
+      "status": "legacy_read_only",
+      "allowed_use": "compatibility alias only; not UI authority",
+      "not_current_trade_authority": true
+    },
+    {
+      "source_id": "aegis_manual_external_capture_v1",
+      "path": "reports/aegis_manual_external_capture_v1/<DAY>/manual_external_capture.v1.jsonl",
+      "status": "migration_source_only",
+      "allowed_use": "legacy audit history and migration reference",
+      "not_current_trade_authority": true
+    },
+    {
+      "source_id": "manual_execution_receipt_v1",
+      "path": "manual_execution_receipt.v1.json",
+      "status": "legacy_read_only",
+      "allowed_use": "historical receipt truth for legacy Lite/manual packet workflows",
+      "not_current_trade_authority": true
+    },
+    {
+      "source_id": "paper_intent_candidate_diagnostics_v1",
+      "path": "reports/paper_intent_candidate_diagnostics_v1/<DAY>/paper_intent_candidate_diagnostics.v1.json",
+      "status": "not_ui_authority",
+      "allowed_use": "projection input only",
+      "not_current_trade_authority": true
+    },
+    {
+      "source_id": "exposure_intent_paper_submission_package_v1",
+      "path": "reports/exposure_intent_paper_submission_package_v1/<DAY>/<ATTEMPT>/exposure_intent_paper_submission_package.v1.json",
+      "status": "not_ui_authority",
+      "allowed_use": "converter/package diagnostic input only",
+      "not_current_trade_authority": true
+    }
+  ],
+  "safety": {
+    "broker_execution_allowed": false,
+    "live_trading_allowed": false,
+    "order_routing_allowed": false,
+    "capital_allocation_allowed": false
+  }
+}

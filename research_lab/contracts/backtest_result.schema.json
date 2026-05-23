@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "required": [
+    "backtest_plan_id",
+    "dataset_snapshot_id",
+    "trade_count",
+    "gross",
+    "post_cost",
+    "benchmark",
+    "schema_version"
+  ],
+  "title": "BacktestResult",
+  "type": "object"
+}

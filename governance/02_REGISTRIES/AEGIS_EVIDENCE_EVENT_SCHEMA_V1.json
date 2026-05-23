@@ -1,0 +1,41 @@
+{
+  "schema_id": "aegis_evidence_event_schema",
+  "schema_version": "v1",
+  "event_types": [
+    "EvidenceProduced",
+    "EvidenceValidated",
+    "EvidenceRejected",
+    "EvidenceExpired",
+    "ArtifactTampered",
+    "CapabilityEvaluated",
+    "RuntimeEvaluated",
+    "RepairPlanned",
+    "RepairAttempted",
+    "RepairSucceeded",
+    "RepairFailed",
+    "ManualActionBlocked",
+    "ManualActionAccepted"
+  ],
+  "required_fields": [
+    "event_id",
+    "event_type",
+    "run_id",
+    "parent_run_id",
+    "day_utc",
+    "created_at_utc",
+    "producer",
+    "producer_version",
+    "git_sha",
+    "schema_id",
+    "schema_version",
+    "input_hashes",
+    "output_hashes",
+    "artifact_paths",
+    "validation_status",
+    "previous_event_hash",
+    "event_hash"
+  ],
+  "storage_path_template": "truth/events/aegis_evidence_events_v1/<day_utc>/events.jsonl",
+  "hash_chain_required": true,
+  "append_only": true
+}

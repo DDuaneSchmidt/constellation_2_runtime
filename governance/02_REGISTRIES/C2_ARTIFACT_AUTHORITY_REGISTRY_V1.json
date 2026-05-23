@@ -41,7 +41,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -83,7 +88,12 @@
         "cash_ledger_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -115,7 +125,12 @@
         "positions_snapshot_v5"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -150,7 +165,13 @@
         "positions_snapshot_v5"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": true,
@@ -185,7 +206,13 @@
         "capital_authority_allocation_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -217,7 +244,13 @@
         "economic_state_build_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -244,7 +277,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -276,7 +314,12 @@
         "execution_journal_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -305,7 +348,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -332,7 +380,13 @@
         "execution_journal_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -359,7 +413,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -389,7 +449,13 @@
         "session_readiness_refresh_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -421,7 +487,13 @@
         "target_day_build_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -451,7 +523,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -482,7 +559,12 @@
         "configuration_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -515,7 +597,12 @@
         "configuration_validation_result_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -547,7 +634,12 @@
         "compiled_active_config_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -577,7 +669,12 @@
         "compiled_active_config_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -609,7 +706,12 @@
         "compiled_active_config_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": true,
@@ -638,7 +740,13 @@
         "configuration_activation_transaction_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -670,7 +778,13 @@
         "target_day_build_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -703,7 +817,13 @@
         "submit_boundary_status_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -731,7 +851,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -760,7 +886,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -787,7 +919,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -817,7 +955,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -848,7 +992,13 @@
         "trade_submit_readiness_c2_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -880,7 +1030,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -918,7 +1074,13 @@
         "trade_submit_readiness_c2_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -950,7 +1112,13 @@
         "submit_boundary_status_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -983,7 +1151,13 @@
         "trading_day_readiness_authority_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1012,11 +1186,16 @@
       ],
       "required_upstream_dependencies": [
         "economic_state_package_v1",
-        "trade_submit_readiness_c2_v1",
         "capital_authority_allocation_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": true,
@@ -1046,7 +1225,13 @@
         "execution_build_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": true,
@@ -1075,7 +1260,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1109,7 +1300,13 @@
         "paper_session_authority_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1144,7 +1341,13 @@
         "economic_state_build_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1172,7 +1375,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1200,7 +1409,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1229,7 +1444,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1258,7 +1479,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1286,7 +1513,13 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1323,7 +1556,13 @@
         "replay_certification_gate_v1"
       ],
       "initial_finality_state": "provisional",
-      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "provisional",
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1353,7 +1592,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1386,7 +1630,12 @@
         "sleeve_edge_fact_ledger_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -1425,7 +1674,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1461,7 +1715,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": true,
@@ -1494,7 +1753,12 @@
         "sleeve_edge_fact_ledger_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -1528,7 +1792,12 @@
         "sleeve_edge_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -1561,7 +1830,12 @@
         "capital_authority_allocation_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -1590,7 +1864,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": false,
@@ -1624,7 +1903,12 @@
         "exit_reconciliation_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1656,7 +1940,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1688,7 +1977,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1720,7 +2014,12 @@
         "capital_risk_envelope_v2"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1752,7 +2051,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1784,7 +2088,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1814,7 +2123,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": true,
@@ -1844,7 +2158,12 @@
         "evaluation_policy_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": true,
       "frozen_input_bundle_required": true,
@@ -1875,7 +2194,12 @@
         "sleeve_governance_action_state_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1903,7 +2227,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1932,7 +2261,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1963,7 +2297,12 @@
         "control_stage_day_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -1994,7 +2333,12 @@
         "control_stage_context_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2024,7 +2368,12 @@
         "control_stage_session_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2053,7 +2402,12 @@
         "control_stage_day_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2082,7 +2436,12 @@
         "control_stage_context_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2111,7 +2470,12 @@
         "control_stage_session_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2140,7 +2504,12 @@
         "control_stage_execution_build_admitted_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2167,7 +2536,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2195,7 +2569,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2225,7 +2604,12 @@
         "control_stage_transition_record_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2254,7 +2638,12 @@
         "control_stage_transition_record_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2283,7 +2672,12 @@
         "control_stage_transition_record_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2313,7 +2707,12 @@
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2354,7 +2753,12 @@
         "deployment_state_machine_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2389,7 +2793,12 @@
         "startup_chain_certification_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2424,7 +2833,12 @@
         "startup_chain_certification_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2458,7 +2872,12 @@
         "opportunity_review_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2490,7 +2909,12 @@
         "product_summary_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2525,7 +2949,12 @@
         "product_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2561,7 +2990,12 @@
         "product_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2596,7 +3030,12 @@
         "opportunity_state_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2631,7 +3070,12 @@
         "product_snapshot_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,
@@ -2660,7 +3104,12 @@
         "control_stage_transition_record_v1"
       ],
       "initial_finality_state": "finalized",
-      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "allowed_finality_states": [
+        "finalized",
+        "corrected",
+        "superseded",
+        "archived"
+      ],
       "append_only_audit": true,
       "immutable_policy_snapshot_required": false,
       "frozen_input_bundle_required": false,

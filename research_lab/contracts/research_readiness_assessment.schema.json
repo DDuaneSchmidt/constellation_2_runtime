@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "data_requirement_status": {
+      "enum": [
+        "available",
+        "partially_available",
+        "missing_or_future",
+        "unknown"
+      ]
+    },
+    "ready_for_research": {
+      "type": "boolean"
+    },
+    "sample_size_estimate_status": {
+      "enum": [
+        "sufficient_likely",
+        "insufficient_likely",
+        "unknown",
+        "not_checked"
+      ]
+    }
+  },
+  "required": [
+    "research_readiness_assessment_id",
+    "hypothesis_proposal_id",
+    "event_family_id",
+    "assessed_at",
+    "assessed_by",
+    "data_requirement_status",
+    "required_symbols",
+    "available_symbols",
+    "missing_symbols",
+    "dataset_snapshot_candidates",
+    "event_definition_supported",
+    "forward_windows_supported",
+    "regime_dimensions_supported",
+    "cost_model_available",
+    "sample_size_estimate_status",
+    "blocking_items",
+    "warnings",
+    "ready_for_research",
+    "next_allowed_actions",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "ResearchReadinessAssessment",
+  "type": "object"
+}

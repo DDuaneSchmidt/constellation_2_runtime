@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "artifact_id": {
+      "const": "market_data_inputs_v1"
+    },
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "broker_execution_allowed": {
+      "const": false
+    },
+    "day_utc": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "type": "string"
+    },
+    "final_eod_certification_pending": {
+      "type": "boolean"
+    },
+    "final_eod_certification_status": {
+      "enum": [
+        "VALID",
+        "PENDING",
+        "UNAVAILABLE"
+      ],
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "type": "string"
+    },
+    "input_records": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "data_item_id": {
+            "pattern": "^market\\.(price|volatility)\\.[A-Z0-9.^-]+$",
+            "type": "string"
+          },
+          "day_utc": {
+            "type": "string"
+          },
+          "field_type": {
+            "enum": [
+              "price",
+              "volatility"
+            ]
+          },
+          "finalization_status": {
+            "enum": [
+              "NOT_FINAL_YET",
+              "FINAL",
+              "FINAL_UNAVAILABLE",
+              "PROVISIONAL",
+              ""
+            ],
+            "type": "string"
+          },
+          "market_data_mode": {
+            "type": "string"
+          },
+          "producer_id": {
+            "type": "string"
+          },
+          "raw_source_hash": {
+            "type": "string"
+          },
+          "retrieved_at_utc": {
+            "type": "string"
+          },
+          "schema_id": {
+            "const": "market_data_inputs"
+          },
+          "schema_version": {
+            "const": "v1"
+          },
+          "source_timestamp_utc": {
+            "type": "string"
+          },
+          "source_vendor": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "transformed_value_hash": {
+            "type": "string"
+          },
+          "usable_for": {
+            "type": "object"
+          },
+          "validation_status": {
+            "enum": [
+              "VALID",
+              "REJECTED",
+              "UNAVAILABLE_EXTERNAL_SOURCE",
+              "STALE",
+              "MISSING",
+              "TAMPERED",
+              "MALFORMED"
+            ]
+          },
+          "value": {
+            "type": [
+              "number",
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data_item_id",
+          "symbol",
+          "field_type",
+          "day_utc",
+          "validation_status",
+          "producer_id",
+          "schema_id",
+          "schema_version"
+        ]
+      },
+      "type": "array"
+    },
+    "market_data_mode": {
+      "enum": [
+        "INTRADAY_OPERATIONAL",
+        "FINAL_EOD_CERTIFIED"
+      ],
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "market_data_inputs"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at_utc",
+    "status",
+    "input_records",
+    "broker_execution_allowed",
+    "autonomous_execution_allowed",
+    "market_data_mode"
+  ],
+  "type": "object"
+}

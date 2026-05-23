@@ -1,0 +1,33 @@
+{
+  "schema_id": "aegis_runtime_evaluation_schema",
+  "schema_version": "v1",
+  "required_fields": [
+    "run_id",
+    "parent_run_id",
+    "day_utc",
+    "generated_at_utc",
+    "git_sha",
+    "evaluator_version",
+    "policy_version",
+    "dag_version",
+    "schema_version",
+    "runtime_truth_classification",
+    "highest_readiness_layer",
+    "capabilities",
+    "blockers",
+    "decision_trace",
+    "source_evidence_refs",
+    "warnings",
+    "errors",
+    "deterministic_output_hash"
+  ],
+  "fail_closed_classifications": [
+    "PARTIAL_CONTEXT",
+    "BLOCKED",
+    "DEMO_ONLY",
+    "DRY_RUN_ONLY"
+  ],
+  "permission_authority": "RuntimeEvaluation",
+  "trade_advice_default_allowed": false,
+  "autonomous_execution_default_allowed": false
+}

@@ -4,65 +4,39 @@
   "title": "aegis_lite_eod_report.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_id",
-    "schema_version",
-    "artifact_id",
-    "day_utc",
-    "run_id",
-    "generated_at_utc",
-    "truth_root",
-    "artifact_path",
-    "operating_model",
-    "market_session",
-    "market_regime_state",
-    "data_freshness_status",
-    "governance_status",
-    "gates",
-    "sleeve_outputs",
-    "sleeve_performance_summary",
-    "sandbox_research_notes",
-    "selected_trade_candidates",
-    "edge_overlap_review",
-    "edge_overlap_summary",
-    "open_manual_positions",
-    "missing_stop_warnings",
-    "prior_day_manual_decisions",
-    "manual_execution_events",
-    "current_exposure_by_edge_cluster",
-    "current_exposure_by_sleeve",
-    "manual_execution_queue",
-    "eod_input_contract",
-    "empty_section_reasons",
-    "blocked_advisory_candidates",
-    "candidate_lineage_artifact_path",
-    "eod_run_manifest_path",
-    "market_snapshot_authority_path",
-    "promoted_sleeve_manifest_path",
-    "skipped_candidate_tracking",
-    "unsupported_manual_execution_warnings",
-    "performance_summary",
-    "edge_clusters",
-    "manual_execution_checklist",
-    "do_not_trade_blockers",
-    "warnings",
-    "operator_notes",
-    "source_artifact_lineage",
-    "run_receipt",
-    "report_status",
-    "manual_execution_status",
-    "readiness_classification",
-    "canonical_json_hash"
-  ],
   "properties": {
-    "schema_id": { "const": "aegis_lite_eod_report" },
-    "schema_version": { "const": "v1" },
-    "artifact_id": { "const": "aegis_lite_eod_report_v1" },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "run_id": { "type": "string", "minLength": 1 },
-    "generated_at_utc": { "type": "string", "minLength": 20 },
-    "truth_root": { "type": "string", "minLength": 1 },
-    "artifact_path": { "type": "string", "minLength": 1 },
+    "schema_id": {
+      "const": "aegis_lite_eod_report"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "enum": [
+        "aegis_lite_eod_report_v1",
+        "aegis_lite_eod_report_manual_acknowledgment_v1"
+      ]
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "truth_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_path": {
+      "type": "string",
+      "minLength": 1
+    },
     "operating_model": {
       "type": "object",
       "additionalProperties": false,
@@ -77,35 +51,106 @@
         "autonomous_order_routing_allowed"
       ],
       "properties": {
-        "phase": { "const": "AEGIS_LITE" },
-        "near_term_product": { "const": "EOD_MANUAL_TRADE_REPORT" },
-        "broker_mode": { "const": "MANUAL_ONLY" },
-        "manual_execution_only": { "const": true },
-        "ib_automation_status": { "const": "DEFERRED" },
-        "broker_required_for_runtime": { "const": false },
-        "broker_submit_required": { "const": false },
-        "autonomous_order_routing_allowed": { "const": false }
+        "phase": {
+          "const": "AEGIS_LITE"
+        },
+        "near_term_product": {
+          "const": "EOD_MANUAL_TRADE_REPORT"
+        },
+        "broker_mode": {
+          "const": "MANUAL_ONLY"
+        },
+        "manual_execution_only": {
+          "const": true
+        },
+        "ib_automation_status": {
+          "const": "DEFERRED"
+        },
+        "broker_required_for_runtime": {
+          "const": false
+        },
+        "broker_submit_required": {
+          "const": false
+        },
+        "autonomous_order_routing_allowed": {
+          "const": false
+        }
       }
     },
-    "market_session": { "type": "object", "additionalProperties": true },
-    "market_regime_state": { "type": "object", "additionalProperties": true },
-    "data_freshness_status": { "type": "object", "additionalProperties": true },
-    "governance_status": { "type": "object", "additionalProperties": true },
-    "gates": { "type": "array", "items": { "$ref": "#/$defs/gate" }, "minItems": 3 },
-    "sleeve_outputs": { "type": "array", "items": { "type": "object" } },
-    "sleeve_performance_summary": { "type": "array", "items": { "type": "object" } },
-    "sandbox_research_notes": { "type": "array", "items": { "type": "object" } },
-    "selected_trade_candidates": { "type": "array", "items": { "$ref": "#/$defs/report_candidate" } },
+    "market_session": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "market_regime_state": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "data_freshness_status": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "governance_status": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gate"
+      },
+      "minItems": 3
+    },
+    "sleeve_outputs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "sleeve_performance_summary": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "sandbox_research_notes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "selected_trade_candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/report_candidate"
+      }
+    },
     "edge_overlap_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_type", "path", "sha256", "status", "distinct_edge_count"],
+      "required": [
+        "artifact_type",
+        "path",
+        "sha256",
+        "status",
+        "distinct_edge_count"
+      ],
       "properties": {
-        "artifact_type": { "const": "sleeve_edge_overlap_review_v1" },
-        "path": { "type": "string" },
-        "sha256": { "type": "string" },
-        "status": { "type": "string" },
-        "distinct_edge_count": { "type": "integer", "minimum": 0 }
+        "artifact_type": {
+          "const": "sleeve_edge_overlap_review_v1"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "distinct_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "edge_overlap_summary": {
@@ -120,45 +165,172 @@
         "portfolio_concentration_warnings"
       ],
       "properties": {
-        "distinct_edge_count": { "type": "integer", "minimum": 0 },
-        "edge_groups": { "type": "array", "items": { "type": "object" } },
-        "shared_risk_groups": { "type": "array", "items": { "type": "object" } },
-        "duplicate_thesis_groups": { "type": "array", "items": { "type": "object" } },
-        "correlated_exposure_groups": { "type": "array", "items": { "type": "object" } },
-        "portfolio_concentration_warnings": { "type": "array", "items": { "type": "object" } }
+        "distinct_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "edge_groups": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "shared_risk_groups": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "duplicate_thesis_groups": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "correlated_exposure_groups": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "portfolio_concentration_warnings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
       }
     },
-    "open_manual_positions": { "type": "array", "items": { "type": "object" } },
-    "missing_stop_warnings": { "type": "array", "items": { "type": "string" } },
-    "prior_day_manual_decisions": { "type": "array", "items": { "type": "object" } },
-    "manual_execution_events": { "type": "array", "items": { "type": "object" } },
-    "current_exposure_by_edge_cluster": { "type": "array", "items": { "type": "object" } },
-    "current_exposure_by_sleeve": { "type": "array", "items": { "type": "object" } },
-    "manual_execution_queue": { "type": "array", "items": { "type": "object" } },
-    "eod_input_contract": { "type": "object", "additionalProperties": true },
+    "open_manual_positions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "missing_stop_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "prior_day_manual_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "manual_execution_events": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "current_exposure_by_edge_cluster": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "current_exposure_by_sleeve": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "manual_execution_queue": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "eod_input_contract": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "empty_section_reasons": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["executable_manual_trades", "blocked_advisory_candidates"],
+      "required": [
+        "executable_manual_trades",
+        "blocked_advisory_candidates"
+      ],
       "properties": {
-        "executable_manual_trades": { "type": "string" },
-        "blocked_advisory_candidates": { "type": "string" }
+        "executable_manual_trades": {
+          "type": "string"
+        },
+        "blocked_advisory_candidates": {
+          "type": "string"
+        }
       }
     },
-    "blocked_advisory_candidates": { "type": "array", "items": { "type": "object" } },
-    "candidate_lineage_artifact_path": { "type": "string" },
-    "eod_run_manifest_path": { "type": "string" },
-    "market_snapshot_authority_path": { "type": "string" },
-    "promoted_sleeve_manifest_path": { "type": "string" },
-    "skipped_candidate_tracking": { "type": "array", "items": { "type": "object" } },
-    "unsupported_manual_execution_warnings": { "type": "array", "items": { "type": "string" } },
-    "performance_summary": { "type": "object", "additionalProperties": true },
-    "edge_clusters": { "type": "array", "items": { "type": "object" } },
-    "manual_execution_checklist": { "type": "array", "items": { "$ref": "#/$defs/checklist_item" }, "minItems": 1 },
-    "do_not_trade_blockers": { "type": "array", "items": { "type": "string" } },
-    "warnings": { "type": "array", "items": { "type": "string" } },
-    "operator_notes": { "type": "string" },
-    "source_artifact_lineage": { "type": "array", "items": { "$ref": "#/$defs/artifact_ref" } },
+    "blocked_advisory_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "candidate_lineage_artifact_path": {
+      "type": "string"
+    },
+    "eod_run_manifest_path": {
+      "type": "string"
+    },
+    "market_snapshot_authority_path": {
+      "type": "string"
+    },
+    "promoted_sleeve_manifest_path": {
+      "type": "string"
+    },
+    "skipped_candidate_tracking": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "unsupported_manual_execution_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "performance_summary": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "edge_clusters": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "manual_execution_checklist": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/checklist_item"
+      },
+      "minItems": 1
+    },
+    "do_not_trade_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "operator_notes": {
+      "type": "string"
+    },
+    "source_artifact_lineage": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    },
     "run_receipt": {
       "type": "object",
       "additionalProperties": true,
@@ -171,28 +343,47 @@
         "broker_transmit_control_touched"
       ],
       "properties": {
-        "pipeline": { "const": "aegis_lite_eod_pipeline_v1" },
-        "deterministic": { "const": true },
-        "replayable": { "const": true },
-        "audit_archive_path": { "type": "string" },
-        "ib_submit_automation_invoked": { "const": false },
-        "broker_transmit_control_touched": { "const": false }
+        "pipeline": {
+          "const": "aegis_lite_eod_pipeline_v1"
+        },
+        "deterministic": {
+          "const": true
+        },
+        "replayable": {
+          "const": true
+        },
+        "audit_archive_path": {
+          "type": "string"
+        },
+        "ib_submit_automation_invoked": {
+          "const": false
+        },
+        "broker_transmit_control_touched": {
+          "const": false
+        }
       }
     },
     "report_status": {
       "type": "string",
       "enum": [
+        "ADVISORY_ONLY",
+        "BLOCKED",
+        "DATA_NOT_READY",
+        "INPUT_CONTRACT_FAILED",
+        "MANUAL_ACKNOWLEDGED",
         "READY",
         "READY_WITH_WARNINGS",
-        "BLOCKED",
-        "ADVISORY_ONLY",
-        "INPUT_CONTRACT_FAILED",
-        "RUNTIME_NOT_READY",
         "RELEASE_MISMATCH",
-        "DATA_NOT_READY"
+        "RUNTIME_NOT_READY"
       ]
     },
-    "manual_execution_status": { "type": "string", "enum": ["READY_FOR_MANUAL_ENTRY", "NOT_READY"] },
+    "manual_execution_status": {
+      "type": "string",
+      "enum": [
+        "READY_FOR_MANUAL_ENTRY",
+        "NOT_READY"
+      ]
+    },
     "readiness_classification": {
       "type": "string",
       "enum": [
@@ -203,39 +394,151 @@
         "READY_FOR_AUTOMATION"
       ]
     },
-    "producer_contract_v1": { "type": "object" },
-    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "producer_contract_v1": {
+      "type": "object"
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "manual_acknowledgment_status": {
+      "type": "string",
+      "enum": [
+        "ACCEPTED"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operator_intent": {
+      "type": "string",
+      "enum": [
+        "REPORT_ACKNOWLEDGED",
+        "REVIEW_COMPLETED"
+      ]
+    },
+    "operator_intent_event_id": {
+      "type": "string",
+      "pattern": "^ManualActionAccepted:.+"
+    },
+    "operator_intent_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime_evaluation_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "reason_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "acknowledged_report_path": {
+      "type": "string"
+    },
+    "acknowledged_report_hash": {
+      "type": "string",
+      "pattern": "^$|^[a-f0-9]{64}$"
+    },
+    "broker_submit_required": {
+      "const": false
+    },
+    "trade_advice_allowed": {
+      "const": false
+    },
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "candidate_consumption_audit_artifact_path": {
+      "type": "string"
+    },
+    "eod_outcome_status": {
+      "type": "string",
+      "enum": [
+        "NORMAL_NO_OP_NO_PROMOTED_CANDIDATES",
+        "BLOCKED_MISSING_REQUIRED_INPUT",
+        "BLOCKED_UNCERTIFIED_SYMBOLS",
+        "BLOCKED_PROMOTION_POLICY",
+        "READY_WITH_PROMOTED_CANDIDATES"
+      ]
+    }
   },
   "$defs": {
     "artifact_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_type", "path", "exists", "sha256"],
+      "required": [
+        "artifact_type",
+        "path",
+        "exists",
+        "sha256"
+      ],
       "properties": {
-        "artifact_type": { "type": "string" },
-        "path": { "type": "string" },
-        "exists": { "type": "boolean" },
-        "sha256": { "type": "string" }
+        "artifact_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "type": "string"
+        }
       }
     },
     "gate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["gate_id", "status", "reason_codes"],
+      "required": [
+        "gate_id",
+        "status",
+        "reason_codes"
+      ],
       "properties": {
-        "gate_id": { "type": "string", "enum": ["DATA_INTEGRITY", "GOVERNANCE_INTEGRITY", "REPORT_COMPLETENESS"] },
-        "status": { "type": "string", "enum": ["PASS", "BLOCKED"] },
-        "reason_codes": { "type": "array", "items": { "type": "string" } }
+        "gate_id": {
+          "type": "string",
+          "enum": [
+            "DATA_INTEGRITY",
+            "GOVERNANCE_INTEGRITY",
+            "REPORT_COMPLETENESS"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "BLOCKED"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "checklist_item": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["check_id", "label", "status"],
+      "required": [
+        "check_id",
+        "label",
+        "status"
+      ],
       "properties": {
-        "check_id": { "type": "string" },
-        "label": { "type": "string" },
-        "status": { "const": "REQUIRED" }
+        "check_id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "const": "REQUIRED"
+        }
       }
     },
     "report_candidate": {
@@ -272,26 +575,79 @@
         "source_artifact_refs"
       ],
       "properties": {
-        "candidate_id": { "type": "string" },
-        "sleeve_id": { "type": "string" },
-        "symbol": { "type": "string" },
-        "direction": { "type": "string" },
-        "instrument_type": { "type": "string" },
-        "entry_reference_price": { "type": "string" },
-        "suggested_quantity": { "type": "integer", "minimum": 0 },
-        "sizing_guidance": { "type": "string" },
-        "stop_price": { "type": "string" },
-        "stop_logic": { "type": "string" },
-        "risk_per_trade": { "type": "string" },
-        "sleeve_ownership": { "type": "string" },
-        "confidence": { "type": "string" },
-        "conviction": { "type": "string" },
-        "reason_codes": { "type": "array", "items": { "type": "string" } },
-        "governance_notes": { "type": "array", "items": { "type": "string" } },
-        "edge_family": { "type": "string" },
-        "thesis_id": { "type": "string" },
-        "shared_risk_tags": { "type": "array", "items": { "type": "string" } },
-        "correlated_symbols": { "type": "array", "items": { "type": "string" } },
+        "candidate_id": {
+          "type": "string"
+        },
+        "sleeve_id": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "instrument_type": {
+          "type": "string"
+        },
+        "entry_reference_price": {
+          "type": "string"
+        },
+        "suggested_quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sizing_guidance": {
+          "type": "string"
+        },
+        "stop_price": {
+          "type": "string"
+        },
+        "stop_logic": {
+          "type": "string"
+        },
+        "risk_per_trade": {
+          "type": "string"
+        },
+        "sleeve_ownership": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "conviction": {
+          "type": "string"
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "governance_notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "edge_family": {
+          "type": "string"
+        },
+        "thesis_id": {
+          "type": "string"
+        },
+        "shared_risk_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "correlated_symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "edge_overlap": {
           "type": "object",
           "additionalProperties": false,
@@ -302,15 +658,35 @@
             "governance_recommendation"
           ],
           "properties": {
-            "overlap_group_id": { "type": "string" },
-            "duplicate_thesis_flag": { "type": "boolean" },
-            "concentration_warning_flag": { "type": "boolean" },
-            "governance_recommendation": { "$ref": "#/$defs/recommendation" }
+            "overlap_group_id": {
+              "type": "string"
+            },
+            "duplicate_thesis_flag": {
+              "type": "boolean"
+            },
+            "concentration_warning_flag": {
+              "type": "boolean"
+            },
+            "governance_recommendation": {
+              "$ref": "#/$defs/recommendation"
+            }
           }
         },
-        "shared_risk_classification": { "type": "array", "items": { "type": "string" } },
-        "portfolio_concentration_warnings": { "type": "array", "items": { "type": "string" } },
-        "governance_adjusted_status": { "$ref": "#/$defs/recommendation" },
+        "shared_risk_classification": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "portfolio_concentration_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "governance_adjusted_status": {
+          "$ref": "#/$defs/recommendation"
+        },
         "manual_execution": {
           "type": "object",
           "additionalProperties": false,
@@ -320,19 +696,51 @@
             "checklist_required"
           ],
           "properties": {
-            "operator_must_enter_in_ib": { "const": true },
-            "aegis_broker_submit_required": { "const": false },
-            "checklist_required": { "const": true }
+            "operator_must_enter_in_ib": {
+              "const": true
+            },
+            "aegis_broker_submit_required": {
+              "const": false
+            },
+            "checklist_required": {
+              "const": true
+            }
           }
         },
-        "executable_status": { "type": "string", "enum": ["EXECUTABLE", "NON_EXECUTABLE"] },
-        "blockers": { "type": "array", "items": { "type": "string" } },
-        "source_artifact_refs": { "type": "array", "items": { "$ref": "#/$defs/artifact_ref" } }
-        ,
-        "promotion_status": { "type": "string" },
-        "execution_confidence_badges": { "type": "array", "items": { "type": "string" } },
-        "demo_mode": { "type": "boolean" },
-        "dry_run_only": { "type": "boolean" }
+        "executable_status": {
+          "type": "string",
+          "enum": [
+            "EXECUTABLE",
+            "NON_EXECUTABLE"
+          ]
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_artifact_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact_ref"
+          }
+        },
+        "promotion_status": {
+          "type": "string"
+        },
+        "execution_confidence_badges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "demo_mode": {
+          "type": "boolean"
+        },
+        "dry_run_only": {
+          "type": "boolean"
+        }
       }
     },
     "recommendation": {
@@ -346,5 +754,109 @@
         "manual_review_required"
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "aegis_lite_eod_report_manual_acknowledgment_v1"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "schema_id",
+          "schema_version",
+          "artifact_id",
+          "day_utc",
+          "generated_at_utc",
+          "report_status",
+          "manual_acknowledgment_status",
+          "operator_id",
+          "operator_intent",
+          "operator_intent_event_id",
+          "operator_intent_hash",
+          "runtime_evaluation_hash",
+          "reason_hash",
+          "acknowledged_report_path",
+          "acknowledged_report_hash",
+          "broker_submit_required",
+          "trade_advice_allowed",
+          "autonomous_execution_allowed",
+          "canonical_json_hash"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "aegis_lite_eod_report_manual_acknowledgment_v1"
+          },
+          "report_status": {
+            "const": "MANUAL_ACKNOWLEDGED"
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "schema_id",
+          "schema_version",
+          "artifact_id",
+          "day_utc",
+          "run_id",
+          "generated_at_utc",
+          "truth_root",
+          "artifact_path",
+          "operating_model",
+          "market_session",
+          "market_regime_state",
+          "data_freshness_status",
+          "governance_status",
+          "gates",
+          "sleeve_outputs",
+          "sleeve_performance_summary",
+          "sandbox_research_notes",
+          "selected_trade_candidates",
+          "edge_overlap_review",
+          "edge_overlap_summary",
+          "open_manual_positions",
+          "missing_stop_warnings",
+          "prior_day_manual_decisions",
+          "manual_execution_events",
+          "current_exposure_by_edge_cluster",
+          "current_exposure_by_sleeve",
+          "manual_execution_queue",
+          "eod_input_contract",
+          "eod_outcome_status",
+          "empty_section_reasons",
+          "blocked_advisory_candidates",
+          "candidate_lineage_artifact_path",
+          "candidate_consumption_audit_artifact_path",
+          "eod_run_manifest_path",
+          "market_snapshot_authority_path",
+          "promoted_sleeve_manifest_path",
+          "skipped_candidate_tracking",
+          "unsupported_manual_execution_warnings",
+          "performance_summary",
+          "edge_clusters",
+          "manual_execution_checklist",
+          "do_not_trade_blockers",
+          "warnings",
+          "operator_notes",
+          "source_artifact_lineage",
+          "run_receipt",
+          "report_status",
+          "manual_execution_status",
+          "readiness_classification",
+          "canonical_json_hash"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "aegis_lite_eod_report_v1"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "candidate_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "symbols": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_batch_id",
+    "hypothesis_id",
+    "source_evidence_package_id",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "candidate_generator_name",
+    "candidate_generator_version",
+    "ranking_policy_version",
+    "symbols",
+    "as_of_date",
+    "created_at",
+    "created_by",
+    "content_hash",
+    "schema_version"
+  ],
+  "title": "CandidateBatch",
+  "type": "object"
+}

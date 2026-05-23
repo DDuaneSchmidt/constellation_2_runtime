@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "candidate_direction": {
+      "enum": [
+        "long"
+      ]
+    },
+    "candidate_status": {
+      "enum": [
+        "approved",
+        "deferred",
+        "expired",
+        "generated",
+        "ignored",
+        "rejected"
+      ]
+    },
+    "ranking_bucket": {
+      "enum": [
+        "top",
+        "middle",
+        "low"
+      ]
+    }
+  },
+  "required": [
+    "candidate_id",
+    "candidate_batch_id",
+    "symbol",
+    "sleeve_id",
+    "hypothesis_id",
+    "source_evidence_package_id",
+    "signal_date",
+    "as_of_date",
+    "signal_type",
+    "signal_value",
+    "candidate_direction",
+    "candidate_status",
+    "ranking_score",
+    "ranking_bucket",
+    "why_now",
+    "risk_regime",
+    "trend_regime",
+    "vol_regime",
+    "drawdown_regime",
+    "expected_holding_period",
+    "evidence_quality",
+    "post_cost_expectancy_reference",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "created_at",
+    "schema_version"
+  ],
+  "title": "Candidate",
+  "type": "object"
+}

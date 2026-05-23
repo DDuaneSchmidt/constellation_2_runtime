@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "breadth_regimes_present": {
+      "items": {
+        "enum": [
+          "strong_breadth",
+          "normal_breadth",
+          "weak_breadth",
+          "breadth_collapse",
+          "breadth_recovery",
+          "unknown"
+        ]
+      },
+      "type": "array"
+    },
+    "breadth_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "dataset_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "metric_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "universe_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "breadth_snapshot_id",
+    "dataset_snapshot_id",
+    "universe_snapshot_id",
+    "metric_count",
+    "start_date",
+    "end_date",
+    "breadth_regimes_present",
+    "storage_uri",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "BreadthSnapshot",
+  "type": "object"
+}

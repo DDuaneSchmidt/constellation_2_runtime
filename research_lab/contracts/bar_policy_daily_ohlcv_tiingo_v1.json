@@ -1,0 +1,14 @@
+{
+  "bar_policy_version": "bp_daily_ohlcv_tiingo_v1",
+  "timezone": "America/New_York",
+  "interval": "1d",
+  "provider": "tiingo",
+  "price_adjustment": {
+    "open_high_low_close": "raw provider OHLC",
+    "adj_close": "provider adjClose"
+  },
+  "volume": "provider raw volume",
+  "split_dividend_policy": "provider divCash and splitFactor retained in raw data when available",
+  "missing_data_policy": "warn, not fill",
+  "calendar": "inferred from available bars"
+}

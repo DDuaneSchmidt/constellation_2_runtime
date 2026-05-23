@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "actionability_status": {
+      "const": "non_actionable_research_only"
+    },
+    "anomaly_score": {
+      "type": "number"
+    },
+    "baseline_values": {
+      "type": "object"
+    },
+    "blockers": {
+      "type": "array"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "event_date": {
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "measured_values": {
+      "type": "object"
+    },
+    "non_actionable_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "novelty_score": {
+      "type": "number"
+    },
+    "observation_candidate_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observation_family": {
+      "enum": [
+        "price_volume",
+        "cross_sectional",
+        "earnings_or_event",
+        "volatility",
+        "regime",
+        "research_quality"
+      ]
+    },
+    "observation_summary": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observation_type": {
+      "enum": [
+        "abnormal_price_move",
+        "abnormal_volume",
+        "abnormal_gap",
+        "relative_strength_divergence",
+        "relative_weakness_divergence",
+        "volatility_compression",
+        "post_event_reversal_candidate",
+        "repeated_pattern_candidate",
+        "regime_shift_candidate",
+        "evidence_quality_anomaly",
+        "research_store_anomaly"
+      ]
+    },
+    "repeat_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "research_status": {
+      "enum": [
+        "new",
+        "previously_seen",
+        "clustered",
+        "ignored_legacy"
+      ]
+    },
+    "scanner_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "scanner_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    },
+    "source_data_refs": {
+      "type": "array"
+    },
+    "symbol_or_asset_id": {
+      "type": "string"
+    },
+    "trigger_conditions": {
+      "type": "array"
+    },
+    "universe_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "observation_candidate_id",
+    "generated_at",
+    "scanner_id",
+    "scanner_version",
+    "observation_type",
+    "observation_family",
+    "symbol_or_asset_id",
+    "universe_id",
+    "event_date",
+    "observation_summary",
+    "trigger_conditions",
+    "measured_values",
+    "baseline_values",
+    "anomaly_score",
+    "novelty_score",
+    "repeat_count",
+    "severity",
+    "research_status",
+    "actionability_status",
+    "non_actionable_reason",
+    "source_artifact_ids",
+    "source_data_refs",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "blockers",
+    "immutable_hash"
+  ],
+  "title": "ObservationCandidate",
+  "type": "object"
+}

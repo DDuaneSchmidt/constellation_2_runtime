@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ranking_quality_report_id",
+    "longitudinal_run_id",
+    "candidate_count",
+    "measured_count",
+    "metrics_by_window",
+    "ranking_quality_status_by_window",
+    "overall_ranking_quality_status",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "RankingQualityReport",
+  "type": "object"
+}

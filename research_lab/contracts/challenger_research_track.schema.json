@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "audit_refs": {
+      "type": "object"
+    },
+    "challenger_hypothesis_set": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "challenger_hypothesis_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "deterministic_rule_delta": {
+            "type": "object"
+          },
+          "expected_failure_mode": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_sleeve_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "required_evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "const": "proposed"
+          },
+          "variant_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenger_hypothesis_id",
+          "parent_sleeve_id",
+          "variant_name",
+          "deterministic_rule_delta",
+          "rationale",
+          "expected_failure_mode",
+          "required_evidence",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "comparison_requirements": {
+      "type": "object"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "evidence_requirements": {
+      "type": "object"
+    },
+    "exclusion_rules": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "governance_constraints": {
+      "type": "object"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_sleeve_version_id": {
+      "type": "string"
+    },
+    "recommended_next_action": {
+      "enum": [
+        "generate_challenger_evidence",
+        "collect_more_observations",
+        "investigate_blocker",
+        "maintain_watch",
+        "archive_track"
+      ]
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "evidence_pending",
+        "comparison_ready",
+        "blocked",
+        "archived"
+      ]
+    },
+    "trigger_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "trigger_report_ids": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "challenger_track_id",
+    "incumbent_sleeve_id",
+    "incumbent_sleeve_version_id",
+    "trigger_report_ids",
+    "trigger_reason",
+    "generated_at",
+    "schema_version",
+    "research_label",
+    "challenger_hypothesis_set",
+    "comparison_requirements",
+    "evidence_requirements",
+    "exclusion_rules",
+    "governance_constraints",
+    "status",
+    "recommended_next_action",
+    "audit_refs"
+  ],
+  "title": "ChallengerResearchTrack",
+  "type": "object"
+}

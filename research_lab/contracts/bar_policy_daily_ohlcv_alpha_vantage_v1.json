@@ -1,0 +1,14 @@
+{
+  "bar_policy_version": "bp_daily_ohlcv_alpha_vantage_v1",
+  "calendar": "inferred from available bars",
+  "interval": "1d",
+  "missing_data_policy": "warn_not_fill",
+  "price_adjustment": {
+    "adj_close": "provider adjusted_close",
+    "open_high_low_close": "raw provider OHLC"
+  },
+  "provider": "alpha_vantage",
+  "split_dividend_policy": "provider dividend_amount and split_coefficient retained in raw data when available",
+  "timezone": "America/New_York",
+  "volume": "provider volume"
+}

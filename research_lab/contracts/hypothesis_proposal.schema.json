@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "actionability_status": {
+          "const": "non_actionable_research_only"
+        },
+        "blockers": {
+          "type": "array"
+        },
+        "cluster_family": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "cluster_status": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "content_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "eligibility_checks": {
+          "type": "object"
+        },
+        "eligibility_status": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "generated_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "hypothesis_proposal_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "immutable_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "latest_integrity_report_id": {
+          "type": "string"
+        },
+        "latest_research_os_status_report_id": {
+          "type": "string"
+        },
+        "non_actionable_research_only_assertion": {
+          "type": "object"
+        },
+        "proposal_family": {
+          "enum": [
+            "market_behavior",
+            "regime_behavior",
+            "evidence_quality",
+            "research_store_integrity",
+            "governance_blocker"
+          ]
+        },
+        "proposal_label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proposal_status": {
+          "enum": [
+            "proposed_for_review",
+            "blocked",
+            "needs_more_observation",
+            "system_research_only"
+          ]
+        },
+        "proposal_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proposed_benchmark": {
+          "type": "string"
+        },
+        "proposed_event_window": {
+          "type": "string"
+        },
+        "proposed_hypothesis_statement": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proposed_research_question": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proposed_test_design": {
+          "additionalProperties": true,
+          "properties": {
+            "benchmark": {
+              "type": "string"
+            },
+            "event_window": {
+              "type": "string"
+            },
+            "expected_artifacts_if_approved": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "minimum_observation_count": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "required_data": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "test_type": {
+              "enum": [
+                "event_study",
+                "longitudinal_backtest",
+                "regime_fragility_review",
+                "integrity_resolution_review",
+                "evidence_quality_review"
+              ]
+            }
+          },
+          "required": [
+            "test_type",
+            "required_data",
+            "minimum_observation_count",
+            "event_window",
+            "benchmark",
+            "expected_artifacts_if_approved"
+          ],
+          "type": "object"
+        },
+        "proposed_universe": {
+          "type": "string"
+        },
+        "required_next_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "research_label": {
+          "const": "RESEARCH_ONLY"
+        },
+        "research_priority_score": {
+          "type": "number"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_artifact_hashes": {
+          "type": "object"
+        },
+        "source_artifact_ids": {
+          "type": "object"
+        },
+        "source_observation_candidate_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_observation_cluster_batch_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_observation_cluster_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_proposal_id",
+        "generated_at",
+        "proposal_version",
+        "proposal_status",
+        "proposal_family",
+        "proposal_label",
+        "proposed_hypothesis_statement",
+        "proposed_research_question",
+        "source_observation_cluster_id",
+        "source_observation_cluster_batch_id",
+        "source_observation_candidate_ids",
+        "cluster_family",
+        "cluster_status",
+        "research_priority_score",
+        "eligibility_status",
+        "eligibility_checks",
+        "blockers",
+        "required_next_evidence",
+        "proposed_test_design",
+        "proposed_event_window",
+        "proposed_universe",
+        "proposed_benchmark",
+        "non_actionable_research_only_assertion",
+        "actionability_status",
+        "latest_integrity_report_id",
+        "latest_research_os_status_report_id",
+        "source_artifact_ids",
+        "source_artifact_hashes",
+        "immutable_hash"
+      ],
+      "title": "HypothesisProposal",
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "content_hash": {
+          "minLength": 12,
+          "type": "string"
+        },
+        "data_requirement_status": {
+          "enum": [
+            "available",
+            "partially_available",
+            "missing_or_future",
+            "unknown"
+          ]
+        },
+        "evidence_requirements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "governance_classification": {
+          "enum": [
+            "core_research",
+            "experimental",
+            "lottery",
+            "regime_filter",
+            "data_required"
+          ]
+        },
+        "proposal_status": {
+          "enum": [
+            "proposed",
+            "accepted_for_research",
+            "rejected",
+            "archived",
+            "watchlist"
+          ]
+        },
+        "proposed_forward_windows": {
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "required_data": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "research_label": {
+          "const": "RESEARCH_ONLY"
+        }
+      },
+      "required": [
+        "hypothesis_proposal_id",
+        "intent_candidate_id",
+        "event_family_id",
+        "title",
+        "hypothesis",
+        "proposed_event_definition",
+        "proposed_universe",
+        "proposed_forward_windows",
+        "proposed_regime_dimensions",
+        "required_data",
+        "data_requirement_status",
+        "evidence_requirements",
+        "governance_classification",
+        "proposal_status",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash"
+      ],
+      "title": "EventIntakeHypothesisProposal",
+      "type": "object"
+    }
+  ],
+  "title": "HypothesisProposal"
+}

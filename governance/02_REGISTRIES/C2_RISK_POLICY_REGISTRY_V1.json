@@ -1,12 +1,297 @@
 {
-  "schema_id": "C2_RISK_POLICY_REGISTRY_V1",
-  "schema_version": "v1",
   "policies": {
-    "C2_TREND_EQ_PRIMARY_V1": {
-      "target_notional_pct_default": "0.01",
-      "per_trade_notional_pct_max": "0.01",
+    "C2_CROSS_ASSET_TREND_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/cross_asset_trend_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 60,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "CROSS_ASSET_TREND_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the source trend signal reverses against the exposure.",
+            "rule_id": "trend_signal_reversal"
+          },
+          {
+            "description": "Invalidate or review when the governed moving-average regime no longer supports the exposure.",
+            "rule_id": "moving_average_regime_failure"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed trend confirmation.",
+            "expected_holding_days": 60,
+            "rule_id": "time_based_invalidation"
+          },
+          {
+            "description": "Review or invalidate when volatility regime evidence invalidates original trend assumptions.",
+            "rule_id": "volatility_regime_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.10",
+      "policy_id": "CROSS_ASSET_TREND_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
       "stop_loss_bps_default": 1000,
-      "allow_entry_only_paper_test": false
+      "target_notional_pct_default": "0.10"
+    },
+    "C2_DEFENSIVE_TAIL_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 45,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_DEFENSIVE_TAIL_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the defensive-tail thesis is no longer supported.",
+            "rule_id": "tail_hedge_thesis_invalidated"
+          },
+          {
+            "description": "Manual capture requires defined-risk max-loss evidence or a governed hard stop proxy.",
+            "rule_id": "defined_risk_structure_required"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 45,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.02",
+      "policy_id": "DEFENSIVE_TAIL_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 1000,
+      "target_notional_pct_default": "0.02"
+    },
+    "C2_EVENT_DISLOCATION_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 10,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_EVENT_DISLOCATION_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the event thesis is no longer supported by governed evidence.",
+            "rule_id": "event_thesis_invalidated"
+          },
+          {
+            "description": "Invalidate or review when the event window expires without confirming follow-through.",
+            "rule_id": "event_window_expired"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 10,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.10",
+      "policy_id": "EVENT_DISLOCATION_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 800,
+      "target_notional_pct_default": "0.10"
+    },
+    "C2_MARKET_NEUTRAL_SPREAD_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 20,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_MARKET_NEUTRAL_SPREAD_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the governed spread relationship breaks down.",
+            "rule_id": "spread_relationship_break"
+          },
+          {
+            "description": "Invalidate or review when hedge integrity no longer supports the exposure.",
+            "rule_id": "hedge_integrity_failure"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 20,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.05",
+      "policy_id": "MARKET_NEUTRAL_SPREAD_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 700,
+      "target_notional_pct_default": "0.05"
+    },
+    "C2_MEAN_REVERSION_EQ_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 3,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_MEAN_REVERSION_EQ_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the mean-reversion score decays below governed entry quality.",
+            "rule_id": "mean_reversion_signal_decay"
+          },
+          {
+            "description": "Invalidate or review when the expected recovery does not begin within the sleeve holding window.",
+            "rule_id": "oversold_recovery_failure"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 3,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.20",
+      "policy_id": "MEAN_REVERSION_EQ_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 500,
+      "target_notional_pct_default": "0.20"
+    },
+    "C2_TREND_EQ_PRIMARY_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 20,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_TREND_EQ_PRIMARY_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the source trend signal reverses against the exposure.",
+            "rule_id": "trend_signal_reversal"
+          },
+          {
+            "description": "Invalidate or review when the governed moving-average regime no longer supports the exposure.",
+            "rule_id": "moving_average_regime_failure"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 20,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.01",
+      "policy_id": "TREND_EQ_PRIMARY_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 1000,
+      "target_notional_pct_default": "0.01"
+    },
+    "C2_VOL_INCOME_DEFINED_RISK_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days_default": 30,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_VOL_INCOME_DEFINED_RISK_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Manual capture requires defined-risk max-loss evidence or a governed hard stop proxy.",
+            "rule_id": "defined_risk_structure_required"
+          },
+          {
+            "description": "Invalidate or review when the volatility-income thesis is no longer supported.",
+            "rule_id": "volatility_income_thesis_invalidated"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 30,
+            "rule_id": "time_based_invalidation"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.05",
+      "policy_id": "VOL_INCOME_DEFINED_RISK_STOP_POLICY_V1",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 1000,
+      "target_notional_pct_default": "0.05"
     }
-  }
+  },
+  "schema_id": "C2_RISK_POLICY_REGISTRY_V1",
+  "schema_version": "v1"
 }

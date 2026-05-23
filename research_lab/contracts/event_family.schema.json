@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "asset_focus": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "default_event_definitions": {
+      "items": {
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "default_forward_windows": {
+      "items": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "default_regime_dimensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "default_research_intents": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "default_symbols": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "description": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_family_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "risk_notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_family_id",
+    "name",
+    "description",
+    "asset_focus",
+    "default_symbols",
+    "default_event_definitions",
+    "default_forward_windows",
+    "default_regime_dimensions",
+    "default_research_intents",
+    "risk_notes",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "EventFamily",
+  "type": "object"
+}

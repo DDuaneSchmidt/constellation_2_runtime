@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "actionability_status": {
+      "const": "non_actionable_research_only"
+    },
+    "blockers": {
+      "type": "array"
+    },
+    "cluster_family": {
+      "enum": [
+        "research_store_integrity",
+        "evidence_quality",
+        "regime_behavior",
+        "market_price_volume",
+        "cross_sectional_behavior",
+        "governance_blocker",
+        "unknown"
+      ]
+    },
+    "cluster_label": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "cluster_score": {
+      "type": "number"
+    },
+    "cluster_status": {
+      "enum": [
+        "active",
+        "recurring",
+        "stale",
+        "legacy",
+        "blocked"
+      ]
+    },
+    "cluster_summary": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "cluster_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "first_seen_at": {
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "last_seen_at": {
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "non_actionable_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "novelty_score": {
+      "type": "number"
+    },
+    "observation_candidate_batch_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "observation_candidate_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "observation_cluster_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observation_type_counts": {
+      "type": "object"
+    },
+    "persistence_score": {
+      "type": "number"
+    },
+    "recurrence_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "research_priority_score": {
+      "type": "number"
+    },
+    "research_status": {
+      "enum": [
+        "observe",
+        "monitor",
+        "candidate_for_later_hypothesis_review",
+        "ignored_legacy"
+      ]
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "severity_counts": {
+      "type": "object"
+    },
+    "severity_score": {
+      "type": "number"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    },
+    "source_scanner_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "unique_symbol_or_asset_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "universe_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "observation_cluster_id",
+    "generated_at",
+    "cluster_version",
+    "cluster_status",
+    "cluster_family",
+    "cluster_label",
+    "cluster_summary",
+    "observation_candidate_ids",
+    "observation_candidate_batch_ids",
+    "observation_type_counts",
+    "severity_counts",
+    "first_seen_at",
+    "last_seen_at",
+    "recurrence_count",
+    "unique_symbol_or_asset_count",
+    "universe_ids",
+    "source_scanner_ids",
+    "source_artifact_ids",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "cluster_score",
+    "novelty_score",
+    "persistence_score",
+    "severity_score",
+    "research_priority_score",
+    "research_status",
+    "actionability_status",
+    "non_actionable_reason",
+    "blockers",
+    "immutable_hash"
+  ],
+  "title": "ObservationCluster",
+  "type": "object"
+}

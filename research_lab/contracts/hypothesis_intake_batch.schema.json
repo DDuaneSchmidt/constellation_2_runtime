@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "accepted_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "blocked_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "created_research_hypothesis_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "deferred_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_intake_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_intake_decision_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "intake_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "intake_run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "intake_status_counts": {
+      "type": "object"
+    },
+    "intake_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "no_lifecycle_mutation_assertion": {
+      "type": "object"
+    },
+    "non_actionable_research_only_assertion": {
+      "type": "object"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_hypothesis_proposal_review_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "hypothesis_intake_batch_id",
+    "generated_at",
+    "intake_run_id",
+    "intake_version",
+    "source_hypothesis_proposal_review_batch_id",
+    "hypothesis_intake_decision_ids",
+    "created_research_hypothesis_ids",
+    "intake_count",
+    "accepted_count",
+    "blocked_count",
+    "deferred_count",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "non_actionable_research_only_assertion",
+    "no_lifecycle_mutation_assertion",
+    "immutable_hash"
+  ],
+  "title": "HypothesisIntakeBatch",
+  "type": "object"
+}

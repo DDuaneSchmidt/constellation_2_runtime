@@ -1,0 +1,212 @@
+{
+  "$defs": {
+    "event": {
+      "additionalProperties": true,
+      "properties": {
+        "actual_completed_at": {
+          "type": "string"
+        },
+        "actual_started_at": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "event_key": {
+          "type": "string"
+        },
+        "event_name": {
+          "type": "string"
+        },
+        "event_type": {
+          "type": "string"
+        },
+        "expected_artifact_id_pattern": {
+          "type": "string"
+        },
+        "expected_artifact_path": {
+          "type": "string"
+        },
+        "expected_artifact_type": {
+          "type": "string"
+        },
+        "grace_window_minutes": {
+          "type": "integer"
+        },
+        "lineage_metadata": {
+          "type": "object"
+        },
+        "observed_artifact_ids": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "operational_day": {
+          "type": "string"
+        },
+        "operator_status": {
+          "enum": [
+            "Scheduled",
+            "Running",
+            "Completed",
+            "Waiting on data",
+            "Missed",
+            "Failed",
+            "Superseded",
+            "Not scheduled today",
+            "Historical status unavailable"
+          ]
+        },
+        "owning_job": {
+          "type": "string"
+        },
+        "planned_order": {
+          "type": "integer"
+        },
+        "retry_count": {
+          "type": "integer"
+        },
+        "run_status": {
+          "enum": [
+            "PLANNED",
+            "QUEUED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "SKIPPED",
+            "SUPERSEDED",
+            "MISSED",
+            "UNKNOWN"
+          ]
+        },
+        "scheduled_at": {
+          "type": "string"
+        },
+        "scheduled_at_utc": {
+          "type": "string"
+        },
+        "status_reason": {
+          "type": "string"
+        },
+        "superseded_by_event_id": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "trigger_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_name",
+        "event_type",
+        "operational_day",
+        "scheduled_at_utc",
+        "trigger_type",
+        "owning_job",
+        "expected_artifact_type",
+        "grace_window_minutes",
+        "run_status",
+        "operator_status",
+        "status_reason",
+        "content_hash"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://constellation.local/schemas/c2/reports/schedule_event_ledger.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "active_dependencies": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "artifact_id": {
+      "type": "string"
+    },
+    "completed_past_events": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "type": "array"
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "type": "array"
+    },
+    "generated_at_utc": {
+      "type": "string"
+    },
+    "missed_events": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "type": "array"
+    },
+    "next_event": {
+      "type": "object"
+    },
+    "operational_day": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "type": "string"
+    },
+    "output_hash": {
+      "type": "string"
+    },
+    "replay_mode": {
+      "type": "boolean"
+    },
+    "schema_id": {
+      "const": "aegis_schedule_event_ledger"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "status_rules": {
+      "type": "object"
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "today_events": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "type": "array"
+    },
+    "tomorrow_events": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "operational_day",
+    "generated_at_utc",
+    "events",
+    "content_hash"
+  ],
+  "title": "Aegis Schedule Event Ledger v1",
+  "type": "object"
+}

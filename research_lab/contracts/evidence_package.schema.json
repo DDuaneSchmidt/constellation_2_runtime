@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "required": [
+    "evidence_package_id",
+    "hypothesis_id",
+    "research_plan_id",
+    "dataset_snapshot_id",
+    "universe_snapshot_id",
+    "runner_name",
+    "runner_version",
+    "runner_input_hash",
+    "runner_output_hash",
+    "artifact_uris",
+    "summary_uri",
+    "manifest_hash",
+    "created_at",
+    "created_by",
+    "schema_version"
+  ],
+  "title": "EvidencePackage",
+  "type": "object"
+}

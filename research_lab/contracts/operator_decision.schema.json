@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "approve",
+        "defer",
+        "ignore",
+        "reject"
+      ]
+    }
+  },
+  "required": [
+    "operator_decision_id",
+    "candidate_id",
+    "candidate_batch_id",
+    "decision",
+    "decision_reason",
+    "decided_by",
+    "decided_at",
+    "portfolio_context_snapshot_id",
+    "notes",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "OperatorDecision",
+  "type": "object"
+}

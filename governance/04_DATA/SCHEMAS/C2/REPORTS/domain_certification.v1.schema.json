@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/domain_certification.v1.schema.json",
+  "title": "domain_certification.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "domains",
+    "domain_dependency_registry",
+    "sleeve_domain_statuses",
+    "summary",
+    "recovery_ladder",
+    "safety",
+    "content_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_domain_certification" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "content_hash": { "type": "string" },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "domain_id",
+          "certification_status",
+          "completeness_score",
+          "freshness_state",
+          "provider_results",
+          "content_hash",
+          "lineage"
+        ],
+        "properties": {
+          "domain_id": {
+            "enum": [
+              "US_EQUITIES_EOD",
+              "US_EQUITIES_INTRADAY",
+              "VOLATILITY",
+              "RATES_BONDS",
+              "MACRO_CALENDAR",
+              "EARNINGS_EVENTS",
+              "CORPORATE_ACTIONS"
+            ]
+          },
+          "certification_status": {
+            "enum": ["CERTIFIED", "PARTIAL", "DEGRADED", "DELAYED", "CONFLICTED", "FAILED"]
+          },
+          "completeness_score": { "type": "string", "pattern": "^[0-1]\\.[0-9]{6}$|^1\\.000000$|^0\\.000000$" },
+          "freshness_state": { "type": "string" },
+          "single_provider_risk": { "type": "boolean" },
+          "quorum_state": { "type": "string" },
+          "provider_results": { "type": "array" },
+          "reason_codes": { "type": "array", "items": { "type": "string" } },
+          "source_refs": { "type": "array" },
+          "lineage": { "type": "object" },
+          "blocking_sleeves": { "type": "array", "items": { "type": "string" } },
+          "content_hash": { "type": "string" },
+          "artifact_path": { "type": "string" }
+        }
+      }
+    },
+    "domain_dependency_registry": { "type": "array" },
+    "sleeve_domain_statuses": { "type": "array" },
+    "summary": { "type": "object" },
+    "recovery_ladder": { "type": "array", "items": { "type": "string" } },
+    "safety": {
+      "type": "object",
+      "required": ["broker_submit_transmit_allowed", "broker_execution_allowed", "autonomous_execution_allowed", "trade_advice_allowed"],
+      "properties": {
+        "broker_submit_transmit_allowed": { "const": false },
+        "broker_execution_allowed": { "const": false },
+        "autonomous_execution_allowed": { "const": false },
+        "trade_advice_allowed": { "const": false }
+      }
+    }
+  }
+}

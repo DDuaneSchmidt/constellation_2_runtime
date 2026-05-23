@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "candidate_batch_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "dataset_snapshot_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "evidence_package_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "paper_trial_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sleeve_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sleeves": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "evidence_inventory_id",
+    "created_at",
+    "created_by",
+    "sleeve_count",
+    "evidence_package_count",
+    "dataset_snapshot_count",
+    "candidate_batch_count",
+    "paper_trial_count",
+    "sleeves",
+    "research_label",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "EvidenceInventory",
+  "type": "object"
+}

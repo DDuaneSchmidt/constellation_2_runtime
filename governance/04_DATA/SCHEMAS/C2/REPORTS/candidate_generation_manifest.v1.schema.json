@@ -22,35 +22,125 @@
     "canonical_json_hash"
   ],
   "properties": {
-    "schema_id": { "const": "candidate_generation_manifest" },
-    "schema_version": { "const": "v1" },
-    "run_id": { "type": "string", "minLength": 1 },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "environment": { "type": "string", "minLength": 1 },
-    "produced_at_utc": { "type": "string", "minLength": 20 },
-    "source_rollup_path": { "type": "string" },
-    "portfolio_activation_gate_path": { "type": "string" },
+    "schema_id": {
+      "const": "candidate_generation_manifest"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "produced_at_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "run_mode": {
+      "type": "string"
+    },
+    "market_data_mode": {
+      "type": "string"
+    },
+    "candidate_generation_label": {
+      "type": "string"
+    },
+    "final_eod_certification_status": {
+      "type": "string"
+    },
+    "source_rollup_path": {
+      "type": "string"
+    },
+    "portfolio_activation_gate_path": {
+      "type": "string"
+    },
     "candidate_rows": {
       "type": "array",
-      "items": { "$ref": "#/$defs/candidate" }
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
     },
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["candidate_count", "status_counts"],
+      "required": [
+        "candidate_count",
+        "status_counts"
+      ],
       "properties": {
-        "candidate_count": { "type": "integer", "minimum": 0 },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
         "status_counts": {
           "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 0 }
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     },
-    "selected_intent_pointer_authoritative": { "const": true },
-    "execution_authority_granted": { "const": false },
-    "order_submission_attempted": { "const": false },
-    "trading_behavior_changed": { "const": false },
-    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "selected_intent_pointer_authoritative": {
+      "const": true
+    },
+    "execution_authority_granted": {
+      "const": false
+    },
+    "order_submission_attempted": {
+      "const": false
+    },
+    "trading_behavior_changed": {
+      "const": false
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "candidate_lane": {
+      "type": "string"
+    },
+    "candidate_visibility_lane": {
+      "type": "string"
+    },
+    "certification_state": {
+      "type": "string"
+    },
+    "certification_label": {
+      "type": "string"
+    },
+    "input_market_data_snapshot_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "market_data_snapshot_path": {
+      "type": "string"
+    },
+    "market_data_snapshot_hash": {
+      "type": "string"
+    },
+    "execution_eligible": {
+      "type": "boolean"
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "certified_candidate_promotion_required": {
+      "type": "boolean"
+    },
+    "execution_firewall_required": {
+      "type": "boolean"
+    }
   },
   "$defs": {
     "candidate": {
@@ -75,37 +165,112 @@
         "lineage_hash"
       ],
       "properties": {
-        "candidate_id": { "type": "string", "minLength": 1 },
-        "engine_id": { "type": "string" },
-        "symbol_or_pair": { "type": "string" },
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engine_id": {
+          "type": "string"
+        },
+        "symbol_or_pair": {
+          "type": "string"
+        },
         "status": {
           "type": "string",
-          "enum": ["CANDIDATE_CREATED", "NO_SIGNAL", "BLOCKED", "SUPPRESSED", "SIGNAL_ONLY", "UNKNOWN"]
+          "enum": [
+            "CANDIDATE_CREATED",
+            "NO_SIGNAL",
+            "BLOCKED",
+            "SUPPRESSED",
+            "SIGNAL_ONLY",
+            "UNKNOWN"
+          ]
         },
         "reason_codes": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "rejection_reason": { "type": "string" },
-        "raw_intent_id": { "type": "string" },
-        "raw_intent_path": { "type": "string" },
-        "raw_intent_hash": { "type": "string" },
-        "lifecycle_decision": { "type": "string" },
+        "rejection_reason": {
+          "type": "string"
+        },
+        "raw_intent_id": {
+          "type": "string"
+        },
+        "raw_intent_path": {
+          "type": "string"
+        },
+        "raw_intent_hash": {
+          "type": "string"
+        },
+        "lifecycle_decision": {
+          "type": "string"
+        },
         "lifecycle_reason_codes": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "portfolio_gate_decision": { "type": "string" },
-        "allowed_by_portfolio_gate": { "type": "boolean" },
+        "portfolio_gate_decision": {
+          "type": "string"
+        },
+        "allowed_by_portfolio_gate": {
+          "type": "boolean"
+        },
         "input_artifact_paths": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "output_artifact_paths": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "lineage_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "lineage_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_data_status": {
+          "type": "string"
+        },
+        "source_data_mode": {
+          "type": "string"
+        },
+        "final_eod_certification_status": {
+          "type": "string"
+        },
+        "final_eod_certification_pending": {
+          "type": "boolean"
+        },
+        "manual_capture_eligible": {
+          "type": "boolean"
+        },
+        "candidate_lane": {
+          "type": "string"
+        },
+        "certification_state": {
+          "type": "string"
+        },
+        "certification_label": {
+          "type": "string"
+        },
+        "execution_eligible": {
+          "type": "boolean"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "input_market_data_snapshot_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     }
   }

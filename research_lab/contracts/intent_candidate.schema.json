@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "candidate_edge_type": {
+      "enum": [
+        "mean_reversion",
+        "momentum_continuation",
+        "volatility_expansion",
+        "volatility_normalization",
+        "regime_filter",
+        "risk_off_exhaustion",
+        "gap_fill",
+        "gap_continuation",
+        "lottery_dislocation"
+      ]
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "expected_fragility": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "extreme"
+      ]
+    },
+    "governance_notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_data": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "intent_candidate_id",
+    "event_cluster_id",
+    "event_family_id",
+    "intent_name",
+    "intent_description",
+    "candidate_edge_type",
+    "expected_holding_period",
+    "expected_frequency",
+    "expected_fragility",
+    "default_test_type",
+    "required_data",
+    "governance_notes",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "IntentCandidate",
+  "type": "object"
+}

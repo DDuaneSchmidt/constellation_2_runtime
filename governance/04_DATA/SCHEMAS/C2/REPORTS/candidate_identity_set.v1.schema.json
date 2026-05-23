@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "candidate_identity_set_v1",
+  "title": "Candidate Identity Set v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "candidate_id",
+    "intent_hash",
+    "runtime_evaluation_hash",
+    "allocation_hash",
+    "risk_contract_hash",
+    "construction_contract_hash",
+    "validation_status",
+    "blocker_codes"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "candidate_identity_set"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "candidate_id": {
+      "type": "string"
+    },
+    "exposure_id": {
+      "type": "string"
+    },
+    "intent_hash": {
+      "type": "string"
+    },
+    "sleeve_id": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "side": {
+      "type": "string"
+    },
+    "source_candidate_artifact_hash": {
+      "type": "string"
+    },
+    "selected_intent_pointer_hash": {
+      "type": "string"
+    },
+    "runtime_evaluation_hash": {
+      "type": "string"
+    },
+    "allocation_hash": {
+      "type": "string"
+    },
+    "risk_contract_hash": {
+      "type": "string"
+    },
+    "construction_contract_hash": {
+      "type": "string"
+    },
+    "actual_phasec_order_plan": {
+      "type": "object"
+    },
+    "validation_status": {
+      "enum": [
+        "VALID",
+        "REJECTED"
+      ]
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "broker_execution_allowed": {
+      "type": "boolean"
+    },
+    "autonomous_execution_allowed": {
+      "type": "boolean"
+    },
+    "trade_advice_allowed": {
+      "type": "boolean"
+    }
+  }
+}

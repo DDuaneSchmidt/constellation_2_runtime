@@ -1,0 +1,271 @@
+{
+  "$id": "https://constellation.local/schemas/ranked_symbol_universe.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ranked Symbol Universe v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "status",
+    "universe_type",
+    "parent_canonical_universe_authority_id",
+    "parent_canonical_universe_authority_path",
+    "parent_universe_type",
+    "universe_scope",
+    "selection_policy",
+    "target_symbol_count",
+    "considered_symbol_count",
+    "eligible_symbol_count",
+    "selected_symbol_count",
+    "symbols",
+    "selection_metrics_by_symbol",
+    "source_evidence",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "ranked_symbol_universe"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "universe_scope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "selection_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_scope",
+        "min_price",
+        "min_median_daily_dollar_volume",
+        "min_bar_history_sessions",
+        "exclude_leveraged_inverse_etf",
+        "target_symbol_count",
+        "allowed_symbol_count_range",
+        "deterministic_sort"
+      ],
+      "properties": {
+        "asset_scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "min_price": {
+          "type": "string",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+        },
+        "min_median_daily_dollar_volume": {
+          "type": "string",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+        },
+        "min_bar_history_sessions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exclude_leveraged_inverse_etf": {
+          "type": "boolean"
+        },
+        "target_symbol_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allowed_symbol_count_range": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "min",
+            "max"
+          ],
+          "properties": {
+            "min": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "deterministic_sort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "target_symbol_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "considered_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "eligible_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "selected_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16
+      }
+    },
+    "selection_metrics_by_symbol": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "symbol",
+          "asset_type",
+          "eligible",
+          "latest_close",
+          "median_daily_dollar_volume",
+          "bar_history_sessions",
+          "has_same_day_bar",
+          "reason_codes"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "asset_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "latest_close": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          },
+          "median_daily_dollar_volume": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          },
+          "bar_history_sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_same_day_bar": {
+            "type": "boolean"
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      }
+    },
+    "source_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market_data_manifest_path",
+        "market_data_manifest_sha256",
+        "canonical_universe_symbol_count",
+        "canonical_universe_authority_path",
+        "canonical_universe_authority_id",
+        "dynamic_discovery_used",
+        "metadata_symbol_count"
+      ],
+      "properties": {
+        "market_data_manifest_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "market_data_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "dynamic_discovery_used": {
+          "type": "boolean"
+        },
+        "metadata_symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canonical_universe_authority_id": {
+          "type": "string"
+        },
+        "canonical_universe_authority_path": {
+          "type": "string"
+        },
+        "canonical_universe_symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "universe_type": {
+      "type": "string",
+      "enum": [
+        "RANKED_DYNAMIC"
+      ]
+    },
+    "parent_canonical_universe_authority_id": {
+      "type": "string"
+    },
+    "parent_canonical_universe_authority_path": {
+      "type": "string"
+    },
+    "parent_universe_type": {
+      "type": "string",
+      "enum": [
+        "CANONICAL_DYNAMIC",
+        ""
+      ]
+    }
+  }
+}

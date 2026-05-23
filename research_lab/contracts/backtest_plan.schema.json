@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "backtest_plan_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "runner_name": {
+      "enum": [
+        "holding_period_backtest_v1"
+      ]
+    }
+  },
+  "required": [
+    "backtest_plan_id",
+    "hypothesis_id",
+    "title",
+    "dataset_snapshot_id",
+    "universe_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "symbols",
+    "date_range",
+    "signal_rule",
+    "execution_model",
+    "portfolio_model",
+    "benchmark_symbol",
+    "success_criteria",
+    "runner_name",
+    "runner_version",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "BacktestPlan",
+  "type": "object"
+}

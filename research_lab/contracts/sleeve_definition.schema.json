@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "sleeve_type": {
+      "enum": [
+        "research_only",
+        "paper_trial_candidate",
+        "paper_trial",
+        "sleeve_review_candidate",
+        "retired"
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "active",
+        "challenged",
+        "under_review",
+        "retired",
+        "archived"
+      ]
+    }
+  },
+  "required": [
+    "sleeve_id",
+    "name",
+    "description",
+    "hypothesis_id",
+    "sleeve_type",
+    "status",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "SleeveDefinition",
+  "type": "object"
+}

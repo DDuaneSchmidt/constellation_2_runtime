@@ -1,0 +1,148 @@
+{
+  "$id": "https://constellation.local/schemas/engine_universe_candidate_basis.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Engine Universe Candidate Basis v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "basis_day_utc",
+    "produced_utc",
+    "engine_id",
+    "policy_id",
+    "status",
+    "universe_type",
+    "parent_canonical_universe_authority_id",
+    "parent_canonical_universe_authority_path",
+    "parent_universe_type",
+    "basis_mode",
+    "configured_rule",
+    "symbols_considered",
+    "candidate_symbols",
+    "exclusions_by_reason",
+    "notes"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "engine_universe_candidate_basis"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "basis_day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "engine_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "basis_mode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "configured_rule": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "symbols_considered": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16
+      }
+    },
+    "candidate_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16
+      }
+    },
+    "exclusions_by_reason": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason_code",
+          "count",
+          "examples"
+        ],
+        "properties": {
+          "reason_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "universe_type": {
+      "type": "string",
+      "enum": [
+        "ENGINE_FILTERED",
+        "TEMPORARY"
+      ]
+    },
+    "parent_canonical_universe_authority_id": {
+      "type": "string"
+    },
+    "parent_canonical_universe_authority_path": {
+      "type": "string"
+    },
+    "parent_universe_type": {
+      "type": "string",
+      "enum": [
+        "CANONICAL_DYNAMIC",
+        ""
+      ]
+    }
+  }
+}

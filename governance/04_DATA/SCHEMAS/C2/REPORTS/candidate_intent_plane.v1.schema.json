@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/candidate_intent_plane.v1.schema.json",
+  "title": "Aegis Candidate Intent Plane v1",
+  "type": "object",
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "generated_at_utc",
+    "policy",
+    "intent_snapshots",
+    "content_hash",
+    "safety"
+  ],
+  "properties": {
+    "schema_id": { "const": "candidate_intent_plane" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "trading_day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at_utc": { "type": "string" },
+    "policy": { "type": "object" },
+    "intent_count": { "type": "integer", "minimum": 0 },
+    "selected_intent_count": { "type": "integer", "minimum": 0 },
+    "manual_ib_capture_recommended_count": { "type": "integer", "minimum": 0 },
+    "intent_snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "intent_id",
+          "symbol",
+          "sleeve",
+          "trading_day",
+          "created_at",
+          "updated_at",
+          "source_candidate_snapshot_ids",
+          "input_market_data_snapshot_ids",
+          "intent_state",
+          "confidence_score",
+          "stability_score",
+          "certification_convergence_score",
+          "data_completeness_score",
+          "capture_guidance",
+          "capture_guidance_reason",
+          "certification_state",
+          "execution_eligibility_state",
+          "lineage_metadata",
+          "content_hash"
+        ],
+        "properties": {
+          "intent_id": { "type": "string", "minLength": 1 },
+          "symbol": { "type": "string" },
+          "sleeve": { "type": "string" },
+          "sleeve_id": { "type": "string" },
+          "trading_day": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "source_candidate_snapshot_ids": { "type": "array", "items": { "type": "string" } },
+          "input_market_data_snapshot_ids": { "type": "array", "items": { "type": "string" } },
+          "intent_state": {
+            "enum": [
+              "DISCOVERED",
+              "QUALIFIED",
+              "SCORED",
+              "SELECTED",
+              "CONFIDENCE_ACCUMULATING",
+              "CAPTURE_RECOMMENDED",
+              "CAPTURE_DEFERRED",
+              "CERTIFIED_CONFIRMED",
+              "CERTIFICATION_DIVERGED",
+              "SUPPRESSED",
+              "BLOCKED",
+              "EXPIRED"
+            ]
+          },
+          "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "stability_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "certification_convergence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "data_completeness_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "suppression_reason": { "type": "string" },
+          "blocker_reason": { "type": "string" },
+          "capture_guidance": {
+            "enum": [
+              "NO_USER_ACTION",
+              "OBSERVE",
+              "AWAIT_CERTIFICATION",
+              "MANUAL_IB_CAPTURE_RECOMMENDED",
+              "DO_NOT_CAPTURE",
+              "SYSTEM_REPAIR_REQUIRED"
+            ]
+          },
+          "capture_guidance_reason": { "type": "string" },
+          "certification_state": { "type": "string" },
+          "execution_eligibility_state": { "type": "string" },
+          "lineage_metadata": { "type": "object" },
+          "content_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "content_hash": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "broker_submit_transmit_allowed": { "const": false },
+        "broker_execution_allowed": { "const": false },
+        "autonomous_execution_allowed": { "const": false },
+        "trade_advice_allowed": { "const": false },
+        "order_routing_allowed": { "const": false }
+      }
+    }
+  },
+  "additionalProperties": true
+}

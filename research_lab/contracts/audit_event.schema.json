@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "required": [
+    "event_id",
+    "timestamp",
+    "actor",
+    "entity_type",
+    "entity_id",
+    "action",
+    "previous_state_hash",
+    "new_state_hash",
+    "reason",
+    "metadata",
+    "schema_version"
+  ],
+  "title": "AuditEvent",
+  "type": "object"
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_proposal_review_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hypothesis_proposal_review_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "no_lifecycle_mutation_assertion": {
+      "type": "object"
+    },
+    "non_actionable_research_only_assertion": {
+      "type": "object"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "review_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "review_decision_counts": {
+      "type": "object"
+    },
+    "review_run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "review_status_counts": {
+      "type": "object"
+    },
+    "review_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_hypothesis_proposal_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "hypothesis_proposal_review_batch_id",
+    "generated_at",
+    "review_run_id",
+    "review_version",
+    "source_hypothesis_proposal_batch_id",
+    "hypothesis_proposal_review_ids",
+    "review_count",
+    "review_decision_counts",
+    "review_status_counts",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "non_actionable_research_only_assertion",
+    "no_lifecycle_mutation_assertion",
+    "immutable_hash"
+  ],
+  "title": "HypothesisProposalReviewBatch",
+  "type": "object"
+}

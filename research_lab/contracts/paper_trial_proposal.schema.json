@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "blockers": {
+      "type": "array"
+    },
+    "challenger_id": {
+      "type": "string"
+    },
+    "challenger_track_id": {
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "eligibility_checks": {
+      "type": "object"
+    },
+    "eligibility_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "human_review_decision_id": {
+      "type": "string"
+    },
+    "human_review_dossier_id": {
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "incumbent_sleeve_id": {
+      "type": "string"
+    },
+    "latest_challenger_comparison_report_id": {
+      "type": "string"
+    },
+    "latest_challenger_evidence_batch_id": {
+      "type": "string"
+    },
+    "latest_human_review_decision_id": {
+      "type": "string"
+    },
+    "latest_human_review_dossier_id": {
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "no_lifecycle_mutation_assertion": {
+      "type": "object"
+    },
+    "paper_trial_proposal_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "proposal_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "proposal_status": {
+      "enum": [
+        "eligible",
+        "blocked",
+        "needs_review"
+      ]
+    },
+    "proposed_paper_trial_type": {
+      "enum": [
+        "challenger_paper_trial"
+      ]
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_artifact_hashes": {
+      "type": "object"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "paper_trial_proposal_id",
+    "generated_at",
+    "proposal_status",
+    "human_review_decision_id",
+    "human_review_dossier_id",
+    "challenger_track_id",
+    "challenger_id",
+    "incumbent_sleeve_id",
+    "proposed_paper_trial_type",
+    "proposal_reason",
+    "eligibility_status",
+    "eligibility_checks",
+    "blockers",
+    "source_artifact_ids",
+    "source_artifact_hashes",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "latest_challenger_evidence_batch_id",
+    "latest_challenger_comparison_report_id",
+    "latest_human_review_dossier_id",
+    "latest_human_review_decision_id",
+    "no_lifecycle_mutation_assertion",
+    "immutable_hash"
+  ],
+  "title": "PaperTrialProposal",
+  "type": "object"
+}

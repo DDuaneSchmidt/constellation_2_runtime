@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.engine_activity_authorization.v1",
+  "title": "Engine Activity Authorization v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "runtime_evaluation_hash",
+    "engine_id",
+    "candidate_id",
+    "intent_hash",
+    "authorization_status",
+    "validation_status",
+    "authorization",
+    "broker_submit_transmit_allowed",
+    "autonomous_execution_allowed",
+    "trade_advice_allowed"
+  ],
+  "properties": {
+    "schema_id": { "const": "engine_activity_authorization" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "runtime_evaluation_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sleeve_id": { "type": "string" },
+    "engine_id": { "type": "string" },
+    "exposure_id": { "type": "string" },
+    "candidate_id": { "type": "string" },
+    "intent_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "symbol": { "type": "string" },
+    "side": { "type": "string" },
+    "target_sleeve_id": { "type": "string" },
+    "target_environment": { "type": "string" },
+    "selected_intent_pointer_hash": { "type": "string" },
+    "candidate_identity_hash": { "type": "string" },
+    "sleeve_readiness_hash": { "type": "string" },
+    "engine_runner_sha256_expected": { "type": "string" },
+    "engine_runner_sha256_actual": { "type": "string" },
+    "engine_runner_hash_match": { "type": "boolean" },
+    "market_readiness_hash": { "type": "string" },
+    "authorization_status": {
+      "type": "string",
+      "enum": ["AUTHORIZED", "REJECTED", "POLICY_DISABLED", "STALE", "MISSING_INPUT"]
+    },
+    "status": { "type": "string" },
+    "authorization": {
+      "type": "object",
+      "required": ["decision", "authorized_quantity", "scope"],
+      "properties": {
+        "decision": { "type": "string", "enum": ["AUTHORIZED", "REJECTED"] },
+        "authorized_quantity": { "type": "integer", "minimum": 0 },
+        "scope": { "const": "CONSTRUCTION_AND_CONVERSION_ONLY" }
+      },
+      "additionalProperties": true
+    },
+    "blocker_reasons": { "type": "array", "items": { "type": "string" } },
+    "blocker_codes": { "type": "array", "items": { "type": "string" } },
+    "validation_status": { "type": "string", "enum": ["VALID", "REJECTED"] },
+    "input_hashes": { "type": "object", "additionalProperties": { "type": "string" } },
+    "broker_execution_allowed": { "const": false },
+    "broker_submit_transmit_allowed": { "const": false },
+    "order_routing_allowed": { "const": false },
+    "autonomous_execution_allowed": { "const": false },
+    "trade_advice_allowed": { "const": false },
+    "output_hash": { "type": "string" }
+  }
+}

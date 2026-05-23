@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "breadth_event_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "breadth_regime": {
+      "enum": [
+        "strong_breadth",
+        "normal_breadth",
+        "weak_breadth",
+        "breadth_collapse",
+        "breadth_recovery",
+        "unknown"
+      ]
+    },
+    "breadth_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "date": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "universe_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "breadth_event_id",
+    "breadth_snapshot_id",
+    "date",
+    "universe_snapshot_id",
+    "breadth_regime",
+    "event_type",
+    "metrics",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "BreadthEvent",
+  "type": "object"
+}

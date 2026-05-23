@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "cluster_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cluster_family_counts": {
+      "type": "object"
+    },
+    "cluster_status_counts": {
+      "type": "object"
+    },
+    "clustering_run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "clustering_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "highest_priority_cluster_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "latest_integrity_report_id": {
+      "type": "string"
+    },
+    "latest_research_os_status_report_id": {
+      "type": "string"
+    },
+    "non_actionable_research_only_assertion": {
+      "type": "object"
+    },
+    "observation_cluster_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observation_cluster_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "scanner_statuses": {
+      "type": "array"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_observation_candidate_batch_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "observation_cluster_batch_id",
+    "generated_at",
+    "clustering_run_id",
+    "clustering_version",
+    "source_observation_candidate_batch_ids",
+    "cluster_count",
+    "observation_cluster_ids",
+    "cluster_family_counts",
+    "cluster_status_counts",
+    "highest_priority_cluster_ids",
+    "latest_integrity_report_id",
+    "latest_research_os_status_report_id",
+    "scanner_statuses",
+    "non_actionable_research_only_assertion",
+    "immutable_hash"
+  ],
+  "title": "ObservationClusterBatch",
+  "type": "object"
+}

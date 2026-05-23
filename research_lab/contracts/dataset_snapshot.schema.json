@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "bar_policy_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "canonical_format": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "created_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "created_by": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "dataset_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "dataset_type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "end_date": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "interval": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "provider": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "provider_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "quality_report_uri": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "quality_status": {
+      "enum": [
+        "fail",
+        "pass",
+        "pass_with_warnings",
+        "pending"
+      ]
+    },
+    "row_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "start_date": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "storage_uri": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "symbol_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "symbols": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "universe_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataset_snapshot_id",
+    "dataset_type",
+    "provider",
+    "provider_version",
+    "interval",
+    "bar_policy_version",
+    "universe_snapshot_id",
+    "start_date",
+    "end_date",
+    "symbol_count",
+    "symbols",
+    "storage_uri",
+    "canonical_format",
+    "row_count",
+    "quality_status",
+    "quality_report_uri",
+    "content_hash",
+    "source_hash",
+    "created_at",
+    "created_by",
+    "schema_version"
+  ],
+  "title": "DatasetSnapshot",
+  "type": "object"
+}

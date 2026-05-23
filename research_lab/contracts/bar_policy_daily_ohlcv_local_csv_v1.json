@@ -1,0 +1,14 @@
+{
+  "bar_policy_version": "bp_daily_ohlcv_local_csv_v1",
+  "calendar": "inferred from available bars",
+  "interval": "1d",
+  "missing_data_policy": "warn_not_fill",
+  "price_adjustment": {
+    "adj_close": "from CSV if present, else equal to close",
+    "open_high_low_close": "from CSV"
+  },
+  "provider": "local_csv",
+  "split_dividend_policy": "depends on user-supplied CSV; adj_close fallback is explicitly recorded",
+  "timezone": "America/New_York",
+  "volume": "from CSV"
+}

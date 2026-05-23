@@ -1,0 +1,48 @@
+{
+  "schema_id": "deprecated_symbol_sources",
+  "schema_version": "v1",
+  "registry_version": 1,
+  "produced_utc": "2026-05-20T00:00:00Z",
+  "sources": [
+    {
+      "source_id": "ENGINE_MODEL_REGISTRY_V1_ALLOWED_SYMBOLS_PRIMARY_UNIVERSE",
+      "file_path": "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
+      "deprecated_reason": "Engine allowed_symbols is a sleeve/submit compatibility constraint and must not be the primary production discovery or all-sleeves scan universe.",
+      "replacement_source": "ops/aegis/universe/canonical_symbol_universe_resolver_v1.py using engine_universe_candidate_basis_v1, ranked_symbol_universe_v1, or market_data_snapshot_v1 dataset_manifest.",
+      "allowed_usage": ["legacy audit only", "fallback only with explicit flag", "test fixtures only"],
+      "disallowed_usage": ["production discovery", "all-sleeves evaluation", "candidate generation", "paper intent universe authority"]
+    },
+    {
+      "source_id": "OLD_RESEARCH_LAB_41_SYMBOL_ETF_UNIVERSE",
+      "file_path": "research_lab/research_store/universes/us_liquid_etf_core_v1_27193c/universe_snapshot.json",
+      "deprecated_reason": "Fixed ETF-core Research Lab universe is not the dynamic Aegis production scan authority.",
+      "replacement_source": "engine_universe_candidate_basis_v1 generated from ENGINE_UNIVERSE_POLICY_V1 and current market_data_snapshot_v1.",
+      "allowed_usage": ["legacy audit only", "fallback only with explicit flag", "test fixtures only"],
+      "disallowed_usage": ["production discovery", "all-sleeves evaluation", "candidate generation", "paper intent universe authority"]
+    },
+    {
+      "source_id": "OLD_AEGIS_43_SYMBOL_MAP",
+      "file_path": "/home/node/constellation_runtime_data/truth/reports/aegis_symbol_map_v1/2026-05-20/symbol_map.v1.json",
+      "deprecated_reason": "Fixed symbol map is diagnostic compatibility evidence, not the dynamic production scan authority.",
+      "replacement_source": "canonical_symbol_universe_resolver_v1 current-day dynamic source order.",
+      "allowed_usage": ["legacy audit only", "fallback only with explicit flag", "test fixtures only"],
+      "disallowed_usage": ["production discovery", "all-sleeves evaluation", "candidate generation", "paper intent universe authority"]
+    },
+    {
+      "source_id": "OLD_LOCAL_ETF_MINIMUM_VIABLE_UNIVERSE",
+      "file_path": "research_lab/research_store/universes/us_local_etf_minimum_viable_v1_a3ccfc/universe_snapshot.json",
+      "deprecated_reason": "Minimum viable local ETF universe is a test/bootstrap artifact, not production scan authority.",
+      "replacement_source": "canonical_symbol_universe_resolver_v1 current-day dynamic source order.",
+      "allowed_usage": ["legacy audit only", "fallback only with explicit flag", "test fixtures only"],
+      "disallowed_usage": ["production discovery", "all-sleeves evaluation", "candidate generation", "paper intent universe authority"]
+    },
+    {
+      "source_id": "OLD_FIXED_ETF_CORE_DATASET_SNAPSHOT",
+      "file_path": "research_lab/research_store/datasets/ds_ohlcv_1d_liquid_etf_core_20050101_20260518_6bd2fa/dataset_snapshot.json",
+      "deprecated_reason": "Fixed ETF-core DatasetSnapshot is superseded for runtime discovery by dynamic market_data_snapshot_v1 and ranked per-engine candidate basis artifacts.",
+      "replacement_source": "engine_universe_candidate_basis_v1 generated from ENGINE_UNIVERSE_POLICY_V1 and current market_data_snapshot_v1.",
+      "allowed_usage": ["legacy audit only", "fallback only with explicit flag", "test fixtures only"],
+      "disallowed_usage": ["production discovery", "all-sleeves evaluation", "candidate generation", "paper intent universe authority"]
+    }
+  ]
+}

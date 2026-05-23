@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "outcome_status": {
+      "enum": [
+        "measured",
+        "pending",
+        "unavailable"
+      ]
+    }
+  },
+  "required": [
+    "outcome_record_id",
+    "candidate_id",
+    "candidate_batch_id",
+    "source_evidence_package_id",
+    "dataset_snapshot_id",
+    "regime_snapshot_id",
+    "cost_model_snapshot_id",
+    "symbol",
+    "benchmark_symbol",
+    "signal_date",
+    "as_of_date",
+    "outcome_window",
+    "outcome_start_date",
+    "outcome_end_date",
+    "gross_return",
+    "post_cost_return",
+    "benchmark_return",
+    "excess_return",
+    "outcome_status",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "OutcomeRecord",
+  "type": "object"
+}

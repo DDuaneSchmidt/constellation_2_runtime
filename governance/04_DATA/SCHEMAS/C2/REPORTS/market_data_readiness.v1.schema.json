@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "artifact_id": { "const": "market_data_readiness_v1" },
+    "autonomous_execution_allowed": { "const": false },
+    "blocked_input_ids": { "items": { "type": "string" }, "type": "array" },
+    "broker_execution_allowed": { "const": false },
+    "day_utc": { "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "input_statuses": { "items": { "type": "object" }, "type": "array" },
+    "ready_input_ids": { "items": { "type": "string" }, "type": "array" },
+    "schema_id": { "const": "market_data_readiness" },
+    "schema_version": { "const": "v1" },
+    "status": { "enum": ["READY", "BLOCKED"] }
+  },
+  "required": ["schema_id", "schema_version", "artifact_id", "day_utc", "generated_at_utc", "status", "ready_input_ids", "blocked_input_ids", "broker_execution_allowed", "autonomous_execution_allowed"],
+  "type": "object"
+}

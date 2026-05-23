@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "audit_refs": {
+      "type": "object"
+    },
+    "blocked_hypotheses": {
+      "type": "array"
+    },
+    "challenger_evidence_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_evidence_items": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "backtest_evidence_id": {
+            "type": "string"
+          },
+          "challenger_hypothesis_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "challenger_variant_id": {
+            "type": "string"
+          },
+          "deterministic_rule_delta": {
+            "type": "object"
+          },
+          "event_study_evidence_id": {
+            "type": "string"
+          },
+          "evidence_quality": {
+            "enum": [
+              "strong",
+              "moderate",
+              "weak",
+              "insufficient",
+              "blocked"
+            ]
+          },
+          "exclusion_flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expectancy_drift_report_id": {
+            "type": "string"
+          },
+          "failure_reason": {
+            "type": "string"
+          },
+          "generated_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "longitudinal_run_id": {
+            "type": "string"
+          },
+          "parent_sleeve_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "regime_fragility_report_id": {
+            "type": "string"
+          },
+          "research_label": {
+            "const": "RESEARCH_ONLY"
+          },
+          "status": {
+            "enum": [
+              "generated",
+              "blocked",
+              "insufficient_evidence"
+            ]
+          },
+          "variant_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenger_hypothesis_id",
+          "parent_sleeve_id",
+          "variant_name",
+          "deterministic_rule_delta",
+          "status",
+          "generated_evidence_ids",
+          "event_study_evidence_id",
+          "backtest_evidence_id",
+          "longitudinal_run_id",
+          "regime_fragility_report_id",
+          "expectancy_drift_report_id",
+          "evidence_quality",
+          "exclusion_flags",
+          "failure_reason",
+          "research_label"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "determinism_fingerprint": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "evidence_generation_config": {
+      "type": "object"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "governance_constraints": {
+      "type": "object"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_sleeve_version_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "recommended_next_action": {
+      "enum": [
+        "compare_challengers",
+        "collect_more_observations",
+        "investigate_blockers",
+        "maintain_watch",
+        "archive_challenger_track"
+      ]
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_challenger_hypothesis_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_cost_model_snapshot_id": {
+      "type": "string"
+    },
+    "source_dataset_snapshot_id": {
+      "type": "string"
+    },
+    "source_regime_snapshot_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "challenger_evidence_batch_id",
+    "challenger_track_id",
+    "incumbent_sleeve_id",
+    "incumbent_sleeve_version_id",
+    "generated_at",
+    "schema_version",
+    "research_label",
+    "source_dataset_snapshot_id",
+    "source_regime_snapshot_id",
+    "source_cost_model_snapshot_id",
+    "source_challenger_hypothesis_ids",
+    "challenger_evidence_items",
+    "blocked_hypotheses",
+    "evidence_generation_config",
+    "determinism_fingerprint",
+    "governance_constraints",
+    "recommended_next_action",
+    "audit_refs"
+  ],
+  "title": "ChallengerEvidenceBatch",
+  "type": "object"
+}

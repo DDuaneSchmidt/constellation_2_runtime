@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "challenger_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "confidence_classification": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "created_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "decided_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "decided_by": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "request_more_challenger_evidence",
+        "reject_challenger",
+        "open_challenger_paper_trial"
+      ]
+    },
+    "evidence_completeness_status": {
+      "enum": [
+        "complete",
+        "incomplete"
+      ]
+    },
+    "governance_constraints": {
+      "type": "object"
+    },
+    "human_review_decision_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "human_review_dossier_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "rationale": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_artifact_ids": {
+      "type": "object"
+    },
+    "source_dossier_hash": {
+      "minLength": 12,
+      "type": "string"
+    }
+  },
+  "required": [
+    "human_review_decision_id",
+    "human_review_dossier_id",
+    "challenger_track_id",
+    "challenger_id",
+    "incumbent_sleeve_id",
+    "decision",
+    "rationale",
+    "decided_by",
+    "decided_at",
+    "source_dossier_hash",
+    "source_artifact_ids",
+    "evidence_completeness_status",
+    "confidence_classification",
+    "created_at",
+    "immutable_hash"
+  ],
+  "title": "HumanReviewDecision",
+  "type": "object"
+}

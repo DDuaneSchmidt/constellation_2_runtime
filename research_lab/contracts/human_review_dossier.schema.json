@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "audit_refs": {
+      "type": "object"
+    },
+    "blocked_or_excluded_items": {
+      "type": "array"
+    },
+    "challenger_comparison_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_context": {
+      "type": "object"
+    },
+    "challenger_evidence_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "dossier_type": {
+      "const": "CHALLENGER_REVIEW"
+    },
+    "executive_summary": {
+      "type": "object"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "governance_constraints": {
+      "type": "object"
+    },
+    "human_review_dossier_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_context": {
+      "type": "object"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_sleeve_version_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "key_evidence_findings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "open_questions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "recommended_next_action": {
+      "enum": [
+        "open_challenger_paper_trial",
+        "request_more_challenger_evidence",
+        "continue_observation",
+        "investigate_incumbent_degradation",
+        "archive_challenger_track",
+        "prepare_manual_governance_review"
+      ]
+    },
+    "required_human_decision_options": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "review_candidates": {
+      "type": "array"
+    },
+    "risk_and_limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_report_ids": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "human_review_dossier_id",
+    "dossier_type",
+    "incumbent_sleeve_id",
+    "incumbent_sleeve_version_id",
+    "challenger_track_id",
+    "challenger_evidence_batch_id",
+    "challenger_comparison_report_id",
+    "generated_at",
+    "schema_version",
+    "research_label",
+    "source_report_ids",
+    "executive_summary",
+    "incumbent_context",
+    "challenger_context",
+    "key_evidence_findings",
+    "review_candidates",
+    "blocked_or_excluded_items",
+    "open_questions",
+    "risk_and_limitations",
+    "governance_constraints",
+    "required_human_decision_options",
+    "recommended_next_action",
+    "audit_refs"
+  ],
+  "title": "HumanReviewDossier",
+  "type": "object"
+}

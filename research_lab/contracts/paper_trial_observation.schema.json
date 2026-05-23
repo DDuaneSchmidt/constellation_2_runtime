@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "recorded",
+        "zero_candidates",
+        "failed"
+      ]
+    }
+  },
+  "required": [
+    "paper_trial_observation_id",
+    "paper_trial_id",
+    "observation_date",
+    "as_of_date",
+    "candidate_batch_id",
+    "candidate_count",
+    "top_candidates",
+    "operator_note",
+    "status",
+    "created_at",
+    "created_by",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "PaperTrialObservation",
+  "type": "object"
+}

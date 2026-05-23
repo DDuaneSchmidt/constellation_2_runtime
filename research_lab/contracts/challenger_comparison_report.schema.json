@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "audit_refs": {
+      "type": "object"
+    },
+    "blocked_hypotheses": {
+      "type": "array"
+    },
+    "challenger_comparison_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_evidence_batch_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "challenger_summaries": {
+      "type": "array"
+    },
+    "challenger_track_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "comparison_config": {
+      "type": "object"
+    },
+    "comparison_table": {
+      "type": "array"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "deterministic_rank_order": {
+      "type": "array"
+    },
+    "evidence_sufficiency": {
+      "enum": [
+        "comparison_ready",
+        "partially_ready",
+        "insufficient",
+        "blocked"
+      ]
+    },
+    "exclusion_results": {
+      "type": "array"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "governance_summary": {
+      "type": "object"
+    },
+    "incumbent_sleeve_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_sleeve_version_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "incumbent_summary": {
+      "type": "object"
+    },
+    "recommended_next_action": {
+      "enum": [
+        "prepare_human_review",
+        "collect_more_observations",
+        "investigate_blockers",
+        "maintain_watch",
+        "archive_challenger_track"
+      ]
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_challenger_evidence_ids": {
+      "type": "array"
+    },
+    "source_incumbent_evidence_ids": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "challenger_comparison_report_id",
+    "challenger_track_id",
+    "challenger_evidence_batch_id",
+    "incumbent_sleeve_id",
+    "incumbent_sleeve_version_id",
+    "generated_at",
+    "schema_version",
+    "research_label",
+    "source_incumbent_evidence_ids",
+    "source_challenger_evidence_ids",
+    "blocked_hypotheses",
+    "comparison_config",
+    "incumbent_summary",
+    "challenger_summaries",
+    "comparison_table",
+    "exclusion_results",
+    "evidence_sufficiency",
+    "deterministic_rank_order",
+    "governance_summary",
+    "recommended_next_action",
+    "audit_refs"
+  ],
+  "title": "ChallengerComparisonReport",
+  "type": "object"
+}

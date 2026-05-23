@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "benchmark_symbol": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "dataset_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "labels": {
+      "type": "object"
+    },
+    "regime_model_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "regime_snapshot_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "regime_snapshot_id",
+    "dataset_snapshot_id",
+    "benchmark_symbol",
+    "created_at",
+    "created_by",
+    "regime_model_version",
+    "inputs",
+    "labels",
+    "storage_uri",
+    "content_hash",
+    "schema_version"
+  ],
+  "title": "RegimeSnapshot",
+  "type": "object"
+}

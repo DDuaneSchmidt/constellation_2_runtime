@@ -1,0 +1,13 @@
+{
+  "bar_policy_version": "bp_daily_ohlcv_v1",
+  "calendar": "exchange trading days inferred from available bars",
+  "interval": "1d",
+  "missing_data_policy": "warn_not_fill",
+  "price_adjustment": {
+    "adj_close": "provider adjusted close",
+    "open_high_low_close": "raw provider OHLC"
+  },
+  "split_dividend_policy": "adj_close retained, OHLC not back-adjusted",
+  "timezone": "America/New_York",
+  "volume": "provider volume"
+}

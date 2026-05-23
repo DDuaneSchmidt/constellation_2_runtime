@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/candidate_consumption_audit.v1.schema.json",
+  "title": "candidate_consumption_audit.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "trading_date",
+    "run_id",
+    "created_at_utc",
+    "raw_candidate_count",
+    "promoted_candidate_count",
+    "excluded_candidate_count",
+    "consumption_counts",
+    "certified_universe_symbol_count",
+    "certified_universe_symbols",
+    "certified_artifact_path",
+    "promotion_contract",
+    "candidate_rows",
+    "normal_no_op",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "candidate_consumption_audit"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "const": "candidate_consumption_audit_v1"
+    },
+    "trading_date": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "created_at_utc": {
+      "type": "string"
+    },
+    "raw_candidate_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "promoted_candidate_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "excluded_candidate_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "consumption_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "certified_universe_symbol_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "certified_universe_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "certified_artifact_path": {
+      "type": "string"
+    },
+    "promotion_contract": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "candidate_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "symbol",
+          "sleeve_id",
+          "source_status",
+          "consumption_category",
+          "consumption_reason",
+          "covered_by_certified_eod",
+          "promoted_sleeve_approved",
+          "raw_reason_codes",
+          "source_artifact_path"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "sleeve_id": {
+            "type": "string"
+          },
+          "source_status": {
+            "type": "string"
+          },
+          "consumption_category": {
+            "type": "string",
+            "enum": [
+              "PROMOTED",
+              "EXCLUDED_UNCOVERED_SYMBOL",
+              "EXCLUDED_POLICY",
+              "EXCLUDED_LOW_SCORE",
+              "EXCLUDED_MISSING_CERTIFIED_DATA"
+            ]
+          },
+          "consumption_reason": {
+            "type": "string"
+          },
+          "covered_by_certified_eod": {
+            "type": "boolean"
+          },
+          "promoted_sleeve_approved": {
+            "type": "boolean"
+          },
+          "raw_reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_artifact_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "normal_no_op": {
+      "type": "boolean"
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

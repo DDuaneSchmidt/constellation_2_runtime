@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "data_requirement_status": {
+      "enum": [
+        "available",
+        "partially_available",
+        "missing_or_future",
+        "unknown"
+      ]
+    },
+    "observation_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "sample_observation_count": {
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_cluster_id",
+    "event_family_id",
+    "observation_ids",
+    "cluster_title",
+    "cluster_description",
+    "common_symbols",
+    "common_mechanisms",
+    "candidate_intents",
+    "sample_observation_count",
+    "data_requirement_status",
+    "created_at",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "EventCluster",
+  "type": "object"
+}

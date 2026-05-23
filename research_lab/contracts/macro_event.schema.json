@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "event_date": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_type": {
+      "enum": [
+        "FOMC",
+        "CPI",
+        "NFP",
+        "OPEX",
+        "TREASURY_AUCTION",
+        "EARNINGS_SEASON",
+        "GEOPOLITICAL",
+        "ENERGY_SHOCK",
+        "RATE_SHOCK",
+        "CREDIT_STRESS",
+        "OTHER"
+      ]
+    },
+    "importance": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_date",
+    "event_type",
+    "event_name",
+    "importance",
+    "source",
+    "notes",
+    "schema_version"
+  ],
+  "title": "MacroEvent",
+  "type": "object"
+}

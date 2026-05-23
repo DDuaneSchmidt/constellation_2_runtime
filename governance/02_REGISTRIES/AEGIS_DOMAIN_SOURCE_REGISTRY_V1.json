@@ -1,0 +1,109 @@
+{
+  "domains": [
+    {
+      "artifact_path_template": "reports/final_eod_market_data_v1/{day_utc}/final_eod_market_data.v1.json",
+      "certification_command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "coverage_requirement": "complete same-trading-day final OHLCV coverage for every governed US_EQUITIES_EOD symbol",
+      "domain_id": "US_EQUITIES_EOD",
+      "provider_or_source": "certification-grade final EOD provider or uploaded CSV/JSON source file",
+      "rebuild_command": "python3 ops/tools/build_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id US_EQUITIES_EOD",
+      "repair_mode_when_missing": "SOURCE_SETUP_REQUIRED",
+      "required": true,
+      "required_config_keys": [
+        "AEGIS_MARKET_DATA_PROVIDER_PRIMARY",
+        "AEGIS_FINAL_EOD_MARKET_DATA_SOURCE_FILE",
+        "AEGIS_US_EQUITIES_EOD_SOURCE_FILE"
+      ],
+      "required_fields": [
+        "symbol",
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "required_source": "final_eod_market_data_v1",
+      "setup_required_message": "Upload/configure EOD source with AEGIS_US_EQUITIES_EOD_SOURCE_FILE as CSV or JSON, or configure a certification-grade EOD provider. Required fields: symbol, date, open, high, low, close, volume.",
+      "validation_command": "python3 ops/tools/validate_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id US_EQUITIES_EOD"
+    },
+    {
+      "artifact_path_template": "reports/macro_calendar_v1/{day_utc}/macro_calendar.v1.json",
+      "certification_command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "coverage_requirement": "macro event calendar coverage for the operational day and affected event-driven hypotheses/sleeves",
+      "domain_id": "MACRO_CALENDAR",
+      "provider_or_source": "governed macro calendar API/export or operator-uploaded file",
+      "rebuild_command": "python3 ops/tools/build_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id MACRO_CALENDAR",
+      "repair_mode_when_missing": "SOURCE_SETUP_REQUIRED",
+      "required": true,
+      "required_config_keys": [
+        "AEGIS_MACRO_CALENDAR_SOURCE_FILE"
+      ],
+      "required_fields": [
+        "event_name",
+        "time",
+        "country",
+        "importance",
+        "source"
+      ],
+      "required_source": "macro_calendar_v1",
+      "setup_required_message": "Set AEGIS_MACRO_CALENDAR_SOURCE_FILE to a governed JSON export or place macro_calendar.v1.json at the required path. Required fields: event name, time, country, importance, source.",
+      "validation_command": "python3 ops/tools/validate_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id MACRO_CALENDAR"
+    },
+    {
+      "artifact_path_template": "reports/earnings_events_v1/{day_utc}/earnings_events.v1.json",
+      "certification_command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "coverage_requirement": "earnings event coverage for tracked symbols in candidate and hypothesis universes",
+      "domain_id": "EARNINGS_EVENTS",
+      "provider_or_source": "governed earnings calendar API/export or operator-uploaded file",
+      "rebuild_command": "python3 ops/tools/build_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id EARNINGS_EVENTS",
+      "repair_mode_when_missing": "SOURCE_SETUP_REQUIRED",
+      "required": false,
+      "required_config_keys": [
+        "AEGIS_EARNINGS_EVENTS_SOURCE_FILE"
+      ],
+      "required_fields": [
+        "symbol",
+        "company",
+        "report_date",
+        "report_time",
+        "confirmed_or_estimated",
+        "source"
+      ],
+      "required_source": "earnings_events_v1",
+      "setup_required_message": "Set AEGIS_EARNINGS_EVENTS_SOURCE_FILE to a governed JSON export or place earnings_events.v1.json at the required path. Required fields: symbol, company, report date/time, confirmed/estimated flag, source.",
+      "validation_command": "python3 ops/tools/validate_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id EARNINGS_EVENTS"
+    },
+    {
+      "artifact_path_template": "reports/corporate_actions_v1/{day_utc}/corporate_actions.v1.json",
+      "certification_command": "python3 ops/tools/build_domain_certification_v1.py --truth-root {truth_root} --day-utc {day_utc}",
+      "coverage_requirement": "split/dividend/corporate-action coverage for tracked symbols",
+      "domain_id": "CORPORATE_ACTIONS",
+      "provider_or_source": "governed corporate actions API/export or operator-uploaded file",
+      "rebuild_command": "python3 ops/tools/build_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id CORPORATE_ACTIONS",
+      "repair_mode_when_missing": "SOURCE_SETUP_REQUIRED",
+      "required": false,
+      "required_config_keys": [
+        "AEGIS_CORPORATE_ACTIONS_SOURCE_FILE"
+      ],
+      "required_fields": [
+        "symbol",
+        "action_type",
+        "effective_date",
+        "source"
+      ],
+      "required_source": "corporate_actions_v1",
+      "setup_required_message": "Set AEGIS_CORPORATE_ACTIONS_SOURCE_FILE to a governed JSON export or place corporate_actions.v1.json at the required path. Required fields: symbol, action type, effective date, source.",
+      "validation_command": "python3 ops/tools/validate_domain_source_v1.py --truth-root {truth_root} --day-utc {day_utc} --domain-id CORPORATE_ACTIONS"
+    }
+  ],
+  "registry_version": "aegis_domain_source_registry.v1",
+  "safety": {
+    "autonomous_execution_allowed": false,
+    "broker_execution_allowed": false,
+    "broker_submit_transmit_allowed": false,
+    "trade_advice_allowed": false
+  },
+  "schema_id": "aegis_domain_source_registry",
+  "schema_version": "v1"
+}

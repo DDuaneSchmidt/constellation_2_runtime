@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "artifact_counts": {
+      "type": "object"
+    },
+    "audit_event_counts": {
+      "type": "object"
+    },
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "duplicate_registry_entries": {
+      "type": "array"
+    },
+    "generated_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "hash_mismatches": {
+      "type": "array"
+    },
+    "immutable_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "integrity_report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "lineage_breaks": {
+      "type": "array"
+    },
+    "missing_references": {
+      "type": "array"
+    },
+    "mutation_boundary_violations": {
+      "type": "array"
+    },
+    "orphaned_artifacts": {
+      "type": "array"
+    },
+    "overall_status": {
+      "enum": [
+        "PASS",
+        "PASS_WITH_WARNINGS",
+        "FAIL"
+      ]
+    },
+    "registry_counts": {
+      "type": "object"
+    },
+    "report_scope": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "research_label": {
+      "const": "RESEARCH_ONLY"
+    },
+    "research_store_root": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_validation_failures": {
+      "type": "array"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_artifact_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_registry_ids": {
+      "type": "object"
+    },
+    "unresolved_blockers": {
+      "type": "array"
+    },
+    "warnings": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "integrity_report_id",
+    "generated_at",
+    "research_store_root",
+    "report_scope",
+    "overall_status",
+    "artifact_counts",
+    "registry_counts",
+    "audit_event_counts",
+    "missing_references",
+    "orphaned_artifacts",
+    "hash_mismatches",
+    "schema_validation_failures",
+    "lineage_breaks",
+    "duplicate_registry_entries",
+    "mutation_boundary_violations",
+    "unresolved_blockers",
+    "warnings",
+    "source_registry_ids",
+    "source_artifact_ids",
+    "immutable_hash"
+  ],
+  "title": "ResearchStoreIntegrityReport",
+  "type": "object"
+}

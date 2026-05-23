@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "minLength": 12,
+      "type": "string"
+    },
+    "priority_rows": {
+      "type": "array"
+    },
+    "recommended_next_actions": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "research_backlog_priority_report_id",
+    "created_at",
+    "priority_rows",
+    "recommended_next_actions",
+    "schema_version",
+    "content_hash"
+  ],
+  "title": "ResearchBacklogPriorityReport",
+  "type": "object"
+}
