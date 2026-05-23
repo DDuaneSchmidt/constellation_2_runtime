@@ -56,6 +56,7 @@ class ServiceSpec:
     port: int
     entrypoint: str
     entrypoint_path: Path
+    systemd_unit: str
     health_url: str
     start_timeout_seconds: int
     stop_timeout_seconds: int
@@ -214,6 +215,7 @@ def load_manifest(manifest_path: Path) -> List[ServiceSpec]:
                 port=port,
                 entrypoint=entrypoint,
                 entrypoint_path=entrypoint_path,
+                systemd_unit=str(row.get("systemd_unit", "")).strip(),
                 health_url=health_url,
                 start_timeout_seconds=start_timeout_seconds,
                 stop_timeout_seconds=stop_timeout_seconds,
@@ -265,6 +267,56 @@ def _pid_owned_by_service(pid: int, service: ServiceSpec) -> bool:
     return False
 
 
+def _systemd_user_service_snapshot(unit: str) -> Dict[str, Any]:
+    if not unit:
+        return {"configured": False}
+    result: Dict[str, Any] = {"configured": True, "unit": unit, "active_state": "", "sub_state": "", "main_pid": None, "ok": False, "error": None}
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "show", unit, "--property=ActiveState", "--property=SubState", "--property=MainPID"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception as exc:
+        result["error"] = f"SYSTEMD_SHOW_ERROR:{type(exc).__name__}:{exc}"
+        return result
+    if proc.returncode != 0:
+        result["error"] = (proc.stderr or proc.stdout or f"SYSTEMD_SHOW_FAILED:{proc.returncode}").strip()
+        return result
+    values: Dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    result["active_state"] = values.get("ActiveState", "")
+    result["sub_state"] = values.get("SubState", "")
+    try:
+        result["main_pid"] = int(values.get("MainPID", "0"))
+    except Exception:
+        result["main_pid"] = None
+    result["ok"] = result["active_state"] == "active" and isinstance(result.get("main_pid"), int) and int(result["main_pid"] or 0) > 0
+    return result
+
+
+def _systemd_user_control(unit: str, action: str) -> Tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", action, unit],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as exc:
+        return False, f"SYSTEMD_{action.upper()}_ERROR:{type(exc).__name__}:{exc}"
+    if proc.returncode == 0:
+        return True, ""
+    return False, (proc.stderr or proc.stdout or f"SYSTEMD_{action.upper()}_FAILED:{proc.returncode}").strip()
+
+
 def _is_port_listening(host: str, port: int, timeout_seconds: float = 0.35) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout_seconds):
@@ -308,7 +360,7 @@ def _health_probe(service: ServiceSpec, timeout_seconds: float = 1.5) -> Dict[st
 
 
 def _route_probe(service: ServiceSpec, timeout_seconds: float = 1.5) -> Dict[str, Any]:
-    route_paths = ["/healthz", "/readyz", "/runtime-status", "/api/runtime-status", "/aegis-runtime"]
+    route_paths = ["/healthz", "/readyz", "/runtime-status", "/api/runtime-status", "/aegis-runtime", "/aegis-runtime-timeline"]
     routes: Dict[str, Any] = {}
     for route_path in route_paths:
         url = f"http://{service.host}:{service.port}{route_path}"
@@ -333,18 +385,23 @@ def _route_probe(service: ServiceSpec, timeout_seconds: float = 1.5) -> Dict[str
 
 
 def probe_service(service: ServiceSpec) -> Dict[str, Any]:
-    pid = _read_pid_file(service.pid_path)
+    systemd = _systemd_user_service_snapshot(service.systemd_unit)
+    systemd_pid = systemd.get("main_pid") if systemd.get("ok") else None
+    pid = int(systemd_pid) if isinstance(systemd_pid, int) and systemd_pid > 0 else _read_pid_file(service.pid_path)
     pid_running = _process_exists(pid) if isinstance(pid, int) else False
+    managed_by = "systemd-user" if systemd.get("ok") else "supervisor-pidfile"
     owned_by_supervisor = False
     ownership_note = None
 
     if isinstance(pid, int):
         if pid_running:
-            owned_by_supervisor = _pid_owned_by_service(pid, service)
+            owned_by_supervisor = bool(systemd.get("ok")) or _pid_owned_by_service(pid, service)
             if not owned_by_supervisor:
                 ownership_note = "PID_OWNERSHIP_MISMATCH"
         else:
             ownership_note = "PID_NOT_RUNNING"
+    elif service.systemd_unit and not systemd.get("ok"):
+        ownership_note = str(systemd.get("error") or "SYSTEMD_UNIT_NOT_ACTIVE")
 
     port_open = _is_port_listening(service.host, service.port)
     health = _health_probe(service) if port_open else {"url": service.health_url, "ok": False, "http_status": None, "error": "PORT_NOT_OPEN", "status_value": None}
@@ -364,6 +421,9 @@ def probe_service(service: ServiceSpec) -> Dict[str, Any]:
         "host": service.host,
         "port": service.port,
         "entrypoint": service.entrypoint,
+        "systemd_unit": service.systemd_unit,
+        "managed_by": managed_by,
+        "systemd": systemd,
         "health_url": service.health_url,
         "pid": pid,
         "pid_running": pid_running,
@@ -482,6 +542,11 @@ def _start_service(service: ServiceSpec) -> Dict[str, Any]:
     if pre["state"] == STATE_READY:
         return {"service": service.name, "ok": True, "action": "already_ready", "snapshot": pre}
 
+    if service.systemd_unit:
+        ok, error = _systemd_user_control(service.systemd_unit, "start")
+        snapshot = probe_service(service)
+        return {"service": service.name, "ok": ok and snapshot["state"] == STATE_READY, "action": "systemd_started" if ok else "systemd_start_failed", "reason": error, "snapshot": snapshot}
+
     if pre["port_open"] and not pre["owned_by_supervisor"]:
         return {
             "service": service.name,
@@ -525,6 +590,10 @@ def _start_service(service: ServiceSpec) -> Dict[str, Any]:
 
 def _stop_service(service: ServiceSpec) -> Dict[str, Any]:
     snapshot = probe_service(service)
+    if service.systemd_unit:
+        ok, error = _systemd_user_control(service.systemd_unit, "stop")
+        final_snapshot = probe_service(service)
+        return {"service": service.name, "ok": ok and final_snapshot["state"] == STATE_NOT_RUNNING, "action": "systemd_stopped" if ok else "systemd_stop_failed", "reason": error, "snapshot": final_snapshot}
     pid = snapshot.get("pid")
     if not isinstance(pid, int):
         service.pid_path.unlink(missing_ok=True)
@@ -638,6 +707,24 @@ def _command_stop(manifest_path: Path, specs: List[ServiceSpec]) -> int:
 
 
 def _command_restart(manifest_path: Path, specs: List[ServiceSpec]) -> int:
+    if specs and all(spec.systemd_unit for spec in specs):
+        results: List[Dict[str, Any]] = []
+        for spec in specs:
+            ok, error = _systemd_user_control(spec.systemd_unit, "restart")
+            ready, snapshot = _wait_until_ready(spec) if ok else (False, probe_service(spec))
+            results.append({"service": spec.name, "ok": ok and ready, "action": "systemd_restarted" if ok else "systemd_restart_failed", "reason": error, "snapshot": snapshot})
+        snapshots = _collect_snapshots(specs)
+        _write_runtime_truth(manifest_path, snapshots, action="restart")
+        payload = {
+            "ok": all(bool(item.get("ok")) for item in results),
+            "generated_utc": utc_now_iso(),
+            "runtime_root": str(RUNTIME_ROOT),
+            "manifest_path": str(manifest_path),
+            "overall_status": summarize_overall_status(snapshots),
+            "results": results,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if payload["ok"] else 1
     stop_code = _command_stop(manifest_path, specs)
     if stop_code != 0:
         return stop_code

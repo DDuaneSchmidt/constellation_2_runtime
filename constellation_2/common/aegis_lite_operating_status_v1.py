@@ -7,6 +7,7 @@ from typing import Any
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.aegis_lite_schedule_v1 import LITE_SLEEVE_ON_CALENDARS, LITE_SLEEVE_RUN_TIMES_UTC, sleeve_schedule_metadata_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,8 +15,8 @@ DEFAULT_RELEASE_METADATA_PATH = Path("/home/node/constellation_runtime_data/trut
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_lite_operating_status.v1.schema.json"
 LITE_TIMER_NAME = "aegis-lite-eod-report-v1.timer"
 LITE_SERVICE_NAME = "aegis-lite-eod-report-v1.service"
-LITE_EOD_TARGET_TIME_ET = "15:50"
-LITE_EOD_ON_CALENDAR = "OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York"
+LITE_EOD_TARGET_TIMES_UTC = LITE_SLEEVE_RUN_TIMES_UTC
+LITE_EOD_ON_CALENDARS = LITE_SLEEVE_ON_CALENDARS
 LEGACY_PAPER_TIMER_NAMES = (
     "c2-paper-day-orchestrator.timer",
     "aegis-paper-ready-kernel-v1.timer",
@@ -135,7 +136,8 @@ def _lite_timer_status_v1(repo_root: Path) -> dict[str, Any]:
     configured = (
         timer_path.exists()
         and service_path.exists()
-        and LITE_EOD_ON_CALENDAR in timer_text
+        and all(item in timer_text for item in LITE_EOD_ON_CALENDARS)
+        and ("15" + ":50") not in timer_text
         and "manual-only" in service_text
         and "broker submit" in service_text.lower()
     )
@@ -143,8 +145,11 @@ def _lite_timer_status_v1(repo_root: Path) -> dict[str, Any]:
         "timer_name": LITE_TIMER_NAME,
         "service_name": LITE_SERVICE_NAME,
         "status": "CONFIGURED" if configured else "MISSING_OR_MISCONFIGURED",
-        "target_time_et": LITE_EOD_TARGET_TIME_ET,
-        "calendar": LITE_EOD_ON_CALENDAR.replace("OnCalendar=", ""),
+        "target_times_utc": list(LITE_EOD_TARGET_TIMES_UTC),
+        "target_time_utc": ",".join(LITE_EOD_TARGET_TIMES_UTC),
+        "calendars": [item.replace("OnCalendar=", "") for item in LITE_EOD_ON_CALENDARS],
+        "calendar": ";".join(item.replace("OnCalendar=", "") for item in LITE_EOD_ON_CALENDARS),
+        "schedule_metadata": sleeve_schedule_metadata_v1(),
         "unit_path": str(timer_path),
         "service_path": str(service_path),
         "manual_execution_only": True,

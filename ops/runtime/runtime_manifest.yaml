@@ -6,6 +6,78 @@ services:
     host: 127.0.0.1
     port: 8787
     entrypoint: constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py
+    systemd_unit: constellation-phasel-ui.service
     health_url: http://127.0.0.1:8787/healthz
     start_timeout_seconds: 45
     stop_timeout_seconds: 15
+operator_workflow_events:
+  - event_key: morning_ai_run
+    event_name: Morning AI Run
+    event_type: CANDIDATE_GENERATION
+    event_category: OPERATOR_WORKFLOW_EVENT
+    local_time: "09:50"
+    timezone: America/New_York
+    day_offset: 0
+    trigger_type: governed-runtime-manifest
+    owning_job: candidate_generation
+    expected_artifact_type: candidate_generation_manifest_v1
+    expected_artifact_path_key: candidate
+    grace_window_minutes: 20
+    purpose: Run the governed morning sleeve and AI workflow.
+    expected_result: Morning candidates, scoring inputs, and operator projection are refreshed.
+  - event_key: afternoon_ai_run
+    event_name: Afternoon AI Run
+    event_type: CANDIDATE_GENERATION
+    event_category: OPERATOR_WORKFLOW_EVENT
+    local_time: "14:50"
+    timezone: America/New_York
+    day_offset: 0
+    trigger_type: governed-runtime-manifest
+    owning_job: candidate_generation
+    expected_artifact_type: candidate_generation_manifest_v1
+    expected_artifact_path_key: candidate
+    grace_window_minutes: 20
+    purpose: Run the governed afternoon sleeve and AI workflow.
+    expected_result: Afternoon candidates, scoring inputs, and operator projection are refreshed.
+  - event_key: final_eod_certification
+    event_name: Final Certification
+    event_type: CERTIFICATION
+    event_category: OPERATOR_WORKFLOW_EVENT
+    local_time: "18:00"
+    timezone: America/New_York
+    day_offset: 0
+    trigger_type: governed-runtime-manifest
+    owning_job: certification_promotion
+    expected_artifact_type: market_data_final_eod_v1
+    expected_artifact_path_key: final_eod
+    grace_window_minutes: 30
+    purpose: Certify final daily market data and reconcile provisional candidates.
+    expected_result: Final manual IB capture recommendations may become available.
+  - event_key: overnight_research
+    event_name: Overnight Research
+    event_type: RESEARCH
+    event_category: OPERATOR_WORKFLOW_EVENT
+    local_time: "05:50"
+    timezone: America/New_York
+    day_offset: 1
+    trigger_type: governed-runtime-manifest
+    owning_job: overnight_research
+    expected_artifact_type: research_pipeline_snapshot_v1
+    expected_artifact_path_key: research_pipeline
+    grace_window_minutes: 60
+    purpose: Run queued overnight hypothesis research.
+    expected_result: Overnight research findings are ready for operator review.
+  - event_key: reconciliation
+    event_name: Reconciliation
+    event_type: RECONCILIATION
+    event_category: OPERATOR_WORKFLOW_EVENT
+    local_time: "08:15"
+    timezone: America/New_York
+    day_offset: 1
+    trigger_type: governed-runtime-manifest
+    owning_job: certification_promotion
+    expected_artifact_type: candidate_intent_plane_v1
+    expected_artifact_path_key: intent
+    grace_window_minutes: 60
+    purpose: Confirm final certification, intent convergence, and promotion evidence agree.
+    expected_result: Preliminary and final intent states are reconciled for the next operator session.

@@ -1,0 +1,7 @@
+{
+  "schema_id": "aegis_runtime_universe_config",
+  "schema_version": "v1",
+  "runtime_universe_mode": "production_scan_dataset",
+  "production_scan_dataset_id": "ds_ohlcv_1d_liquid_etf_core_20050101_20260518_6bd2fa",
+  "notes": "Aegis runtime candidate scan uses this production scan DatasetSnapshot by default. Sleeve-required symbols are added on top and remain the gating inputs for sleeve readiness."
+}
