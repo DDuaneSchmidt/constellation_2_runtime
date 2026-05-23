@@ -125,7 +125,7 @@ def _load_portfolio_scoring(
             payload = read_json_object_v1(scoring_path)
         except Exception:
             payload = {}
-        if str(payload.get("day_utc") or "") == day_utc:
+        if str(payload.get("day_utc") or "") == day_utc and _scoring_covers_gate(payload, gate, source_rollup_path):
             payload["_artifact_path_resolved"] = str(scoring_path)
             return payload
     if gate:
@@ -140,6 +140,28 @@ def _load_portfolio_scoring(
         return payload
     return {}
 
+
+
+def _scoring_covers_gate(scoring: dict[str, Any], gate: dict[str, Any], source_rollup_path: Path) -> bool:
+    if not scoring:
+        return False
+    expected_rollup = str(source_rollup_path.resolve())
+    observed_rollup = str(scoring.get("source_rollup_path") or "")
+    if observed_rollup and observed_rollup != expected_rollup:
+        return False
+    expected_gate = str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or "")
+    observed_gate = str(scoring.get("portfolio_activation_gate_path") or "")
+    if expected_gate and observed_gate and observed_gate != expected_gate:
+        return False
+    rows = _scoring_rankings(scoring)
+    scored_ids = {str(row.get("intent_id") or "").strip() for row in rows if isinstance(row, dict)}
+    decisions = gate.get("decisions") if isinstance(gate.get("decisions"), list) else []
+    expected_ids = {
+        str(row.get("raw_intent_id") or "").strip()
+        for row in decisions
+        if isinstance(row, dict) and str(row.get("raw_intent_id") or "").strip()
+    }
+    return expected_ids.issubset(scored_ids)
 
 def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not gate:
@@ -208,7 +230,8 @@ def _apply_portfolio_scoring(candidates: list[dict[str, Any]], scoring: dict[str
                     "portfolio_score_components": {},
                     "portfolio_score_rank": 999999,
                     "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
-                    "portfolio_scoring_status": "MISSING_INTENT_SCORE",
+                    "portfolio_scoring_status": "SCORE_UNAVAILABLE",
+                    "score_unavailable_reason": "PORTFOLIO_SCORING_ROW_MISSING",
                     "rejection_reason": "PORTFOLIO_SCORING_MISSING_INTENT_SCORE",
                 }
             )
@@ -220,6 +243,11 @@ def _apply_portfolio_scoring(candidates: list[dict[str, Any]], scoring: dict[str
             "portfolio_score_rank": int(row.get("rank") or 999999),
             "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
             "portfolio_scoring_status": "SCORED",
+            "score_unavailable_reason": str(row.get("score_unavailable_reason") or ""),
+            "run_id": str(row.get("run_id") or ""),
+            "market_data_mode": str(row.get("market_data_mode") or ""),
+            "final_eod_certification_status": str(row.get("final_eod_certification_status") or ""),
+            "final_eod_certification_pending": bool(row.get("final_eod_certification_pending") is True),
             "scoring_reason_codes": row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else [],
             "executable_eligible": bool(row.get("executable_eligible")),
             "lifecycle_state_path": str(row.get("lifecycle_state_path") or candidate.get("lifecycle_state_path") or ""),
@@ -229,7 +257,7 @@ def _apply_portfolio_scoring(candidates: list[dict[str, Any]], scoring: dict[str
         if scored["executable_eligible"] and int(scored["portfolio_score_rank"]) > 0:
             enriched.append(scored)
         else:
-            rejected.append({**scored, "rejection_reason": "PORTFOLIO_SCORING_NOT_EXECUTABLE"})
+            rejected.append({**scored, "rejection_reason": str(row.get("score_unavailable_reason") or "PORTFOLIO_SCORING_NOT_EXECUTABLE")})
     enriched.sort(
         key=lambda row: (
             int(row.get("portfolio_score_rank") or 999999),
@@ -377,10 +405,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--day_utc", required=True)
     parser.add_argument("--environment", default=PAPER_MODE)
     parser.add_argument("--truth_root", default="")
+    parser.add_argument("--source-rollup-path", "--source_rollup_path", default="")
+    parser.add_argument("--portfolio-gate-path", "--portfolio_gate_path", default="")
+    parser.add_argument("--portfolio-scoring-path", "--portfolio_scoring_path", default="")
+    parser.add_argument("--cycle-id", "--cycle_id", default="")
     args = parser.parse_args(argv)
     day_utc = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
-    payload = build_intent_arbitration(day_utc=day_utc, truth_root=truth_root, environment=str(args.environment or PAPER_MODE).strip().upper())
+    payload = build_intent_arbitration(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=str(args.environment or PAPER_MODE).strip().upper(),
+        cycle_id=str(args.cycle_id or ""),
+        source_rollup_path=Path(args.source_rollup_path).expanduser().resolve() if str(args.source_rollup_path or "").strip() else None,
+        portfolio_gate_path=Path(args.portfolio_gate_path).expanduser().resolve() if str(args.portfolio_gate_path or "").strip() else None,
+        portfolio_scoring_path_arg=Path(args.portfolio_scoring_path).expanduser().resolve() if str(args.portfolio_scoring_path or "").strip() else None,
+    )
     print(json.dumps({"status": payload["status"], "canonical_blocker": payload["canonical_blocker"], "path": payload["artifact_path"], "selected_intent_pointer_path": payload.get("selected_intent_pointer_path", "")}, sort_keys=True))
     return 0 if payload["status"] in {"SELECTED", "NO_EXECUTABLE_INTENT"} else 2
 

@@ -215,6 +215,7 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
 def _evaluate_dependencies(ctx: DayActivationContext, manifest: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     results: Dict[str, Dict[str, Any]] = {}
     bootstrap_admission_applied = False
+    runtime_admission_applied = False
     for dependency in manifest.get('dependencies', []):
         dep_id = str(dependency.get('dependency_id') or '').strip()
         upstream_ids = [str(x).strip() for x in dependency.get('upstream_dependency_ids') or [] if str(x).strip()]
@@ -236,6 +237,11 @@ def _evaluate_dependencies(ctx: DayActivationContext, manifest: Dict[str, Any]) 
                     if dep_id == 'target_day_admission_v1' and status == STATUS_PRESENT:
                         if str(obj.get('mode') or '').strip().upper() == BOOTSTRAP_MODE:
                             bootstrap_admission_applied = True
+                        if (
+                            str(obj.get('validation_status') or '').strip().upper() == 'VALID'
+                            and str(obj.get('admission_authority_source') or '').strip() == 'RUNTIME_EVALUATION_MANUAL_CAPTURE'
+                        ):
+                            runtime_admission_applied = True
                 except Exception as exc:
                     status = STATUS_FAILED
                     detail = f'PARSE_OR_VALIDATION_FAILED:{type(exc).__name__}:{exc}'
@@ -248,12 +254,12 @@ def _evaluate_dependencies(ctx: DayActivationContext, manifest: Dict[str, Any]) 
                 detail = f'BLOCKED_BY_UPSTREAM:{upstream_blockers}'
 
             if (
-                bootstrap_admission_applied
+                (bootstrap_admission_applied or runtime_admission_applied)
                 and dep_id in {'canonical_authority_head_v1', 'authorization_gate_verdict_v1'}
                 and status in {STATUS_MISSING, STATUS_STALE, STATUS_FAILED, STATUS_BLOCKED_BY_UPSTREAM}
             ):
                 status = STATUS_PRESENT
-                detail = f'BOOTSTRAP_OVERRIDE:{dep_id}'
+                detail = f'{"RUNTIME_ADMISSION_OVERRIDE" if runtime_admission_applied else "BOOTSTRAP_OVERRIDE"}:{dep_id}'
                 upstream_blockers = []
 
         results[dep_id] = {
@@ -367,6 +373,13 @@ def run_day_activation_authority_v1(*, repo_root: Path, operation_type: str, day
                 entry = {'dependency_id': dep_id, 'path': row['path'], 'sha256': row['sha256'], 'owner_ref': row['owner_ref'], 'role_class': row['role_class'], 'status': row['status']}
                 refs.append(entry)
                 ref_map[dep_id] = entry
+        admission_payload = {}
+        admission_ref = ref_map.get('target_day_admission_v1')
+        if isinstance(admission_ref, dict) and str(admission_ref.get('path') or '').strip():
+            try:
+                admission_payload = _read_json(Path(str(admission_ref.get('path'))))
+            except Exception:
+                admission_payload = {}
         package_obj = {
             'schema_id': 'day_activation_package',
             'schema_version': 'v1',
@@ -380,12 +393,27 @@ def run_day_activation_authority_v1(*, repo_root: Path, operation_type: str, day
             'target_day_admission_ref': ref_map.get('target_day_admission_v1'),
             'canonical_authority_head_ref': ref_map.get('canonical_authority_head_v1'),
             'authorization_gate_verdict_ref': ref_map.get('authorization_gate_verdict_v1'),
+            'runtime_evaluation_hash': str(admission_payload.get('runtime_evaluation_hash') or ''),
+            'market_session_status': str(admission_payload.get('market_session_status') or ''),
+            'calendar_session_classification': str(admission_payload.get('calendar_session_classification') or ''),
+            'enabled_sleeves': admission_payload.get('enabled_sleeves') if isinstance(admission_payload.get('enabled_sleeves'), list) else [ctx.sleeve_id],
+            'disabled_sleeves': admission_payload.get('disabled_sleeves') if isinstance(admission_payload.get('disabled_sleeves'), list) else [],
+            'policy_version': str(admission_payload.get('policy_version') or 'day_activation_authority.v1'),
+            'data_readiness_hash': str(admission_payload.get('data_readiness_hash') or ''),
+            'sleeve_readiness_hash': str(admission_payload.get('sleeve_readiness_hash') or ''),
+            'manual_intent_hash': str(admission_payload.get('manual_intent_hash') or ''),
+            'validation_status': 'VALID',
             'build_ref': {'path': str(build_path), 'sha256': build_sha},
             'manifest_ref': str((ctx.repo_root / MANIFEST_REGISTRY_RELPATH).resolve()),
             'dependency_refs': refs,
             'seal_basis': 'day activation closure achieved',
             'sealed': True,
             'sealed_utc': _anchor_utc(ctx.day_utc),
+            'broker_execution_allowed': False,
+            'broker_submit_transmit_allowed': False,
+            'order_routing_allowed': False,
+            'autonomous_execution_allowed': False,
+            'trade_advice_allowed': False,
         }
         package_obj['package_hash'] = canonical_hash_for_c2_artifact_v1(package_obj)
         validate_against_repo_schema_v1(package_obj, ctx.repo_root, PACKAGE_SCHEMA_RELPATH)

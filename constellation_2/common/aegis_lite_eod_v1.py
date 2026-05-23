@@ -261,6 +261,7 @@ def build_aegis_lite_eod_report_v1(
     eod_input_contract: dict[str, Any] | None = None,
     blocked_advisory_candidates: list[dict[str, Any]] | None = None,
     candidate_lineage_artifact_path: str = "",
+    candidate_consumption_audit_artifact_path: str = "",
     eod_run_manifest_path: str = "",
     market_snapshot_authority_path: str = "",
     promoted_sleeve_manifest_path: str = "",
@@ -366,6 +367,11 @@ def build_aegis_lite_eod_report_v1(
         "current_exposure_by_sleeve": feedback["current_exposure_by_sleeve"],
         "manual_execution_queue": feedback["manual_execution_queue"],
         "eod_input_contract": input_contract,
+        "eod_outcome_status": _eod_outcome_status_v1(
+            report_candidates=report_candidates,
+            input_contract=input_contract,
+            blockers=blockers,
+        ),
         "empty_section_reasons": _empty_section_reasons_v1(
             report_candidates=report_candidates,
             blocked_advisory_candidates=blocked_advisory_candidates or [],
@@ -375,6 +381,7 @@ def build_aegis_lite_eod_report_v1(
         ),
         "blocked_advisory_candidates": blocked_advisory_candidates or [],
         "candidate_lineage_artifact_path": str(candidate_lineage_artifact_path),
+        "candidate_consumption_audit_artifact_path": str(candidate_consumption_audit_artifact_path),
         "eod_run_manifest_path": str(eod_run_manifest_path),
         "market_snapshot_authority_path": str(market_snapshot_authority_path),
         "promoted_sleeve_manifest_path": str(promoted_sleeve_manifest_path),
@@ -510,6 +517,22 @@ def _suppress_no_trade_candidate_gate(gates: list[dict[str, Any]]) -> list[dict[
     return out
 
 
+def _eod_outcome_status_v1(*, report_candidates: list[dict[str, Any]], input_contract: dict[str, Any], blockers: list[str]) -> str:
+    contract_status = _text(input_contract.get("status")).upper()
+    contract_blockers = set(_string_list(input_contract.get("blockers")))
+    if report_candidates and contract_status == "PASS":
+        return "READY_WITH_PROMOTED_CANDIDATES"
+    if contract_status == "NO_PROMOTABLE_CANDIDATES":
+        return "NORMAL_NO_OP_NO_PROMOTED_CANDIDATES"
+    if any(blocker.startswith("MARKET_SNAPSHOT_") for blocker in contract_blockers) or "BLOCKED_UNCERTIFIED_SYMBOLS" in blockers:
+        return "BLOCKED_UNCERTIFIED_SYMBOLS"
+    if contract_blockers.intersection({"PROMOTED_SLEEVE_LIBRARY_REQUIRED", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE", "MISSING_PROMOTION_APPROVAL"}):
+        return "BLOCKED_PROMOTION_POLICY"
+    if contract_status == "INPUT_CONTRACT_FAILED":
+        return "BLOCKED_MISSING_REQUIRED_INPUT"
+    return "BLOCKED_PROMOTION_POLICY" if blockers else "READY_WITH_PROMOTED_CANDIDATES"
+
+
 def _report_status_v1(
     *,
     blockers: list[str],
@@ -521,6 +544,8 @@ def _report_status_v1(
     contract_status = _text(input_contract.get("status")).upper()
     if contract_status == "INPUT_CONTRACT_FAILED":
         return "INPUT_CONTRACT_FAILED"
+    if contract_status == "NO_PROMOTABLE_CANDIDATES":
+        return "ADVISORY_ONLY"
     if not has_explicit_input_contract:
         return "BLOCKED" if blockers else ("READY_WITH_WARNINGS" if warnings else "READY")
     if any("RELEASE_MISMATCH" in blocker for blocker in blockers):
@@ -549,6 +574,10 @@ def _empty_section_reasons_v1(
         executable_reason = ""
     elif clean_no_signal:
         executable_reason = "no raw candidates generated"
+    elif "NO_PROMOTABLE_CANDIDATES" in contract_blockers:
+        executable_reason = "raw candidates existed but none passed promotion governance"
+    elif "MISSING_PROMOTION_APPROVAL" in contract_blockers:
+        executable_reason = "no approved promoted sleeve library for EOD report"
     elif "CANDIDATE_INPUT_MISSING" in contract_blockers:
         executable_reason = "candidates not supplied to EOD"
     elif "PROMOTED_SLEEVE_LIBRARY_REQUIRED" in contract_blockers:
@@ -572,6 +601,10 @@ def _empty_section_reasons_v1(
         blocked_reason = ""
     elif clean_no_signal:
         blocked_reason = "no raw candidates generated"
+    elif "NO_PROMOTABLE_CANDIDATES" in contract_blockers:
+        blocked_reason = "raw candidates were preserved for lineage but excluded from the report because promotion governance was not satisfied"
+    elif "MISSING_PROMOTION_APPROVAL" in contract_blockers:
+        blocked_reason = "no approved promoted sleeve library exists for the EOD report"
     elif "CANDIDATE_INPUT_MISSING" in contract_blockers:
         blocked_reason = "raw candidates may exist upstream but candidate input was not consumed"
     elif report_candidates:

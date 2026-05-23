@@ -69,11 +69,12 @@ def _packet(**overrides: object) -> dict[str, object]:
     return build_event_tactical_packet_v1(**base)
 
 
-def test_eod_timer_changed_to_1550_et() -> None:
+def test_lite_sleeve_timer_runs_at_0950_and_1450_utc() -> None:
     timer = (REPO_ROOT / "ops/systemd/user/aegis-lite-eod-report-v1.timer").read_text(encoding="utf-8")
 
-    assert "OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York" in timer
-    assert "15:35:00 America/New_York" not in timer
+    assert "OnCalendar=*-*-* 09:50:00 UTC" in timer
+    assert "OnCalendar=*-*-* 14:50:00 UTC" in timer
+    assert "15:50:00" not in timer
 
 
 def test_event_awareness_cannot_mutate_canonical_eod_state(tmp_path: Path) -> None:

@@ -1,0 +1,13 @@
+[Unit]
+Description=Aegis Final EOD Market Data Certification v1 (no execution)
+Documentation=file:/home/node/constellation/docs/aegis_market_data_readiness_v1.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation
+Environment=PYTHONUNBUFFERED=1
+Environment=AEGIS_LITE_MANUAL_ONLY=1
+Environment=AEGIS_MARKET_DATA_MODE=FINAL_EOD_CERTIFIED
+EnvironmentFile=-/home/node/constellation_runtime_data/config/aegis_market_data.env
+EnvironmentFile=/home/node/constellation_runtime_data/config/private/aegis_eod_provider.env
+ExecStart=/usr/bin/bash -lc 'DAY_UTC=${TARGET_DAY:-$(date -u +%%F)}; PYTHON_BIN=${AEGIS_PYTHON:-/usr/bin/python3}; TRUTH_ROOT=${AEGIS_TRUTH_ROOT:-/home/node/constellation_runtime_data/truth}; "$PYTHON_BIN" ops/tools/run_aegis_final_eod_certification_v1.py --truth-root "$TRUTH_ROOT" --day-utc "$DAY_UTC" --market-data-mode FINAL_EOD_CERTIFIED --use-latest-trading-day-on-or-before'

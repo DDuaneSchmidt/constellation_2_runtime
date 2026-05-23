@@ -13,6 +13,7 @@ from constellation_2.common.aegis_chatgpt_control_packet_v1 import (
     render_aegis_chatgpt_control_packet_summary_v1,
     write_aegis_chatgpt_control_packet_v1,
 )
+from ops.aegis.runtime_truth_kernel_v1 import build_runtime_truth_kernel_v1, write_runtime_truth_kernel_reports_v1
 from ops.tools import build_aegis_chatgpt_control_packet_v1 as cli
 
 
@@ -23,13 +24,22 @@ VALID_UNTIL = "2099-01-01T20:55:00Z"
 
 def test_complete_packet_builds_with_all_sections(tmp_path: Path) -> None:
     _write_complete_sources(tmp_path)
+    kernel = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+    write_runtime_truth_kernel_reports_v1(truth_root=tmp_path, payload=kernel)
 
     packet = build_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
 
     assert packet["schema_id"] == "aegis_chatgpt_control_packet"
-    assert packet["runtime_truth_classification"] == "REAL_RUNTIME"
-    assert packet["trade_advice_allowed"] is True
-    assert packet["manual_trade_capture_allowed"] is True
+    assert packet["runtime_truth_classification"] == "PARTIAL_CONTEXT"
+    assert packet["runtime_evaluation_hash"]
+    assert packet["runtime_evaluation_path"].endswith("runtime_evaluation.v1.json")
+    assert packet["packet_generated_at_utc"] == NOW
+    assert packet["packet_day_utc"] == DAY
+    assert packet["packet_freshness_status"] == "CURRENT"
+    assert packet["readiness_state"]["target_operating_mode"] == "HUMAN_APPROVED_ADVISORY_RUNTIME"
+    assert packet["readiness_state"]["live_broker_trading_policy"] == "DISABLED_BY_DESIGN"
+    assert packet["trade_advice_allowed"] is False
+    assert packet["manual_trade_capture_allowed"] is False
     assert packet["current_actionable_items"][0]["symbol"] == "SPY"
     assert packet["safety_assertions"]["manual_execution_only"] is True
     for section in [
@@ -83,18 +93,21 @@ def test_stale_required_source_blocks_manual_capture(tmp_path: Path) -> None:
 
 
 def test_do_not_claim_includes_deferred_unproven_items(tmp_path: Path) -> None:
-    _write_complete_sources(tmp_path, dataset_missing=True, ai_review=False)
+    _write_complete_sources(tmp_path, dataset_missing=True, ai_review=False, omit={"alert_transport_proof"})
 
     packet = build_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
 
     joined = "\n".join(packet["do_not_claim"])
     assert "Live email/SMS transport is not proven" in joined
-    assert "Research dataset binding is incomplete" in joined
+    assert "Do not claim broker submit/transmit" in joined
+    assert "Research dataset binding must be current" in joined
     assert "AI feedback is deterministic fallback only" in joined
 
 
 def test_source_artifact_refs_are_preserved_and_output_is_deterministic(tmp_path: Path) -> None:
     _write_complete_sources(tmp_path)
+    kernel = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+    write_runtime_truth_kernel_reports_v1(truth_root=tmp_path, payload=kernel)
 
     first = build_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
     second = build_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
@@ -107,6 +120,8 @@ def test_source_artifact_refs_are_preserved_and_output_is_deterministic(tmp_path
 
 def test_packet_cli_writes_artifact_and_has_no_broker_dependency(tmp_path: Path, capsys) -> None:
     _write_complete_sources(tmp_path)
+    kernel = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+    write_runtime_truth_kernel_reports_v1(truth_root=tmp_path, payload=kernel)
 
     assert cli.main(["--truth_root", str(tmp_path), "--day", DAY, "--generated_at_utc", NOW, "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
@@ -116,6 +131,8 @@ def test_packet_cli_writes_artifact_and_has_no_broker_dependency(tmp_path: Path,
     assert payload["ib_automation_required"] is False
     assert payload["autonomous_execution_allowed"] is False
     assert "AEGIS CHATGPT CONTROL PACKET" in render_aegis_chatgpt_control_packet_summary_v1(payload)
+    assert "target_operating_mode: HUMAN_APPROVED_ADVISORY_RUNTIME" in render_aegis_chatgpt_control_packet_summary_v1(payload)
+    assert "live_broker_trading_policy: DISABLED_BY_DESIGN" in render_aegis_chatgpt_control_packet_summary_v1(payload)
     assert write_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, payload=payload).exists()
 
 
@@ -139,14 +156,14 @@ def _write_complete_sources(
                 "generated_at_utc": generated_at,
                 "broker_mode": "MANUAL_ONLY",
                 "ib_automation_status": "DEFERRED",
-                "canonical_eod_timer": "15:50 America/New_York",
+                "canonical_eod_timer": "09:50 UTC and 14:50 UTC",
                 "manual_execution_only": True,
                 "broker_submit_required": False,
                 "runtime_truth_classification": runtime_truth_classification,
             },
         ),
         "aegis_lite_eod_report": (
-            "reports/aegis_lite_eod_report_v1/2026-05-15/aegis_lite_eod_report.v1.json",
+            "reports/aegis_lite_eod_report_v1/2026-05-15/eod-1/aegis_lite_eod_report.v1.json",
             {
                 "schema_id": "aegis_lite_eod_report",
                 "artifact_id": "aegis_lite_eod_report_v1",
@@ -160,7 +177,7 @@ def _write_complete_sources(
             },
         ),
         "operator_execution_queue": (
-            "reports/operator_execution_queue_v1/2026-05-15/operator_execution_queue.v1.json",
+            "reports/operator_execution_queue_v1/2026-05-15/eod-1/operator_execution_queue.v1.json",
             {
                 "schema_id": "operator_execution_queue",
                 "artifact_id": "operator_execution_queue_v1",
@@ -219,7 +236,7 @@ def _write_complete_sources(
             },
         ),
         "event_rules_registry": (
-            "reports/event_rules_registry_v1/2026-05-15/run/event_rules_registry.v1.json",
+            "reports/event_rules_registry_v1/2026-05-15/event_rules_registry.v1.json",
             {
                 "schema_id": "event_rules_registry",
                 "artifact_id": "event_rules_registry_v1",
@@ -230,7 +247,7 @@ def _write_complete_sources(
             },
         ),
         "promoted_sleeve_library": (
-            "reports/promoted_sleeve_library_v1/promoted_sleeve_library.v1.json",
+            "reports/promoted_sleeve_library_v1/current/promoted_sleeve_library.v1.json",
             {
                 "schema_id": "promoted_sleeve_library",
                 "artifact_id": "promoted_sleeve_library_v1",
@@ -241,8 +258,8 @@ def _write_complete_sources(
             },
         ),
         "research_task_queue": (
-            "research_lab/research_task_queue_v1/research_task_queue.v1.json",
-            {"schema_id": "research_task_queue", "artifact_id": "research_task_queue_v1", "generated_at_utc": generated_at, "tasks": []},
+            "research_lab/research_task_queue_v1/2026-05-15/index/research_task_queue.v1.json",
+            {"schema_id": "research_task_queue", "artifact_id": "research_task_queue_v1", "day_utc": DAY, "generated_at_utc": generated_at, "tasks": []},
         ),
         "operator_inbox_review_report": (
             "operator_inbox_review_report_v1/latest/operator_inbox_review_report.v1.json",
@@ -271,10 +288,49 @@ def _write_complete_sources(
                 ],
             },
         ),
+        "manual_execution_receipt": (
+            "reports/manual_execution_receipt_v1/2026-05-15/run/manual_execution_receipt.v1.json",
+            {
+                "schema_id": "manual_execution_receipt",
+                "artifact_id": "manual_execution_receipt_v1",
+                "day_utc": DAY,
+                "generated_at_utc": generated_at,
+                "receipt_type": "MANUAL_FILL_RECORDED",
+                "operator_declared_no_manual_execution": False,
+                "manual_fill_present": True,
+                "fill_details_present": True,
+                "source": "manual_entry",
+                "trade_ids": ["trade-1"],
+                "evidence_paths": [],
+                "evidence_hash": "hash",
+                "result": "MANUAL_FILL_RECEIPT_VALID",
+                "receipt_id": "receipt-1",
+                "broker_submission_by_aegis": False,
+                "autonomous_execution": False,
+            },
+        ),
+        "event_validity_gate": (
+            "reports/event_validity_gate_v1/2026-05-15/run/event_validity_gate.v1.json",
+            {
+                "schema_id": "event_validity_gate",
+                "artifact_id": "event_validity_gate_v1",
+                "day_utc": DAY,
+                "generated_at_utc": generated_at,
+                "evaluated": True,
+                "event_packet_present": True,
+                "event_packet_path": "/tmp/event_packet.v1.json",
+                "source_event_snapshot_path": "",
+                "validity_status": "VALID",
+                "reason": "Event packet exists.",
+                "evidence_hash": "hash",
+                "generated_by_command": "test",
+                "validation_command": "test",
+            },
+        ),
     }
     if ai_review:
         sources["ai_feedback_review"] = (
-            "reports/ai_feedback_review_v1/2026-05-15/review/ai_feedback_review.v1.json",
+            "reports/ai_feedback_review_v1/EOD/2026-05-15/ai_feedback_review.v1.json",
             {
                 "schema_id": "ai_feedback_review",
                 "artifact_id": "ai_feedback_review_v1",
@@ -282,12 +338,55 @@ def _write_complete_sources(
                 "generated_at_utc": generated_at,
                 "evidence_gate_status": "PASS",
                 "research_tasks_created": [],
-                "ai_used": False,
-                "deterministic_fallback_used": True,
+                "ai_used": True,
+                "deterministic_fallback_used": False,
                 "human_review_required": True,
                 "production_mutation": False,
             },
         )
+    sources["broker_lifecycle_proof"] = (
+        "reports/broker_lifecycle_proof_v1/2026-05-15/run/broker_lifecycle_proof.v1.json",
+        {
+            "schema_id": "broker_lifecycle_proof",
+            "schema_version": "v1",
+            "artifact_id": "broker_lifecycle_proof_v1",
+            "day_utc": DAY,
+            "generated_at_utc": generated_at,
+            "lifecycle_mode": "PAPER",
+            "evaluated": True,
+            "broker_connected": True,
+            "order_created": True,
+            "order_submitted": True,
+            "order_acknowledged": True,
+            "order_filled": False,
+            "order_cancelled": True,
+            "account_type": "paper",
+            "broker": "IBKR",
+            "evidence_paths": [],
+            "external_ids_redacted": [],
+            "result": "PAPER_LIFECYCLE_CONFIRMED",
+            "evidence_hash": "hash",
+        },
+    )
+    sources["alert_transport_proof"] = (
+        "reports/alert_transport_proof_v1/2026-05-15/run/alert_transport_proof.v1.json",
+        {
+            "schema_id": "alert_transport_proof",
+            "artifact_id": "alert_transport_proof_v1",
+            "day_utc": DAY,
+            "generated_at_utc": generated_at,
+            "transport_mode": "LIVE",
+            "evaluated": True,
+            "delivery_attempted": True,
+            "delivery_confirmed": True,
+            "channel": "email",
+            "dry_run": False,
+            "provider_message_id": "redacted",
+            "destination_redacted": "operator@example.invalid",
+            "result": "LIVE_CONFIRMED",
+            "evidence_hash": "hash",
+        },
+    )
     for key, (relpath, payload) in sources.items():
         if key not in omit:
             _write_json(root / relpath, payload)
@@ -300,6 +399,7 @@ def _manual_packet(*, runtime_truth_classification: str, generated_at: str) -> d
         "packet_id": "packet-1",
         "run_id": "eod-1",
         "date": DAY,
+        "day_utc": DAY,
         "generated_at_utc": generated_at,
         "runtime_truth_classification": runtime_truth_classification,
         "manual_execution_only": True,

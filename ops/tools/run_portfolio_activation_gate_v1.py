@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.candidate_observability_v1 import build_candidate_generation_manifest_v1, write_candidate_generation_manifest_v1
+from ops.aegis.candidate_snapshot_plane_v1 import build_candidate_snapshot_v1, write_candidate_snapshot_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
 from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1, portfolio_state_path
@@ -68,29 +69,53 @@ def _latest_scan_rollup_path(truth_root: Path, day_utc: str) -> Path:
     return sleeve_evaluation_rollup_path(truth_root=truth_root, day_utc=day_utc)
 
 
-def _intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
+def _empty_intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
+    return {
+        "raw_intent_id": "",
+        "raw_intent_path": "",
+        "raw_intent_hash": "",
+        "raw_intent_symbol": str(outcome.get("intent_symbol") or outcome.get("producer_requested_symbol") or "").upper(),
+    }
+
+
+def _intents_from_outcome(outcome: dict[str, Any]) -> list[dict[str, str]]:
     lifecycle_decision = str(outcome.get("lifecycle_decision") or "").strip().upper()
     if lifecycle_decision and lifecycle_decision != "INTENT_CREATED":
-        return {"raw_intent_id": "", "raw_intent_path": "", "raw_intent_hash": "", "raw_intent_symbol": str(outcome.get("intent_symbol") or outcome.get("producer_requested_symbol") or "").upper()}
+        return [_empty_intent_from_outcome(outcome)]
+
     output_intents = outcome.get("output_intents") if isinstance(outcome.get("output_intents"), list) else []
-    if output_intents and isinstance(output_intents[0], dict):
-        row = output_intents[0]
-        return {
-            "raw_intent_id": str(row.get("intent_id") or ""),
-            "raw_intent_path": str(row.get("intent_path") or ""),
-            "raw_intent_hash": str(row.get("intent_hash") or ""),
-            "raw_intent_symbol": str(row.get("symbol") or "").upper(),
-        }
+    rows: list[dict[str, str]] = []
+    for row in output_intents:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "raw_intent_id": str(row.get("intent_id") or ""),
+                "raw_intent_path": str(row.get("intent_path") or ""),
+                "raw_intent_hash": str(row.get("intent_hash") or ""),
+                "raw_intent_symbol": str(row.get("symbol") or "").upper(),
+            }
+        )
+    if rows:
+        return rows
+
     signature = outcome.get("intent_signature") if isinstance(outcome.get("intent_signature"), list) else []
-    if signature and isinstance(signature[0], dict):
-        row = signature[0]
-        return {
-            "raw_intent_id": str(row.get("intent_id") or ""),
-            "raw_intent_path": str(outcome.get("intent_artifact_path") or ""),
-            "raw_intent_hash": str(row.get("intent_hash") or ""),
-            "raw_intent_symbol": str(row.get("symbol") or outcome.get("intent_symbol") or "").upper(),
-        }
-    return {"raw_intent_id": "", "raw_intent_path": "", "raw_intent_hash": "", "raw_intent_symbol": ""}
+    for row in signature:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "raw_intent_id": str(row.get("intent_id") or ""),
+                "raw_intent_path": str(outcome.get("intent_artifact_path") or ""),
+                "raw_intent_hash": str(row.get("intent_hash") or ""),
+                "raw_intent_symbol": str(row.get("symbol") or outcome.get("intent_symbol") or "").upper(),
+            }
+        )
+    return rows or [_empty_intent_from_outcome(outcome)]
+
+
+def _intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
+    return _intents_from_outcome(outcome)[0]
 
 
 def _load_lifecycle_rows(truth_root: Path, day_utc: str) -> tuple[dict[str, dict[str, Any]], str]:
@@ -124,7 +149,9 @@ def _merge_lifecycle(outcome: dict[str, Any], lifecycle_by_engine: dict[str, dic
         ("symbol", "intent_symbol"),
         ("exposure_type", "exposure_type"),
     ):
-        if source_key in lifecycle:
+        current = merged.get(target_key)
+        current_missing = current is None or current == "" or current == []
+        if source_key in lifecycle and current_missing:
             merged[target_key] = lifecycle.get(source_key)
     merged["lifecycle_state_path"] = lifecycle_path
     return merged
@@ -249,8 +276,12 @@ def build_portfolio_activation_gate_v1(
     truth_root: Path,
     environment: str = PAPER_MODE,
     source_rollup_path: Path | None = None,
+    run_id: str = "",
+    run_mode: str = "INTRADAY_OPERATIONAL",
 ) -> dict[str, Any]:
     truth_root = Path(truth_root).resolve()
+    run_id = str(run_id or f"sleeve_evaluation_kernel_v1:{day_utc}").strip()
+    run_mode = str(run_mode or "INTRADAY_OPERATIONAL").strip().upper()
     state_path = portfolio_state_path(truth_root=truth_root, day_utc=day_utc)
     state = _read_json(state_path)
     if not state:
@@ -266,42 +297,25 @@ def build_portfolio_activation_gate_v1(
             continue
         outcome = _merge_lifecycle(outcome, lifecycle_by_engine, lifecycle_path)
         sleeve_id = str(outcome.get("sleeve_id") or outcome.get("engine_id") or "")
-        intent = _intent_from_outcome(outcome)
-        raw_status = _raw_status(outcome, intent)
-        regime_bucket, overlap_group = _classify(sleeve_id)
-        decision, reasons = _initial_decision(
-            engine_id=sleeve_id,
-            raw_status=raw_status,
-            symbol=str(intent.get("raw_intent_symbol") or ""),
-            state=state,
-        )
-        row = {
-            "sleeve_id": sleeve_id,
-            "raw_signal_status": raw_status,
-            "raw_intent_id": intent["raw_intent_id"],
-            "raw_intent_path": intent["raw_intent_path"],
-            "raw_intent_hash": intent["raw_intent_hash"],
-            "raw_intent_symbol": intent["raw_intent_symbol"],
-            "allowed_by_portfolio_gate": decision == "ALLOW",
-            "portfolio_gate_decision": decision,
-            "reason_codes": reasons,
-            "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
-            "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
-            "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
-            "position_match_status": str(outcome.get("position_match_status") or ""),
-            "order_match_status": str(outcome.get("order_match_status") or ""),
-            "reentry_eligible": bool(outcome.get("reentry_eligible")),
-            "unchanged_signal": bool(outcome.get("unchanged_signal")),
-            "overlap_group": overlap_group,
-            "regime_bucket": regime_bucket,
-            "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
-        }
-        decisions.append(row)
-        raw_signals.append(
-            {
+        for intent in _intents_from_outcome(outcome):
+            raw_status = _raw_status(outcome, intent)
+            regime_bucket, overlap_group = _classify(sleeve_id)
+            decision, reasons = _initial_decision(
+                engine_id=sleeve_id,
+                raw_status=raw_status,
+                symbol=str(intent.get("raw_intent_symbol") or ""),
+                state=state,
+            )
+            row = {
                 "sleeve_id": sleeve_id,
                 "raw_signal_status": raw_status,
-                **intent,
+                "raw_intent_id": intent["raw_intent_id"],
+                "raw_intent_path": intent["raw_intent_path"],
+                "raw_intent_hash": intent["raw_intent_hash"],
+                "raw_intent_symbol": intent["raw_intent_symbol"],
+                "allowed_by_portfolio_gate": decision == "ALLOW",
+                "portfolio_gate_decision": decision,
+                "reason_codes": reasons,
                 "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
                 "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
                 "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
@@ -309,13 +323,49 @@ def build_portfolio_activation_gate_v1(
                 "order_match_status": str(outcome.get("order_match_status") or ""),
                 "reentry_eligible": bool(outcome.get("reentry_eligible")),
                 "unchanged_signal": bool(outcome.get("unchanged_signal")),
-                "source_sleeve_outcome_path": str(outcome.get("artifact_path") or ""),
+                "overlap_group": overlap_group,
+                "regime_bucket": regime_bucket,
+                "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
             }
-        )
+            decisions.append(row)
+            raw_signals.append(
+                {
+                    "sleeve_id": sleeve_id,
+                    "raw_signal_status": raw_status,
+                    **intent,
+                    "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
+                    "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
+                    "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
+                    "position_match_status": str(outcome.get("position_match_status") or ""),
+                    "order_match_status": str(outcome.get("order_match_status") or ""),
+                    "reentry_eligible": bool(outcome.get("reentry_eligible")),
+                    "unchanged_signal": bool(outcome.get("unchanged_signal")),
+                    "source_sleeve_outcome_path": str(outcome.get("artifact_path") or ""),
+                }
+            )
 
     _apply_one_primary_per_bucket(decisions)
+    market_payload: dict[str, Any] = {}
+    market_path = Path(truth_root).resolve() / "reports" / "aegis_market_data_v1" / day_utc / "market_data.v1.json"
+    if market_path.exists():
+        try:
+            loaded_market = json.loads(market_path.read_text(encoding="utf-8"))
+            market_payload = loaded_market if isinstance(loaded_market, dict) else {}
+        except Exception:
+            market_payload = {}
+    gate_certification_state = str(market_payload.get("certification_state") or ("CERTIFIED" if run_mode == "FINAL_EOD_CERTIFIED" else "CERTIFICATION_PENDING")).upper()
+    gate_candidate_lane = str(market_payload.get("candidate_lane") or ("CERTIFIED" if gate_certification_state == "CERTIFIED" else "PROVISIONAL")).upper()
+    gate_certification_label = "CERTIFIED" if gate_candidate_lane == "CERTIFIED" and gate_certification_state == "CERTIFIED" else "NON_CERTIFIED"
+    gate_execution_eligible = gate_certification_label == "CERTIFIED"
+    gate_snapshot_ids = market_payload.get("input_market_data_snapshot_ids") if isinstance(market_payload.get("input_market_data_snapshot_ids"), list) else []
     for row in decisions:
         row["allowed_by_portfolio_gate"] = row.get("portfolio_gate_decision") == "ALLOW"
+        row["candidate_lane"] = gate_candidate_lane
+        row["certification_state"] = gate_certification_state
+        row["certification_label"] = gate_certification_label
+        row["execution_eligible"] = gate_execution_eligible and row["allowed_by_portfolio_gate"]
+        row["read_only"] = not row["execution_eligible"]
+        row["input_market_data_snapshot_ids"] = list(gate_snapshot_ids)
     out_path = portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)
     allowed = [row for row in decisions if row.get("portfolio_gate_decision") == "ALLOW"]
     degraded = [row for row in decisions if row.get("portfolio_gate_decision") == "DEGRADED"]
@@ -324,6 +374,17 @@ def build_portfolio_activation_gate_v1(
         "schema_version": "v1",
         "day_utc": day_utc,
         "environment": environment,
+        "run_id": run_id,
+        "run_mode": run_mode,
+        "market_data_mode": run_mode,
+        "candidate_lane": gate_candidate_lane,
+        "candidate_visibility_lane": gate_candidate_lane,
+        "certification_state": gate_certification_state,
+        "certification_label": gate_certification_label,
+        "input_market_data_snapshot_ids": list(gate_snapshot_ids),
+        "execution_eligible": gate_execution_eligible,
+        "read_only": not gate_execution_eligible,
+        "final_eod_certification_status": str(market_payload.get("final_eod_certification_status") or ("PASS" if gate_execution_eligible else "PENDING")),
         "status": BOOTSTRAP_ACCEPTED_FOR_PAPER if str(state.get("status") or "").strip().upper() == BOOTSTRAP_ACCEPTED_FOR_PAPER else ("DEGRADED" if degraded or str(state.get("status") or "") == "DEGRADED" else "PASS"),
         "canonical_blocker": "",
         "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
@@ -352,17 +413,48 @@ def build_portfolio_activation_gate_v1(
     }
     _write_json(out_path, payload)
     try:
+        from ops.aegis.regime_bucket_candidate_ranking_v1 import build_regime_bucket_candidate_ranking_report_v1
+        ranking = build_regime_bucket_candidate_ranking_report_v1(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            portfolio_gate_path_arg=out_path,
+        )
+        payload["regime_bucket_candidate_ranking_report_path"] = str(ranking.get("artifact_path") or "")
+        payload["regime_bucket_candidate_ranking_summary"] = {
+            "selected_candidate_id": ranking.get("selected_candidate_id"),
+            "selected_candidate_rank": ranking.get("selected_candidate_rank"),
+            "top_ranked_candidate_id": ranking.get("top_ranked_candidate_id"),
+            "order_dependency_detected": bool(ranking.get("order_dependency_detected")),
+            "diagnostic_only": True,
+        }
+        _write_json(out_path, payload)
+    except Exception:
+        pass
+    try:
         manifest = build_candidate_generation_manifest_v1(
             day_utc=day_utc,
             environment=environment,
             truth_root=truth_root,
             outcomes=outcomes if isinstance(outcomes, list) else [],
-            run_id=f"sleeve_evaluation_kernel_v1:{day_utc}",
+            run_id=run_id,
             produced_at_utc=str(payload.get("produced_at_utc") or _now_iso()),
             source_rollup_path=str(rollup_path),
             portfolio_gate=payload,
+            run_mode=run_mode,
         )
-        write_candidate_generation_manifest_v1(truth_root=truth_root, payload=manifest)
+        manifest_path = write_candidate_generation_manifest_v1(truth_root=truth_root, payload=manifest)
+        candidate_snapshot = build_candidate_snapshot_v1(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            candidate_manifest=manifest,
+            source_manifest_path=str(manifest_path),
+        )
+        write_candidate_snapshot_v1(truth_root=truth_root, snapshot=candidate_snapshot)
+    except Exception:
+        pass
+    try:
+        from ops.aegis.operator_state.canonical_operator_state_builder_v1 import build_and_write_operator_state_snapshot_v1
+        build_and_write_operator_state_snapshot_v1(truth_root=truth_root, day_utc=day_utc)
     except Exception:
         pass
     return payload
@@ -374,12 +466,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", default=PAPER_MODE, choices=["PAPER"])
     parser.add_argument("--truth_root", default="")
     parser.add_argument("--source_rollup_path", default="")
+    parser.add_argument("--run-id", "--run_id", dest="run_id", default="")
+    parser.add_argument("--run-mode", "--run_mode", dest="run_mode", choices=["INTRADAY_OPERATIONAL", "FINAL_EOD_CERTIFIED"], default="INTRADAY_OPERATIONAL")
     args = parser.parse_args(argv)
     day_utc = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
     rollup = Path(args.source_rollup_path).resolve() if str(args.source_rollup_path or "").strip() else None
-    payload = build_portfolio_activation_gate_v1(day_utc=day_utc, truth_root=truth_root, environment=str(args.environment).strip().upper(), source_rollup_path=rollup)
-    print(json.dumps({"status": payload["status"], "path": payload["artifact_path"], "decision_count": len(payload["decisions"])}, sort_keys=True))
+    payload = build_portfolio_activation_gate_v1(day_utc=day_utc, truth_root=truth_root, environment=str(args.environment).strip().upper(), source_rollup_path=rollup, run_id=str(args.run_id or ""), run_mode=str(args.run_mode or "INTRADAY_OPERATIONAL"))
+    print(json.dumps({"status": payload["status"], "path": payload["artifact_path"], "decision_count": len(payload["decisions"]), "run_id": payload.get("run_id", ""), "run_mode": payload.get("run_mode", "")}, sort_keys=True))
     return 0 if payload["status"] in {"PASS", "DEGRADED", BOOTSTRAP_ACCEPTED_FOR_PAPER} else 2
 
 

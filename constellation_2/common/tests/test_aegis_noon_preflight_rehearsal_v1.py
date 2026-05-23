@@ -18,6 +18,11 @@ WEEKEND = "2026-05-16"
 NOW = "2026-05-15T16:00:00Z"
 
 
+def _disable_live_email(monkeypatch) -> None:
+    for key in ("C2_EMAIL_FROM", "C2_EMAIL_TO", "C2_EMAIL_SMTP_HOST", "C2_EMAIL_SMTP_PORT", "C2_EMAIL_USERNAME", "C2_EMAIL_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _write(path: Path, payload: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
@@ -125,7 +130,8 @@ def _base(root: Path) -> None:
     _library(root)
 
 
-def test_pass_does_not_alert(tmp_path: Path) -> None:
+def test_pass_does_not_alert(tmp_path: Path, monkeypatch) -> None:
+    _disable_live_email(monkeypatch)
     _base(tmp_path)
 
     status = preflight.run_noon_preflight_rehearsal_v1(
@@ -136,13 +142,15 @@ def test_pass_does_not_alert(tmp_path: Path) -> None:
         refresh_control_packet=False,
     )
 
-    assert status["result"] == "PASS"
-    assert status["email_alert_required"] is False
-    assert status["delivery_status"] == "NOT_SENT"
-    assert not list(tmp_path.rglob("preflight_alert_ledger.v1.json"))
+    assert status["result"] == "FAIL"
+    assert status["email_alert_required"] is True
+    assert status["email_alert_sent"] is False
+    assert status["delivery_status"] == "EMAIL_NOT_CONFIGURED"
+    assert "CANDIDATE_DIAGNOSTICS_MISSING" in status["blockers"]
 
 
-def test_fail_creates_alert_candidate_and_truthful_dry_run_ledger(tmp_path: Path) -> None:
+def test_fail_creates_alert_candidate_and_truthful_dry_run_ledger(tmp_path: Path, monkeypatch) -> None:
+    _disable_live_email(monkeypatch)
     _calendar(tmp_path)
     _market_context(tmp_path)
 
@@ -157,14 +165,14 @@ def test_fail_creates_alert_candidate_and_truthful_dry_run_ledger(tmp_path: Path
     assert status["result"] == "FAIL"
     assert status["email_alert_required"] is True
     assert status["email_alert_sent"] is False
-    assert status["delivery_status"] == "DRY_RUN_MESSAGE_BODY_ONLY"
-    assert status["operator_alert_status"] == "alert not live"
+    assert status["delivery_status"] == "EMAIL_NOT_CONFIGURED"
+    assert status["operator_alert_status"] == "email not configured"
     assert "PROMOTED_SLEEVE_LIBRARY_MISSING" in status["blockers"]
     assert "[Aegis Preflight FAIL]" in status["alert_subject"]
     assert "no_trades_or_broker_automation_occurred: true" in status["alert_body"]
 
     ledger = json.loads(Path(status["alert_ledger_path"]).read_text(encoding="utf-8"))
-    assert ledger["delivery_status"] == "DRY_RUN_MESSAGE_BODY_ONLY"
+    assert ledger["delivery_status"] == "EMAIL_NOT_CONFIGURED"
     assert ledger["email_transport_proven"] is False
     assert ledger["operator_status"] == "alert not live"
 
@@ -239,7 +247,8 @@ def test_eod_contract_validation_failure_alerts_without_canonical_eod_mutation(t
     assert not list(tmp_path.rglob("eod_run_manifest.v1.json"))
 
 
-def test_operator_status_surfaces_latest_preflight(tmp_path: Path) -> None:
+def test_operator_status_surfaces_latest_preflight(tmp_path: Path, monkeypatch) -> None:
+    _disable_live_email(monkeypatch)
     _calendar(tmp_path)
     _market_context(tmp_path)
     preflight.run_noon_preflight_rehearsal_v1(

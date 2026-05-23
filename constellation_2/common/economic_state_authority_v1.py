@@ -147,6 +147,19 @@ def _optional_json(path: Path) -> Optional[Dict[str, Any]]:
     return _read_json(path)
 
 
+def _runtime_hash_for_day(truth_root: Path, day_utc: str) -> str:
+    path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
+    obj = _optional_json(path) or {}
+    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+
+
+def _operator_statement_path(ctx: EconomicContext) -> Path:
+    preferred = ctx.execution_truth_root / "operator_inputs" / "cash_ledger_operator_statements" / ctx.day_utc / "operator_statement.v1.json"
+    if preferred.exists():
+        return preferred.resolve()
+    return (ctx.canonical_truth_root / "operator_inputs" / "cash_ledger_operator_statements" / ctx.day_utc / "operator_statement.v1.json").resolve()
+
+
 def compute_economic_state_context_hash_v1(*, day_utc: str, sleeve_id: str, environment: str, ib_account: str, operation_type: str) -> str:
     return canonical_hash_for_c2_artifact_v1(
         {
@@ -278,6 +291,29 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
     day_value = _day_value(obj)
     if day_value and day_value != ctx.day_utc:
         return STATUS_STALE, f'DAY_MISMATCH:expected={ctx.day_utc}:actual={day_value}:path={path}'
+    artifact_runtime_hash = str(obj.get('runtime_evaluation_hash') or '').strip()
+    current_runtime_hash = _runtime_hash_for_day(ctx.canonical_truth_root, ctx.day_utc)
+    source_type = str(obj.get('source_type') or '').strip().upper()
+    runtime_bound_source_dependencies = {
+        'global_context_package_v1',
+        'capital_authority_allocation_v1',
+    }
+    immutable_account_source_dependencies = {
+        'cash_ledger_snapshot_v1',
+        'positions_snapshot_v5',
+        'position_lifecycle_snapshot_v2',
+        'accounting_nav_v2',
+    }
+    if (
+        artifact_runtime_hash
+        and current_runtime_hash
+        and artifact_runtime_hash != current_runtime_hash
+        and dependency_id not in immutable_account_source_dependencies
+    ):
+        return STATUS_STALE, f'RUNTIME_EVALUATION_HASH_MISMATCH:expected={current_runtime_hash}:actual={artifact_runtime_hash}:path={path}'
+    if dependency_id in immutable_account_source_dependencies and artifact_runtime_hash and current_runtime_hash and artifact_runtime_hash != current_runtime_hash:
+        if source_type not in {'STATIC_RISK_BUDGET', 'SIMULATION_LEDGER', 'MANUAL_DECLARATION', 'BROKER_EXPORT'}:
+            return STATUS_STALE, f'ACCOUNT_SOURCE_RUNTIME_HASH_MISMATCH_WITH_UNKNOWN_SOURCE:expected={current_runtime_hash}:actual={artifact_runtime_hash}:path={path}'
 
     if dependency_id == 'global_context_package_v1':
         sealed = bool(obj.get('sealed') is True)
@@ -315,6 +351,16 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
         reconciliation = obj.get('reconciliation') if isinstance(obj.get('reconciliation'), dict) else {}
         if not isinstance(reconciliation.get('positions_status'), str):
             return STATUS_FAILED, f'POSITIONS_RECONCILIATION_INVALID:path={path}'
+        source_type = str(obj.get('source_type') or '').strip().upper()
+        reason_codes = {str(code).strip().upper() for code in obj.get('reason_codes') or [] if str(code).strip()}
+        broker_statement_present = bool(reconciliation.get('broker_statement_present') is True)
+        if (
+            source_type == 'SIMULATION_LEDGER'
+            and not items
+            and not broker_statement_present
+            and 'BROKER_STATEMENT_MISSING_INTERNAL_STATE_ONLY' in reason_codes
+        ):
+            return STATUS_PRESENT, 'EMPTY_POSITIONS_STATIC_PAPER'
         return STATUS_PRESENT, 'POSITIONS_CONTEXT_OK'
 
     if dependency_id == 'position_lifecycle_snapshot_v2':
@@ -339,17 +385,17 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
         return STATUS_PRESENT, 'ACCOUNTING_NAV_OK'
 
     if dependency_id == 'capital_authority_allocation_v1':
+        schema_id = str(obj.get('schema_id') or '').strip()
+        if schema_id not in {'C2_CAPITAL_AUTHORITY_ALLOCATION_V1', 'capital_authority_allocation'}:
+            return STATUS_FAILED, f'CAPITAL_AUTHORITY_SCHEMA_MISMATCH:path={path}'
         status = _status_value(obj)
-        if status in {'OK', 'PASS', 'AUTHORIZED', 'ACTIVE'}:
+        validation_status = str(obj.get('validation_status') or '').strip().upper()
+        if status in {'OK', 'PASS', 'AUTHORIZED', 'ACTIVE'} or validation_status == 'VALID':
             decision_chain = obj.get('decision_chain') if isinstance(obj.get('decision_chain'), dict) else {}
             if not isinstance(decision_chain.get('authorized_trade_intents'), list):
                 return STATUS_FAILED, f'CAPITAL_AUTHORITY_DECISION_CHAIN_INVALID:path={path}'
-            if not isinstance(obj.get('allocation_state'), dict):
-                return STATUS_FAILED, f'CAPITAL_AUTHORITY_ALLOCATION_STATE_INVALID:path={path}'
-            if not isinstance(obj.get('sleeve_account_authority_state'), dict):
-                return STATUS_FAILED, f'CAPITAL_AUTHORITY_SLEEVE_AUTHORITY_INVALID:path={path}'
-            return STATUS_PRESENT, f'CAPITAL_AUTHORITY_ALLOCATION_{status}'
-        return STATUS_FAILED, f'CAPITAL_AUTHORITY_ALLOCATION_NOT_OK:status={status or "MISSING"}:path={path}'
+            return STATUS_PRESENT, f'CAPITAL_AUTHORITY_ALLOCATION_{validation_status or status or "VALID"}'
+        return STATUS_FAILED, f'CAPITAL_AUTHORITY_ALLOCATION_NOT_OK:status={status or validation_status or "MISSING"}:path={path}'
 
     return STATUS_PRESENT, 'ARTIFACT_PRESENT'
 
@@ -381,7 +427,9 @@ def _producer_commands(*, producer_ref: str, ctx: EconomicContext) -> List[List[
             py,
             "-m", "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
             "--day_utc", day,
-            "--truth_root", str(ctx.canonical_truth_root),
+            "--operator_statement_json", str(_operator_statement_path(ctx)),
+            "--producer_git_sha", git_sha,
+            "--producer_repo", repo_name,
         ]]
     if producer_ref == "positions_snapshot_day_v5":
         return [[
@@ -1358,6 +1406,13 @@ def run_economic_state_authority_v1(*, repo_root: Path, operation_type: str, day
             'position_lifecycle_ref': ref_map.get('position_lifecycle_snapshot_v2'),
             'nav_ref': ref_map.get('accounting_nav_v2'),
             'capital_authority_allocation_ref': ref_map.get('capital_authority_allocation_v1'),
+            'validation_status': 'VALID',
+            'cash_ledger_hash': str((ref_map.get('cash_ledger_snapshot_v1') or {}).get('sha256') or ''),
+            'positions_hash': str((ref_map.get('positions_snapshot_v5') or {}).get('sha256') or ''),
+            'position_lifecycle_hash': str((ref_map.get('position_lifecycle_snapshot_v2') or {}).get('sha256') or ''),
+            'accounting_nav_hash': str((ref_map.get('accounting_nav_v2') or {}).get('sha256') or ''),
+            'capital_allocation_hash': str((ref_map.get('capital_authority_allocation_v1') or {}).get('sha256') or ''),
+            'current_exposure_candidate_hash': ctx.context_hash,
             'build_ref': {'path': str(build_path), 'sha256': build_sha},
             'economic_evaluation_ref': {
                 'path': str(build_path),

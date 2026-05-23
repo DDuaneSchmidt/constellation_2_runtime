@@ -7,4 +7,5 @@ Type=oneshot
 WorkingDirectory=/home/node/constellation_active
 Environment=PYTHONUNBUFFERED=1
 Environment=AEGIS_LITE_MANUAL_ONLY=1
-ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_lite_eod_pipeline_v1 --day_utc @today_utc@ --environment PAPER --manual-only --allow-not-ready-exit-zero
+Environment=AEGIS_MARKET_DATA_MODE=INTRADAY_OPERATIONAL
+ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_intraday_sleeves_now_v1 --day-utc @today_utc@ --truth-root /home/node/constellation_runtime_data/truth --environment PAPER

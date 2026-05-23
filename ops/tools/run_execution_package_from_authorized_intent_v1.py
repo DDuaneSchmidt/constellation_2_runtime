@@ -18,9 +18,25 @@ from constellation_2.common.advisory.execution_package_builder_from_execution_in
     stage_candidate_from_execution_intent_v1,
 )
 from constellation_2.common.execution_build_authority_v1 import run_execution_build_authority_v1
+from constellation_2.common.day_activation_authority_v1 import (
+    day_activation_build_path_v1,
+    day_activation_package_path_v1,
+    resolve_day_activation_context_v1,
+)
+from constellation_2.common.global_context_authority_v1 import (
+    global_context_build_path_v1,
+    global_context_package_path_v1,
+    resolve_global_context_v1,
+)
+from constellation_2.common.economic_state_authority_v1 import (
+    economic_state_build_path_v1,
+    economic_state_package_path_v1,
+    resolve_economic_state_context_v1,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from ops.tools.run_risk_definition_contract_v1 import load_valid_risk_definition_contract_v1
+from ops.aegis.candidate_identity_set_v1 import load_candidate_identity_set_v1
 
 
 def _git_sha() -> str:
@@ -48,6 +64,17 @@ def _read_json_if_exists(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _sha256_file(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _capital_authority_path(truth_root: Path, day_utc: str) -> Path:
     return (
         truth_root
@@ -59,7 +86,18 @@ def _capital_authority_path(truth_root: Path, day_utc: str) -> Path:
 
 
 def _intent_path(truth_root: Path, day_utc: str, intent_hash: str) -> Path:
-    return (truth_root / "intents_v1" / "snapshots" / day_utc / f"{intent_hash}.exposure_intent.v1.json").resolve()
+    direct = (truth_root / "intents_v1" / "snapshots" / day_utc / f"{intent_hash}.exposure_intent.v1.json").resolve()
+    if direct.exists():
+        return direct
+    pointer_path = truth_root / "pointers" / "selected_intent_pointer.v1.json"
+    pointer = _read_json_if_exists(pointer_path)
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    if str(selected.get("intent_hash") or "").lower() == intent_hash.lower():
+        selected_path = Path(str(selected.get("intent_path") or "")).expanduser().resolve()
+        if selected_path.exists():
+            return selected_path
+    sleeve = (truth_root.parent / "truth_sleeves" / "PRIMARY" / "PAPER" / "intents_v1" / "snapshots" / day_utc / f"{intent_hash}.exposure_intent.v1.json").resolve()
+    return sleeve if sleeve.exists() else direct
 
 
 def _authorized_row(*, capital: dict[str, Any], intent_id: str) -> dict[str, Any]:
@@ -151,23 +189,54 @@ def _execution_build_chain_map(
     execution_root = Path(str(candidate_ref.get("execution_truth_root") or truth_root)).resolve()
     sleeve_id = str(candidate_ref.get("sleeve_id") or "PRIMARY").strip() or "PRIMARY"
     environment = str(candidate_ref.get("environment") or "PAPER").strip() or "PAPER"
-    ib_account = "DUO847203"
     target_admission_path = (canonical_root / "target_day_admission_v1" / f"{day_utc}.json").resolve()
     target_admission = _read_json_if_exists(target_admission_path)
     execution_build_path = Path(str(build_path or "")).resolve() if str(build_path or "").strip() else Path()
     execution_build = _read_json_if_exists(execution_build_path) if str(build_path or "").strip() else build_obj
-    global_build_path = ""
+    operation_type = str(candidate_ref.get("operation_type") or "fresh_paper_entry_v1").strip() or "fresh_paper_entry_v1"
+    ib_account = str(candidate_ref.get("ib_account") or candidate_ref.get("account_id") or "DUO847203").strip() or "DUO847203"
+    day_ctx = resolve_day_activation_context_v1(
+        repo_root=REPO_ROOT,
+        operation_type=operation_type,
+        day_utc=day_utc,
+        sleeve_id=sleeve_id,
+        environment=environment,
+        ib_account=ib_account,
+    )
+    global_ctx = resolve_global_context_v1(
+        repo_root=REPO_ROOT,
+        operation_type=operation_type,
+        day_utc=day_utc,
+        sleeve_id=sleeve_id,
+        environment=environment,
+        ib_account=ib_account,
+    )
+    day_build_path_obj = day_activation_build_path_v1(ctx=day_ctx)
+    day_package_path_obj = day_activation_package_path_v1(ctx=day_ctx)
+    global_build_path_obj = global_context_build_path_v1(ctx=global_ctx)
+    global_package_path_obj = global_context_package_path_v1(ctx=global_ctx)
+    economic_ctx = resolve_economic_state_context_v1(
+        repo_root=REPO_ROOT,
+        operation_type=operation_type,
+        day_utc=day_utc,
+        sleeve_id=sleeve_id,
+        environment=environment,
+        ib_account=ib_account,
+    )
+    economic_build_path_obj = economic_state_build_path_v1(ctx=economic_ctx)
+    economic_package_path_obj = economic_state_package_path_v1(ctx=economic_ctx)
+    day_build = _read_json_if_exists(day_build_path_obj)
+    day_package = _read_json_if_exists(day_package_path_obj)
+    global_build = _read_json_if_exists(global_build_path_obj)
+    global_package = _read_json_if_exists(global_package_path_obj)
+    economic_build = _read_json_if_exists(economic_build_path_obj)
+    economic_package = _read_json_if_exists(economic_package_path_obj)
+    economic_refs = {
+        str(row.get("dependency_id") or ""): row
+        for row in (economic_build.get("dependency_results") or [])
+        if isinstance(row, dict)
+    }
     first = execution_build.get("first_real_blocker") if isinstance(execution_build.get("first_real_blocker"), dict) else {}
-    if first:
-        global_build_path = str(first.get("blocking_build_ref") or "")
-    global_build = _read_json_if_exists(Path(global_build_path)) if global_build_path else {}
-    day_build_path = ""
-    global_first = global_build.get("first_real_blocker") if isinstance(global_build.get("first_real_blocker"), dict) else {}
-    detail = str(global_first.get("detail") or "")
-    marker = "build_ref="
-    if marker in detail:
-        day_build_path = detail.split(marker, 1)[1].split(":", 1)[0]
-    day_build = _read_json_if_exists(Path(day_build_path)) if day_build_path else {}
     submission_id = str(execution_build.get("submission_id") or "").strip()
     expected_package_path = (
         str(package_path)
@@ -188,21 +257,44 @@ def _execution_build_chain_map(
         },
         {
             "artifact": "day_activation_package_v1",
-            "status": _node_status(day_build, "closure_status", "status"),
-            "blocker": _node_blocker(day_build),
-            "artifact_path": str(global_first.get("path") or ""),
+            "status": str(day_package.get("validation_status") or _node_status(day_build, "closure_status", "status")),
+            "blocker": _node_blocker(day_build) if not day_package else "",
+            "artifact_path": str(day_package_path_obj),
+            "artifact_hash": _sha256_file(day_package_path_obj) if day_package_path_obj.exists() else "",
+            "build_path": str(day_build_path_obj),
             "producer": "ops/tools/run_day_activation_authority_v1.py",
-            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_activation_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
-            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+            "recovery_command": f'PYTHONPATH="$PWD" python3 ops/tools/run_day_activation_authority_v1.py --operation_type {operation_type} --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES',
+            "blocker_classification": "BLOCKED_BY_UPSTREAM" if not day_package else "CLEARED",
         },
         {
             "artifact": "global_context_package_v1",
-            "status": _node_status(global_build, "closure_status", "status"),
-            "blocker": _node_blocker(global_build),
-            "artifact_path": str(first.get("path") or ""),
+            "status": str(global_package.get("validation_status") or _node_status(global_build, "closure_status", "status")),
+            "blocker": _node_blocker(global_build) if not global_package else "",
+            "artifact_path": str(global_package_path_obj),
+            "artifact_hash": _sha256_file(global_package_path_obj) if global_package_path_obj.exists() else "",
+            "build_path": str(global_build_path_obj),
             "producer": "ops/tools/run_global_context_authority_v1.py",
-            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_global_context_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
-            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+            "recovery_command": f'PYTHONPATH="$PWD" python3 ops/tools/run_global_context_authority_v1.py --operation_type {operation_type} --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES',
+            "blocker_classification": "BLOCKED_BY_UPSTREAM" if not global_package else "CLEARED",
+        },
+        {
+            "artifact": "economic_state_package_v1",
+            "status": str(economic_package.get("validation_status") or _node_status(economic_build, "closure_status", "status")),
+            "blocker": _node_blocker(economic_build) if not economic_package else "",
+            "artifact_path": str(economic_package_path_obj),
+            "artifact_hash": _sha256_file(economic_package_path_obj) if economic_package_path_obj.exists() else "",
+            "build_path": str(economic_build_path_obj),
+            "cash_ledger_path": str((economic_refs.get("cash_ledger_snapshot_v1") or {}).get("path") or ""),
+            "cash_ledger_hash": str((economic_refs.get("cash_ledger_snapshot_v1") or {}).get("sha256") or ""),
+            "positions_snapshot_path": str((economic_refs.get("positions_snapshot_v5") or {}).get("path") or ""),
+            "positions_snapshot_hash": str((economic_refs.get("positions_snapshot_v5") or {}).get("sha256") or ""),
+            "position_lifecycle_path": str((economic_refs.get("position_lifecycle_snapshot_v2") or {}).get("path") or ""),
+            "position_lifecycle_hash": str((economic_refs.get("position_lifecycle_snapshot_v2") or {}).get("sha256") or ""),
+            "accounting_nav_path": str((economic_refs.get("accounting_nav_v2") or {}).get("path") or ""),
+            "accounting_nav_hash": str((economic_refs.get("accounting_nav_v2") or {}).get("sha256") or ""),
+            "producer": "ops/tools/build_account_economic_state_authority_v1.py",
+            "recovery_command": f'PYTHONPATH="$PWD" python3 ops/tools/build_account_economic_state_authority_v1.py --truth-root {canonical_root} --day-utc {day_utc} --operation-type {operation_type} --sleeve-id {sleeve_id} --environment {environment} --ib-account {ib_account}',
+            "blocker_classification": "BLOCKED_BY_UPSTREAM" if not economic_package else "CLEARED",
         },
         {
             "artifact": "execution_build_v1",
@@ -233,6 +325,7 @@ def _build_execution_intent(
     intent_obj: dict[str, Any],
     intent_path: Path,
     risk_contract_path: Path,
+    candidate_identity_set_path: Path,
 ) -> ExecutionIntentV1:
     intent_hash = str(row.get("intent_hash") or "").strip()
     symbol = str(((intent_obj.get("underlying") or {}) if isinstance(intent_obj.get("underlying"), dict) else {}).get("symbol") or row.get("symbol") or "").strip().upper()
@@ -262,7 +355,7 @@ def _build_execution_intent(
         "quantity_shares": quantity,
         "order_terms": {"order_type": "MARKET", "limit_price": None, "time_in_force": "DAY"},
         "parent_lineage_refs": [f"capital_authority_allocation_path:{_capital_authority_path(truth_root, day_utc)}"],
-        "source_artifact_refs": [f"exposure_intent_path:{intent_path}", f"risk_contract_path:{risk_contract_path}", f"intent_hash:{intent_hash}"],
+        "source_artifact_refs": [f"exposure_intent_path:{intent_path}", f"risk_contract_path:{risk_contract_path}", f"candidate_identity_set_path:{candidate_identity_set_path}", f"intent_hash:{intent_hash}"],
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1({**payload, "canonical_json_hash": None})
@@ -318,6 +411,28 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
             blocker=risk_blocker.split(":", 1)[0],
             details={"risk_contract_path": str(risk_contract_path), "risk_contract_blocker": risk_blocker},
         )
+    identity_path, identity_set, identity_blocker = load_candidate_identity_set_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        intent_hash=intent_hash,
+    )
+    if identity_blocker:
+        return _fail_payload(
+            day_utc=day_utc,
+            intent_id=intent_id,
+            truth_root=truth_root,
+            blocker=identity_blocker,
+            details={"candidate_identity_set_path": str(identity_path), "candidate_identity_set_blocker": identity_blocker},
+        )
+    if str(identity_set.get("candidate_id") or "") != intent_id or str(identity_set.get("intent_hash") or "").lower() != intent_hash.lower():
+        return _fail_payload(
+            day_utc=day_utc,
+            intent_id=intent_id,
+            truth_root=truth_root,
+            blocker="CANDIDATE_IDENTITY_SET_MISMATCH",
+            details={"candidate_identity_set_path": str(identity_path), "expected_intent_id": intent_id, "actual_candidate_id": identity_set.get("candidate_id"), "expected_intent_hash": intent_hash, "actual_intent_hash": identity_set.get("intent_hash")},
+        )
+
     exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
     if exposure_type != "LONG_EQUITY":
         if str(risk_contract.get("risk_type") or "").strip().upper() != "DEFINED_RISK":
@@ -343,7 +458,7 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
             blocker="STOP_BASED_RISK_CONTRACT_REQUIRED",
             details={"risk_contract_path": str(risk_contract_path), "risk_type": str(risk_contract.get("risk_type") or "")},
         )
-    execution_intent = _build_execution_intent(day_utc=day_utc, truth_root=truth_root, row=row, intent_obj=intent_obj, intent_path=path, risk_contract_path=risk_contract_path)
+    execution_intent = _build_execution_intent(day_utc=day_utc, truth_root=truth_root, row=row, intent_obj=intent_obj, intent_path=path, risk_contract_path=risk_contract_path, candidate_identity_set_path=identity_path)
     staged = stage_candidate_from_execution_intent_v1(repo_root=REPO_ROOT, execution_intent=execution_intent)
     result = run_execution_build_authority_v1(
         repo_root=REPO_ROOT,
@@ -392,6 +507,13 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
             "intent_hash": intent_hash,
             "risk_contract_path": str(risk_contract_path),
             "risk_contract_id": str(risk_contract.get("contract_id") or ""),
+            "chain_map": _execution_build_chain_map(
+                day_utc=day_utc,
+                truth_root=truth_root,
+                build_obj=build_obj,
+                build_path=str(result.get("build_path") or ""),
+                package_path=str(result.get("package_path") or ""),
+            ),
         },
         "package_path": str(result["package_path"]),
         "build_path": str(result["build_path"]),

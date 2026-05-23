@@ -1,0 +1,21 @@
+{
+  "schema_id": "aegis_paper_trade_construction_defaults",
+  "schema_version": "v1",
+  "enabled": false,
+  "safety": {
+    "paper_only": true,
+    "broker_execution_allowed": false,
+    "live_trading_allowed": false,
+    "order_routing_allowed": false,
+    "capital_allocation_allowed": false,
+    "paper_submit_allowed": false
+  },
+  "paper_defaults": {
+    "paper_test_capital_base": "",
+    "max_notional_per_trade": "",
+    "max_risk_per_trade": "",
+    "entry_reference_rule": "",
+    "quantity_rounding_rule": "",
+    "default_stop_policy": {}
+  }
+}

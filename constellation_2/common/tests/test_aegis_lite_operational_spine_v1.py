@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.aegis_lite_operating_status_v1 import build_aegis_lite_operating_status_v1  # noqa: E402
+from constellation_2.common.aegis_lite_schedule_v1 import sleeve_schedule_metadata_v1, sleeve_schedule_run_key_v1, sleeve_schedule_should_fire_v1  # noqa: E402
 from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     build_manual_execution_event_v1,
     build_manual_operator_decision_v1,
@@ -91,6 +92,7 @@ def _input(candidates: list[dict[str, object]]) -> dict[str, object]:
 
 
 def _run_pipeline(tmp_path: Path, candidates: list[dict[str, object]], *, run_id: str = "test-lite-spine") -> dict[str, object]:
+    _write_market_snapshot(tmp_path, DAY, [str(row.get("symbol") or row.get("symbol_or_pair") or "") for row in candidates])
     return build_aegis_lite_eod_pipeline_v1(
         day_utc=DAY,
         truth_root=tmp_path,
@@ -98,6 +100,16 @@ def _run_pipeline(tmp_path: Path, candidates: list[dict[str, object]], *, run_id
         generated_at_utc=GENERATED,
         input_payload=_input(candidates),
     )
+
+
+def _write_market_snapshot(root: Path, day: str, symbols: list[str]) -> None:
+    market_root = root / "market_data_snapshot_v1"
+    market_root.mkdir(parents=True, exist_ok=True)
+    (market_root / "dataset_manifest.json").write_text(json.dumps({"day_utc": day}), encoding="utf-8")
+    for symbol in sorted({str(item).strip().upper() for item in symbols if str(item).strip()}):
+        path = market_root / symbol / f"{day[:4]}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"timestamp_utc": f"{day}T20:00:00Z", "close": 100}) + "\n", encoding="utf-8")
 
 
 def _force_release_match(tmp_path: Path) -> None:
@@ -170,12 +182,46 @@ def test_blocked_candidate_cannot_appear_in_executable_queue(tmp_path: Path) -> 
     assert "STOP_RISK_MISSING" in view["blocked_or_advisory_trades"][0]["do_not_trade_blockers"]
 
 
-def test_lite_timer_exists_at_1550_et_and_legacy_paper_timers_are_deferred() -> None:
+
+def test_lite_sleeve_schedule_fires_only_at_0950_and_1450_utc() -> None:
+    first = sleeve_schedule_should_fire_v1(f"{DAY}T09:50:00Z")
+    second = sleeve_schedule_should_fire_v1(f"{DAY}T14:50:00Z")
+    old = sleeve_schedule_should_fire_v1(f"{DAY}T15:50:00Z")
+
+    assert first["should_fire"] is True
+    assert first["day_utc"] == DAY
+    assert first["run_key"] == f"{DAY}T09:50Z"
+    assert second["should_fire"] is True
+    assert second["run_key"] == f"{DAY}T14:50Z"
+    assert old["should_fire"] is False
+    assert old["scheduled_window"] is False
+
+
+def test_lite_sleeve_schedule_duplicate_day_rollover_and_replay_metadata() -> None:
+    run_key = sleeve_schedule_run_key_v1("2026-05-15T09:50:30+00:00")
+    duplicate = sleeve_schedule_should_fire_v1("2026-05-15T09:50:00Z", completed_run_keys={run_key})
+    rollover = sleeve_schedule_should_fire_v1("2026-05-16T00:00:00Z")
+    metadata = sleeve_schedule_metadata_v1()
+
+    assert run_key == "2026-05-15T09:50Z"
+    assert duplicate["scheduled_window"] is True
+    assert duplicate["duplicate"] is True
+    assert duplicate["should_fire"] is False
+    assert rollover["day_utc"] == "2026-05-16"
+    assert rollover["should_fire"] is False
+    assert metadata["timezone"] == "UTC"
+    assert metadata["times_utc"] == ["09:50", "14:50"]
+    assert metadata["replay_safe"] is True
+
+
+def test_lite_timer_exists_at_0950_and_1450_utc_and_legacy_paper_timers_are_deferred() -> None:
     lite_timer = (REPO_ROOT / "ops/systemd/user/aegis-lite-eod-report-v1.timer").read_text(encoding="utf-8")
     lite_service = (REPO_ROOT / "ops/systemd/user/aegis-lite-eod-report-v1.service").read_text(encoding="utf-8")
-    assert "OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York" in lite_timer
-    assert "15:35:00 America/New_York" not in lite_timer
-    assert "--manual-only" in lite_service
+    assert "OnCalendar=*-*-* 09:50:00 UTC" in lite_timer
+    assert "OnCalendar=*-*-* 14:50:00 UTC" in lite_timer
+    assert "15:50:00" not in lite_timer
+    assert "manual-only" in lite_service
+    assert "AEGIS_LITE_MANUAL_ONLY=1" in lite_service
     assert "no broker submit" in lite_service.lower()
 
     status = build_aegis_lite_operating_status_v1(
@@ -185,8 +231,9 @@ def test_lite_timer_exists_at_1550_et_and_legacy_paper_timers_are_deferred() -> 
         repo_head_commit="repo",
         active_release_commit="repo",
     )
-    assert status["lite_eod_timer_status"]["target_time_et"] == "15:50"
-    assert status["lite_eod_timer_status"]["calendar"] == "Mon..Fri *-*-* 15:50:00 America/New_York"
+    assert status["lite_eod_timer_status"]["target_times_utc"] == ["09:50", "14:50"]
+    assert status["lite_eod_timer_status"]["calendars"] == ["*-*-* 09:50:00 UTC", "*-*-* 14:50:00 UTC"]
+    assert status["lite_eod_timer_status"]["calendar"] == "*-*-* 09:50:00 UTC;*-*-* 14:50:00 UTC"
     assert status["lite_eod_timer_status"]["status"] == "CONFIGURED"
     assert status["broker_mode"] == "MANUAL_ONLY"
     assert status["ib_automation_status"] == "DEFERRED"
@@ -315,6 +362,7 @@ def test_unpromoted_research_candidates_cannot_enter_operational_lite_report(tmp
         promoted_sleeve_library_path=str(library_path),
         manual_only=True,
     )
+    _write_market_snapshot(tmp_path, DAY, ["SPY"])
     report = build_aegis_lite_eod_pipeline_v1(
         day_utc=DAY,
         truth_root=tmp_path,
@@ -354,6 +402,7 @@ def test_promoted_candidate_can_generate_executable_queue_visible_in_ui(tmp_path
         promoted_sleeve_library_path=str(library_path),
         manual_only=True,
     )
+    _write_market_snapshot(tmp_path, DAY, ["SPY"])
     report = build_aegis_lite_eod_pipeline_v1(
         day_utc=DAY,
         truth_root=tmp_path,

@@ -71,6 +71,15 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return obj
 
 
+def _read_runtime_hash(truth_root: Path, day_utc: str) -> str:
+    runtime_path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
+    try:
+        obj = json.loads(runtime_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+
+
 def _resolve_truth_root(args_truth_root: str) -> Path:
     tr = (args_truth_root or "").strip()
     if not tr:
@@ -242,9 +251,14 @@ def main() -> int:
         "status": ("FAIL" if validation_errors else "OK"),
         "reason_codes": (reason_codes_stable + sorted(set(validation_errors))),
         "items": ([] if validation_errors else out_items),
+        "runtime_evaluation_hash": _read_runtime_hash(truth, day),
+        "source_positions_hash": _sha256_file(p_pos),
+        "source_type": str(pos.get("source_type") or "POSITIONS_SNAPSHOT_V5"),
+        "output_hash": None,
         "canonical_json_hash": None,
     }
 
+    out["output_hash"] = canonical_hash_for_c2_artifact_v1({**out, "output_hash": None, "canonical_json_hash": None})
     out["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(out)
     validate_against_repo_schema_v1(out, REPO_ROOT, OUT_SCHEMA)
 

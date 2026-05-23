@@ -28,6 +28,31 @@ def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def _truth_root_from_snapshot_path(path: Path) -> Path:
+    # <truth_root>/cash_ledger_v1/snapshots/<DAY>/cash_ledger_snapshot.v1.json
+    return path.resolve().parents[3]
+
+
+def _read_runtime_hash(truth_root: Path, day_utc: str) -> str:
+    runtime_path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
+    try:
+        obj = json.loads(runtime_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+
+
+def _account_source_type(notes: List[str]) -> str:
+    joined = "\n".join(str(item) for item in notes).upper()
+    if "BROKER" in joined:
+        return "BROKER_EXPORT"
+    if "CAPITAL_SEED" in joined or "STATIC_RISK_BUDGET" in joined:
+        return "STATIC_RISK_BUDGET"
+    if "SIMULATION" in joined:
+        return "SIMULATION_LEDGER"
+    return "MANUAL_DECLARATION"
+
+
 def _read_json_object_strict(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise ValueError(f"INPUT_FILE_MISSING: {str(path)}")
@@ -325,6 +350,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         account_id=account_id,
         notes=notes_list,
     )
+    truth_root = _truth_root_from_snapshot_path(paths.snapshot_path)
+    snapshot["source_type"] = _account_source_type(notes_list)
+    snapshot["source_hash"] = input_manifest[0]["sha256"]
+    snapshot["operator_intent_hash"] = None if snapshot["source_type"] == "STATIC_RISK_BUDGET" else input_manifest[0]["sha256"]
+    snapshot["runtime_evaluation_hash"] = _read_runtime_hash(truth_root, day_utc)
+    snapshot["downstream_dependency_hashes"] = {}
+    snapshot["output_hash"] = _sha256_bytes(json.dumps({**snapshot, "output_hash": ""}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
 
     validate_against_repo_schema_v1(snapshot, REPO_ROOT, SCHEMA_RELPATH_SNAPSHOT)
 

@@ -302,22 +302,50 @@ def _resolve_governed_policy_or_fail(
     return target_raw, max_risk_raw, governed_stop_loss_bps
 
 
-def main() -> int:
+def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_trend_eq_primary_intents_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     ap.add_argument("--truth_root", default="", help="Canonical truth root override")
     ap.add_argument("--symbol", default="SPY", help="Underlying symbol (default: SPY)")
+    ap.add_argument("--symbols", default="", help="Comma-separated symbols for governed paper/ad-hoc batch evaluation")
     ap.add_argument("--target_notional_pct", default="", help="Decimal string in [0,1]; defaults from governed risk policy")
     ap.add_argument("--max_risk_pct", default="", help="Decimal string in [0,1]; defaults from governed risk policy")
     ap.add_argument("--sma_fast", default="3", help="Integer SMA window (fast). Default chosen to fit bootstrap dataset.")
     ap.add_argument("--sma_slow", default="7", help="Integer SMA window (slow). Default chosen to fit bootstrap dataset.")
 
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     _bind_truth_root(str(args.truth_root))
 
     day_utc = _parse_day_utc(args.day_utc)
     mode = str(args.mode).strip().upper()
+    batch_symbols = [s.strip().upper() for s in str(args.symbols or "").split(",") if s.strip()]
+    if batch_symbols:
+        seen: set[str] = set()
+        unique_symbols = [s for s in batch_symbols if not (s in seen or seen.add(s))]
+        for batch_symbol in unique_symbols:
+            try:
+                main([
+                    "--day_utc", day_utc,
+                    "--mode", mode,
+                    "--truth_root", str(args.truth_root),
+                    "--symbol", batch_symbol,
+                    "--target_notional_pct", str(args.target_notional_pct),
+                    "--max_risk_pct", str(args.max_risk_pct),
+                    "--sma_fast", str(args.sma_fast),
+                    "--sma_slow", str(args.sma_slow),
+                ])
+            except Exception as exc:  # noqa: BLE001
+                print(json.dumps({
+                    "status": "NO_INTENT",
+                    "day_utc": day_utc,
+                    "symbol": batch_symbol,
+                    "reason_codes": ["BATCH_SYMBOL_EVALUATION_FAILED", str(exc)],
+                    "engine_id": ENGINE_ID,
+                    "suite": ENGINE_SUITE,
+                    "mode": mode,
+                }, sort_keys=True, separators=(",", ":")))
+        return 0
     symbol = str(args.symbol).strip().upper()
 
     try:

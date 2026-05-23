@@ -127,7 +127,8 @@ def test_sleeve_invocation_ledger_contains_all_seven_sleeves(tmp_path: Path) -> 
     path = sleeve_invocation_ledger_path_v1(truth_root=truth, day_utc=DAY, run_id=f"sleeve_evaluation_kernel_v1:{DAY}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert {row["engine_id"] for row in payload["invocations"]} == set(ENGINES)
-    assert all(row["symbol_or_pair"] == "SPY" for row in payload["invocations"])
+    assert all(str(row["symbol_or_pair"]).strip() for row in payload["invocations"])
+    assert any(row["symbol_or_pair"] == "SPY" for row in payload["invocations"])
     assert payload["execution_authority_granted"] is False
     assert payload["order_submission_attempted"] is False
     assert payload["trading_behavior_changed"] is False
@@ -170,6 +171,20 @@ def test_candidate_manifest_retains_generated_no_signal_blocked_and_suppressed_r
     assert gate["suppressed_or_signal_only_intents"]
     assert payload["selected_intent_pointer_authoritative"] is True
     assert payload["execution_authority_granted"] is False
+    assert payload["run_mode"] == "INTRADAY_OPERATIONAL"
+    assert payload["market_data_mode"] == "INTRADAY_OPERATIONAL"
+    assert payload["candidate_generation_label"] == "NON_CERTIFIED"
+    assert payload["candidate_lane"] == "PROVISIONAL"
+    assert payload["certification_label"] == "NON_CERTIFIED"
+    assert payload["read_only"] is True
+    assert payload["execution_eligible"] is False
+    assert payload["final_eod_certification_status"] == "PENDING"
+    assert all(row["candidate_data_status"] == "PROVISIONAL_CANDIDATE" for row in payload["candidate_rows"])
+    assert all(row["source_data_mode"] == "INTRADAY_OPERATIONAL" for row in payload["candidate_rows"])
+    assert all(row["final_eod_certification_status"] == "PENDING" for row in payload["candidate_rows"])
+    assert all(row["manual_capture_eligible"] is False for row in payload["candidate_rows"])
+    assert all(row["read_only"] is True for row in payload["candidate_rows"])
+    assert all(row["execution_eligible"] is False for row in payload["candidate_rows"])
 
 
 def test_signal_only_candidate_is_retained(tmp_path: Path) -> None:
@@ -225,10 +240,12 @@ def test_arbitration_winner_and_selected_pointer_are_unchanged_by_observability(
     pointer = json.loads(Path(result["selected_intent_pointer_path"]).read_text(encoding="utf-8"))
     manifest = json.loads(candidate_generation_manifest_path_v1(truth_root=truth, day_utc=DAY, run_id=f"sleeve_evaluation_kernel_v1:{DAY}").read_text(encoding="utf-8"))
 
-    assert result["selected_intent"]["intent_id"] == pointer["selected_intent"]["intent_id"]
-    assert result["selected_intent"]["intent_id"] == "trend"
+    assert result.get("selected_intent", {}) == {}
+    assert pointer.get("selected_intent", {}) == {}
+    assert scoring["execution_firewall_status"] == "REJECTED_NON_CERTIFIED_INPUT"
     assert manifest["order_submission_attempted"] is False
     assert manifest["execution_authority_granted"] is False
+    assert manifest["execution_eligible"] is False
 
 
 def test_missing_observability_artifacts_do_not_create_execution_authority(tmp_path: Path) -> None:

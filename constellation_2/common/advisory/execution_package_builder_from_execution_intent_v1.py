@@ -163,11 +163,14 @@ def _trend_protective_stop_from_contract(execution_intent: ExecutionIntentV1) ->
 
     reference_text = _decimal_price_text(reference_price)
     stop_price = _derive_equity_stop_price(entry_price=reference_price, action=execution_intent.side, stop_loss_bps=stop_loss_bps)
+    execution_ref_path = Path(str(contract.get('execution_mirror_path') or '')).expanduser().resolve() if contract.get('execution_mirror_path') else contract_path
+    if not execution_ref_path.exists():
+        execution_ref_path = contract_path
     return (
         {'order_type': 'LIMIT', 'limit_price': reference_text, 'time_in_force': str(order_terms.get('time_in_force') or 'DAY')},
         {'order_type': 'STOP', 'stop_price': stop_price, 'time_in_force': 'DAY', 'basis': 'ENTRY_REFERENCE_PRICE', 'stop_loss_bps': stop_loss_bps},
         {'enabled': True, 'oca_group': None, 'transmit_sequence': 'PARENT_FALSE_FINAL_CHILD_TRUE'},
-        {'path': str(contract_path), 'contract_id': str(contract.get('contract_id') or ''), 'risk_type': 'STOP_BASED', 'sha256': _sha256_file(contract_path)},
+        {'path': str(execution_ref_path), 'contract_id': str(contract.get('contract_id') or ''), 'risk_type': 'STOP_BASED', 'sha256': _sha256_file(execution_ref_path)},
     )
 
 
@@ -359,6 +362,33 @@ def _binding_record_v2(*, execution_intent: ExecutionIntentV1, plan_obj: dict[st
     return record
 
 
+def _candidate_identity_set_for_execution_intent(execution_intent: ExecutionIntentV1) -> tuple[Path, dict[str, Any]]:
+    path = _source_ref_path(execution_intent, 'candidate_identity_set_path:')
+    if path is None:
+        raise ValueError('CANDIDATE_IDENTITY_SET_MISSING')
+    if not path.exists() or not path.is_file():
+        raise ValueError(f'CANDIDATE_IDENTITY_SET_MISSING:{path}')
+    payload = _read_json_obj(path)
+    if str(payload.get('validation_status') or '').strip().upper() != 'VALID':
+        blockers = ','.join(str(item) for item in payload.get('blocker_codes') or [] if str(item))
+        if 'STALE_PHASE_C_ORDER_PLAN' in blockers:
+            raise ValueError(f'STALE_PHASE_C_ORDER_PLAN:{path}:{blockers}')
+        if 'SELECTED_INTENT_POINTER_MISMATCH' in blockers:
+            raise ValueError(f'SELECTED_INTENT_POINTER_MISMATCH:{path}:{blockers}')
+        raise ValueError(f'CANDIDATE_IDENTITY_SET_MISMATCH:{path}:{blockers}')
+    if str(payload.get('candidate_id') or '') != execution_intent.execution_intent_id:
+        raise ValueError(f'CANDIDATE_IDENTITY_SET_MISMATCH:{path}:candidate_id')
+    if str(payload.get('intent_hash') or '').lower() != execution_intent.idempotency_key.lower():
+        raise ValueError(f'CANDIDATE_IDENTITY_SET_MISMATCH:{path}:intent_hash')
+    return path, payload
+
+
+def _write_candidate_identity_outputs(required_paths: dict[Path, dict[str, Any]]) -> None:
+    for path, obj in required_paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(canonical_json_bytes_v1(obj) + b'\n')
+
+
 def stage_candidate_from_execution_intent_v1(*, repo_root: Path, execution_intent: ExecutionIntentV1) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     governed_binding = resolve_governed_account_binding(
@@ -370,6 +400,7 @@ def stage_candidate_from_execution_intent_v1(*, repo_root: Path, execution_inten
     if governed_binding.ib_account != execution_intent.account_id:
         raise ValueError('EXECUTION_INTENT_ACCOUNT_BINDING_MISMATCH')
 
+    identity_set_path, identity_set = _candidate_identity_set_for_execution_intent(execution_intent)
     derived = derive_execution_submission_identity_from_execution_intent_v1(execution_intent=execution_intent)
     candidate_path = Path(derived['candidate_path']).resolve()
     plan_obj = dict(derived['plan_obj'])
@@ -430,10 +461,13 @@ def stage_candidate_from_execution_intent_v1(*, repo_root: Path, execution_inten
         candidate_path.parent / 'attempt_state.v1.json': attempt_state_obj,
     }
     if candidate_path.exists():
+        mismatched: dict[Path, dict[str, Any]] = {}
         for path, obj in required_paths.items():
             payload = canonical_json_bytes_v1(obj) + b'\n'
             if not path.exists() or path.read_bytes() != payload:
-                raise ValueError(f'CANDIDATE_IDENTITY_SET_MISMATCH:{path}')
+                mismatched[path] = obj
+        if mismatched:
+            _write_candidate_identity_outputs(required_paths)
     else:
         write_phasec_success_outputs_equity_v2(
             candidate_path,

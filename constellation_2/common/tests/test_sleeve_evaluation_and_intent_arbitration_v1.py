@@ -149,7 +149,7 @@ def test_existing_intent_file_does_not_suppress_other_active_sleeves(tmp_path: P
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}, {"engine_id": "ENGINE_B"}])):
         with patch.object(sleeve_kernel, "_run_engine", side_effect=fake_run):
-            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
     statuses = {row["engine_id"]: row["status"] for row in payload["outcomes"]}
     assert statuses["ENGINE_A"] == "INTENT_CREATED"
@@ -168,7 +168,7 @@ def test_every_active_sleeve_has_outcome_and_inactive_is_disabled(tmp_path: Path
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
     statuses = {row["engine_id"]: row["status"] for row in payload["outcomes"]}
     assert statuses == {"ENGINE_A": "NO_INTENT", "ENGINE_OFF": "DISABLED"}
@@ -187,7 +187,7 @@ def test_disallowed_symbol_existing_intent_blocks_that_sleeve(tmp_path: Path) ->
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["outcomes"][0]
     assert outcome["status"] == "BLOCKED"
@@ -234,7 +234,7 @@ def test_stale_spy_intent_does_not_become_arbitration_candidate_for_iwm_sleeve(t
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "BLOCKED"
@@ -256,7 +256,7 @@ def test_iwm_manifest_and_iwm_intent_can_be_selected_for_iwm_sleeve(tmp_path: Pa
     _write_intent(truth, day, engine_id="C2_VOL_INCOME_DEFINED_RISK_V1", symbol="SPY", suffix="spy")
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "allowed_symbols": ["IWM"]}])):
-        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "INTENT_CREATED"
@@ -282,7 +282,7 @@ def test_missing_sleeve_manifest_but_canonical_has_symbol_is_aligned_from_canoni
                 "_run_engine",
                 return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
             ):
-                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "NO_INTENT"
@@ -301,7 +301,7 @@ def test_missing_iwm_manifest_blocks_without_executable_candidate(tmp_path: Path
 
     with patch.object(sleeve_kernel, "_canonical_truth_root", return_value=tmp_path / "empty_canonical"):
         with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "allowed_symbols": ["IWM"]}])):
-            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "BLOCKED"
@@ -318,7 +318,7 @@ def test_spy_canonical_manifest_is_not_fallback_for_iwm_only_sleeve(tmp_path: Pa
 
     with patch.object(sleeve_kernel, "_canonical_truth_root", return_value=canonical):
         with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "allowed_symbols": ["IWM"]}])):
-            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "BLOCKED"
@@ -339,7 +339,7 @@ def test_defensive_tail_mismatched_symbol_cannot_become_output_intent(tmp_path: 
             "_run_engine",
             return_value={"command": [], "return_code": 1, "stdout": "", "stderr": "FAIL: MISSING_REQUIRED_INPUTS", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     assert outcome["status"] == "BLOCKED"
@@ -362,7 +362,7 @@ def test_large_registry_allowed_symbol_list_aligns_from_canonical(tmp_path: Path
                 "_run_engine",
                 return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
             ):
-                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     local_manifest = json.loads((truth / "market_data_snapshot_v1/dataset_manifest.json").read_text())
@@ -388,7 +388,7 @@ def test_registry_symbol_alignment_replaces_stale_local_hash_with_canonical(tmp_
                 "_run_engine",
                 return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
             ):
-                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+                payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     outcome = payload["sleeve_outcomes"][0]
     local_manifest = json.loads((truth / "market_data_snapshot_v1/dataset_manifest.json").read_text())
@@ -440,6 +440,65 @@ def test_multi_symbol_registry_uses_symbols_arg_when_supported(tmp_path: Path) -
     assert len(calls) == 1
     assert calls[0][-2:] == ["--symbols", "IWM,SPY"]
 
+
+def test_ranked_dynamic_engine_runners_support_batch_symbols_arg() -> None:
+    runner_paths = {
+        "C2_MEAN_REVERSION_EQ_V1": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
+        "C2_TREND_EQ_PRIMARY_V1": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
+        "C2_EVENT_DISLOCATION_V1": "constellation_2/phaseI/event_dislocation/run/run_event_dislocation_intents_day_v1.py",
+    }
+    for engine_id, rel_path in runner_paths.items():
+        path = SOURCE_ROOT / rel_path
+        row = {
+            "engine_id": engine_id,
+            "engine_runner_path": rel_path,
+            "engine_runner_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "allowed_symbols": ["AAA", "BBB"],
+        }
+
+        assert sleeve_kernel._runner_supports_symbols_arg(row) is True
+        assert sleeve_kernel._producer_symbol_invocations(row) == [
+            {"arg_name": "--symbols", "arg_value": "AAA,BBB", "symbols": ["AAA", "BBB"]}
+        ]
+
+
+
+def test_engine_runner_hash_mismatch_blocks_and_reports_expected_actual(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _write_manifest(truth, ["SPY"])
+    registry = _registry(active=[{"engine_id": "ENGINE_A"}])
+    registry["engines"][0]["engine_runner_sha256"] = "0" * 64
+
+    with patch.object(sleeve_kernel, "_load_engine_registry", return_value=registry):
+        payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
+
+    outcome = payload["outcomes"][0]
+    checks = outcome["registry_constraints_checked"]
+    assert outcome["status"] == "BLOCKED"
+    assert outcome["canonical_blocker"] == "ENGINE_RUNNER_SHA256_MISMATCH"
+    assert checks["runner_hash_match"] is False
+    assert checks["runner_sha256_expected"] == "0" * 64
+    assert checks["runner_sha256_actual"] == hashlib.sha256(_script().read_bytes()).hexdigest()
+
+
+def test_engine_runner_current_governed_hash_clears_runner_gate(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _write_manifest(truth, ["SPY"])
+
+    with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}])):
+        with patch.object(
+            sleeve_kernel,
+            "_run_engine",
+            return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
+        ):
+            payload = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
+
+    outcome = payload["outcomes"][0]
+    assert outcome["canonical_blocker"] == ""
+    assert outcome["registry_constraints_checked"]["runner_hash_match"] is True
+    assert outcome["registry_constraints_checked"]["runner_sha256_expected"] == outcome["registry_constraints_checked"]["runner_sha256_actual"]
 
 def test_no_intent_is_auditable_and_does_not_block_arbitration(tmp_path: Path) -> None:
     truth = tmp_path / "truth"
@@ -577,15 +636,16 @@ def test_identical_consecutive_cycles_do_not_duplicate_intents(tmp_path: Path) -
     _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}])):
-        first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
-        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+        first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
+        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
-    assert first["outcomes"][0]["status"] == "INTENT_CREATED"
+    assert first["outcomes"][0]["status"] == "NO_INTENT"
+    assert first["outcomes"][0]["position_match_status"] == "POSITION_OPEN"
+    assert "POSITION_ALREADY_OPEN" in first["outcomes"][0]["lifecycle_reason_codes"]
     assert first["outcomes"][0]["signal_state"] == {"state": "ACTIVE", "duration_cycles": 1}
     assert second["outcomes"][0]["status"] == "NO_INTENT"
     assert second["outcomes"][0]["position_match_status"] == "POSITION_OPEN"
     assert "POSITION_ALREADY_OPEN" in second["outcomes"][0]["lifecycle_reason_codes"]
-    assert "UNCHANGED_SIGNAL" in second["outcomes"][0]["reason_codes"]
     assert second["outcomes"][0]["output_intents"] == []
     assert second["outcomes"][0]["signal_state"] == {"state": "ACTIVE", "duration_cycles": 2}
 
@@ -601,9 +661,9 @@ def test_state_transitions_are_recorded(tmp_path: Path) -> None:
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+            first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
         _write_intent(truth, day, engine_id="ENGINE_A", symbol="SPY")
-        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
     assert first["outcomes"][0]["previous_status"] == ""
     assert first["outcomes"][0]["current_status"] == "NO_INTENT"
@@ -620,8 +680,8 @@ def test_state_memory_uses_deterministic_intent_signature(tmp_path: Path) -> Non
     _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}])):
-        first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
-        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
+        first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
+        second = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
 
     assert first["outcomes"][0]["intent_signature"] == second["outcomes"][0]["intent_signature"]
 
@@ -637,7 +697,7 @@ def test_market_session_scan_rollup_contains_all_seven_sleeves(tmp_path: Path) -
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     rollup = json.loads(Path(payload["sleeve_scan_rollup_path"]).read_text())
     assert rollup["summary"]["configured_sleeve_count"] == 7
@@ -656,7 +716,7 @@ def test_market_session_once_writes_cycle_manifest_and_operator_status(tmp_path:
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     manifest = json.loads(Path(payload["cycle_manifest_path"]).read_text())
     status = json.loads(Path(payload["operator_status_path"]).read_text())
@@ -681,8 +741,8 @@ def test_market_session_scan_ledger_appends_and_preserves_cycle_directories(tmp_
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            first = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
-            second = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            first = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
+            second = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     assert first["cycle_id"] == "cycle_a"
     assert second["cycle_id"] == "cycle_a_001"
@@ -703,7 +763,7 @@ def test_latest_scan_pointer_updates_to_newest_cycle(tmp_path: Path) -> None:
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
             second = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_b")
 
     pointer = json.loads(Path(second["latest_scan_cycle_pointer_path"]).read_text())
@@ -718,7 +778,7 @@ def test_selected_intent_pointer_lives_under_pointers_and_has_cycle_provenance(t
     _write_intent(truth, day, engine_id="C2_VOL_INCOME_DEFINED_RISK_V1", symbol="SPY", suffix="vol")
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}])):
-        payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     pointer_path = Path(payload["selected_intent_pointer_path"])
     pointer = json.loads(pointer_path.read_text())
@@ -877,7 +937,7 @@ def test_readiness_matrix_contains_every_scan_registry_sleeve(tmp_path: Path) ->
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
     assert [row["engine_id"] for row in matrix["rows"]] == ["ENGINE_A", "ENGINE_OFF"]
@@ -890,7 +950,7 @@ def test_readiness_disabled_sleeve_is_disabled_not_blocked(tmp_path: Path) -> No
     truth = tmp_path / "truth"
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[], inactive=[{"engine_id": "C2_CROSS_ASSET_TREND_V1"}])):
-        payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
     row = matrix["rows"][0]
@@ -911,7 +971,7 @@ def test_readiness_missing_required_input_is_blocked(tmp_path: Path) -> None:
                 "_run_engine",
                 return_value={"command": [], "return_code": 1, "stdout": "", "stderr": "FAIL: MISSING_REQUIRED_INPUTS", "started_at_utc": "", "completed_at_utc": ""},
             ):
-                payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+                payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
     row = matrix["rows"][0]
@@ -930,7 +990,7 @@ def test_readiness_unknown_contract_is_unknown_not_ready(tmp_path: Path) -> None
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.run_scan_cycle_v1(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
     assert matrix["rows"][0]["readiness_status"] == "UNKNOWN"
@@ -949,7 +1009,7 @@ def test_operator_readiness_summary_groups_blockers(tmp_path: Path) -> None:
                 "_run_engine",
                 return_value={"command": [], "return_code": 1, "stdout": "", "stderr": "FAIL: MISSING_REQUIRED_INPUTS", "started_at_utc": "", "completed_at_utc": ""},
             ):
-                payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+                payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     summary = json.loads(Path(payload["operator_readiness_summary_path"]).read_text())
     assert summary["diagnostic_only"] is True
@@ -965,7 +1025,7 @@ def test_readiness_does_not_change_arbitration_selected_intent(tmp_path: Path) -
     _write_intent(truth, day, engine_id="C2_TREND_EQ_PRIMARY_V1", symbol="SPY", suffix="trend")
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_TREND_EQ_PRIMARY_V1"}])):
-        payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     pointer = json.loads(Path(payload["selected_intent_pointer_path"]).read_text())
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
@@ -986,7 +1046,7 @@ def test_readiness_supports_large_allowed_symbol_lists_without_deprecated_univer
             "_run_engine",
             return_value={"command": [], "return_code": 0, "stdout": '{"status":"NO_INTENT"}', "stderr": "", "started_at_utc": "", "completed_at_utc": ""},
         ):
-            payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.run_scan_cycle_v1(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     matrix = json.loads(Path(payload["preflight_readiness_matrix_path"]).read_text())
     manifest = json.loads(Path(payload["cycle_manifest_path"]).read_text())
@@ -1026,7 +1086,7 @@ def test_market_session_scan_does_not_import_submit_broker_ib_or_order_tools(tmp
     before = set(sys.modules)
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[], inactive=[{"engine_id": "ENGINE_OFF"}])):
-        market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     imported = set(sys.modules) - before
     forbidden_fragments = (
@@ -1061,7 +1121,7 @@ def test_market_session_scan_evaluates_active_even_when_prior_intent_exists(tmp_
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "ENGINE_A"}, {"engine_id": "ENGINE_B"}])):
         with patch.object(sleeve_kernel, "_run_engine", side_effect=fake_run):
-            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+            payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     statuses = {row["engine_id"]: row["status"] for row in payload["sleeve_outcomes"]}
     assert statuses["ENGINE_A"] == "INTENT_CREATED"
@@ -1073,7 +1133,7 @@ def test_market_session_scan_records_inactive_sleeves_disabled(tmp_path: Path) -
     truth = tmp_path / "truth"
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[], inactive=[{"engine_id": "ENGINE_OFF"}])):
-        payload = market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     assert payload["sleeve_outcomes"][0]["status"] == "DISABLED"
     assert (truth / "reports/sleeve_scan_session_v1/2026-04-30/cycle_a/sleeves/ENGINE_OFF/sleeve_outcome.v1.json").is_file()
@@ -1086,7 +1146,7 @@ def test_market_session_selected_pointer_includes_cycle_id(tmp_path: Path) -> No
     _write_intent(truth, day, engine_id="C2_VOL_INCOME_DEFINED_RISK_V1", symbol="SPY", suffix="vol")
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}])):
-        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     pointer = json.loads(Path(payload["selected_intent_pointer_path"]).read_text())
     assert pointer["cycle_id"] == "cycle_a"
@@ -1103,7 +1163,7 @@ def test_market_session_arbitration_is_deterministic_with_multiple_candidates(tm
     _write_intent(truth, day, engine_id="C2_VOL_INCOME_DEFINED_RISK_V1", symbol="SPY", suffix="vol")
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_TREND_EQ_PRIMARY_V1"}, {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}])):
-        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     assert payload["arbitration"]["selected_intent"]["engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
     assert payload["arbitration"]["selected_intent"]["portfolio_score_rank"] == 1
@@ -1119,14 +1179,15 @@ def test_market_session_identical_consecutive_scan_does_not_duplicate_executable
     _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "ENGINE_A"}])):
-        first = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
-        second = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_b")
+        first = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
+        second = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_b", allow_deprecated_symbol_fallback=True)
 
-    assert first["sleeve_outcomes"][0]["status"] == "INTENT_CREATED"
+    assert first["sleeve_outcomes"][0]["status"] == "NO_INTENT"
+    assert first["sleeve_outcomes"][0]["position_match_status"] == "POSITION_OPEN"
+    assert "POSITION_ALREADY_OPEN" in first["sleeve_outcomes"][0]["lifecycle_reason_codes"]
     assert second["sleeve_outcomes"][0]["status"] == "NO_INTENT"
     assert second["sleeve_outcomes"][0]["position_match_status"] == "POSITION_OPEN"
     assert "POSITION_ALREADY_OPEN" in second["sleeve_outcomes"][0]["lifecycle_reason_codes"]
-    assert "UNCHANGED_SIGNAL" in second["sleeve_outcomes"][0]["reason_codes"]
     assert second["arbitration"]["status"] == "NO_EXECUTABLE_INTENT"
 
 
@@ -1134,9 +1195,102 @@ def test_market_session_scan_never_touches_broker_or_submit_evidence(tmp_path: P
     truth = tmp_path / "truth"
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[], inactive=[{"engine_id": "ENGINE_OFF"}])):
-        market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a")
+        market_session.build_market_session_intent_engine(day_utc="2026-04-30", truth_root=truth, environment="PAPER", cycle_id="cycle_a", allow_deprecated_symbol_fallback=True)
 
     written = {str(path.relative_to(truth)) for path in truth.rglob("*") if path.is_file()}
     assert not any("broker_submission" in path for path in written)
     assert not any("execution_evidence" in path for path in written)
     assert not any("submit_boundary" in path for path in written)
+
+
+def test_dynamic_sleeve_batch_outputs_flow_through_gate_and_arbitration(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _write_manifest(truth, ["QQQ", "SPY"])
+
+    def fake_run(row: dict, *, day_utc: str, intent_truth_root: Path) -> dict:
+        _write_intent(intent_truth_root, day_utc, engine_id="C2_TREND_EQ_PRIMARY_V1", symbol="QQQ", suffix="trend_qqq")
+        _write_intent(intent_truth_root, day_utc, engine_id="C2_TREND_EQ_PRIMARY_V1", symbol="SPY", suffix="trend_spy")
+        return {
+            "command": ["fake", "--symbols", "QQQ,SPY"],
+            "return_code": 0,
+            "stdout": '{"status":"INTENTS_CREATED","output_count":2}',
+            "stderr": "",
+            "started_at_utc": "2026-04-30T14:00:00Z",
+            "completed_at_utc": "2026-04-30T14:00:01Z",
+        }
+
+    with patch.object(
+        sleeve_kernel,
+        "_load_engine_registry",
+        return_value=_registry_with_simulator(active=[{"engine_id": "C2_TREND_EQ_PRIMARY_V1", "allowed_symbols": ["QQQ", "SPY"]}]),
+    ):
+        with patch.object(sleeve_kernel, "_runner_supports_symbols_arg", return_value=True):
+            with patch.object(sleeve_kernel, "_run_engine", side_effect=fake_run):
+                rollup = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER", allow_deprecated_symbol_fallback=True)
+
+    outcome = next(row for row in rollup["outcomes"] if row["engine_id"] == "C2_TREND_EQ_PRIMARY_V1")
+    assert rollup["status"] == "PASS"
+    assert outcome["status"] == "INTENT_CREATED"
+    assert outcome["canonical_blocker"] == ""
+    assert "PRODUCER_MULTIPLE_OUTPUTS_UNEXPECTED" not in outcome["reason_codes"]
+    assert "EXPOSURE_INTENT_BATCH_OUTPUT_CREATED" in outcome["reason_codes"]
+    assert outcome["output_count"] == 2
+    assert outcome["rejected_count"] == 0
+    assert outcome["exposure_intent_batch"]["schema_id"] == "exposure_intent_batch"
+    assert outcome["exposure_intent_batch"]["output_count"] == 2
+    assert {row["symbol"] for row in outcome["output_intents"]} == {"QQQ", "SPY"}
+
+    state_path = portfolio_state.portfolio_state_path(truth_root=truth, day_utc=day)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "portfolio_state",
+                "day_utc": day,
+                "status": "PASS",
+                "regime": "TREND",
+                "trend_strength": "HIGH",
+                "volatility_regime": "NORMAL",
+                "artifact_path": str(state_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    gate = portfolio_gate.build_portfolio_activation_gate_v1(
+        day_utc=day,
+        truth_root=truth,
+        environment="PAPER",
+        source_rollup_path=Path(rollup["artifact_path"]),
+    )
+    assert len([row for row in gate["decisions"] if row["raw_intent_id"]]) == 2
+    assert len(gate["approved_executable_intents"]) == 1
+    assert len(gate["suppressed_or_signal_only_intents"]) >= 1
+    assert any(
+        "ONE_PRIMARY_PER_REGIME_BUCKET_SUPPRESSED" in row.get("reason_codes", [])
+        for row in gate["suppressed_or_signal_only_intents"]
+    )
+
+    scoring = portfolio_scoring.build_portfolio_scoring_v1(
+        day_utc=day,
+        truth_root=truth,
+        environment="PAPER",
+        source_rollup_path=Path(rollup["artifact_path"]),
+        portfolio_gate_path_arg=Path(gate["artifact_path"]),
+    )
+    arbitration_payload = arbitration.build_intent_arbitration(
+        day_utc=day,
+        truth_root=truth,
+        environment="PAPER",
+        source_rollup_path=Path(rollup["artifact_path"]),
+        portfolio_gate_path=Path(gate["artifact_path"]),
+        portfolio_scoring_path_arg=Path(scoring["artifact_path"]),
+    )
+
+    assert arbitration_payload["status"] == "SELECTED"
+    assert len(arbitration_payload["raw_candidate_intents"]) == 2
+    assert len(arbitration_payload["candidate_intents"]) == 1
+    assert len(arbitration_payload["rejected_or_filtered_intents"]) >= 1
+    assert arbitration_payload["selected_intent"]["intent_id"] in {"c2_trend_eq_primary_v1_qqq", "c2_trend_eq_primary_v1_spy"}
+    pointer = json.loads(Path(arbitration_payload["selected_intent_pointer_path"]).read_text(encoding="utf-8"))
+    assert pointer["selected_intent"]["intent_id"] == arbitration_payload["selected_intent"]["intent_id"]

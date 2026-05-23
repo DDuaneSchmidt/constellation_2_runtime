@@ -138,6 +138,115 @@ def _dec_str(v: Any, field: str) -> str:
     return format(d, "f")
 
 
+def _runtime_evaluation_ref(truth_root: Path, day: str) -> Dict[str, str]:
+    path = (truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day / "runtime_evaluation.v1.json").resolve()
+    if not path.exists():
+        return {"path": "", "sha256": "", "runtime_evaluation_hash": ""}
+    payload = _read_json_obj(path)
+    return {
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "runtime_evaluation_hash": str(payload.get("deterministic_output_hash") or ""),
+    }
+
+
+def _market_inputs_event_ref(truth_root: Path, day: str, market_inputs_path: Path) -> Dict[str, str]:
+    events_path = truth_root / "events" / "aegis_evidence_events_v1" / day / "events.jsonl"
+    if not events_path.exists():
+        return {"event_id": "", "event_hash": ""}
+    target = str(market_inputs_path.resolve())
+    for line in reversed(events_path.read_text(encoding="utf-8").splitlines()):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        paths = [str(Path(path).expanduser().resolve()) for path in event.get("artifact_paths", []) if str(path)]
+        if target in paths and str(event.get("event_type") or "") == "EvidenceValidated":
+            return {"event_id": str(event.get("event_id") or ""), "event_hash": str(event.get("event_hash") or "")}
+    return {"event_id": "", "event_hash": ""}
+
+
+def _canonical_market_inputs_path(truth_root: Path, day: str) -> Path:
+    local = (truth_root / "reports" / "market_data_inputs_v1" / day / "market_data_inputs.v1.json").resolve()
+    if local.exists():
+        return local
+    canonical_raw = os.environ.get("C2_CANONICAL_TRUTH_ROOT", "/home/node/constellation_runtime_data/truth").strip()
+    if canonical_raw:
+        canonical = Path(canonical_raw).expanduser().resolve()
+        candidate = (canonical / "reports" / "market_data_inputs_v1" / day / "market_data_inputs.v1.json").resolve()
+        if candidate.exists():
+            return candidate
+    return local
+
+
+def _canonical_spy_market_snapshot(truth_root: Path, day: str, sym: str) -> Dict[str, Any]:
+    if sym != "SPY":
+        return {}
+    src = _canonical_market_inputs_path(truth_root, day)
+    source_root = src.parents[3] if len(src.parents) > 3 else truth_root
+    if not src.exists():
+        raise SystemExit(f"FAIL: missing canonical market_data_inputs_v1 for SPY: {src}")
+    payload = _read_json_obj(src)
+    item_id = "market.price.SPY"
+    record: Dict[str, Any] = {}
+    for row in payload.get("input_records", []) if isinstance(payload.get("input_records"), list) else []:
+        if isinstance(row, dict) and str(row.get("data_item_id") or "") == item_id:
+            record = row
+            break
+    if not record:
+        raise SystemExit(f"FAIL: canonical market input missing: {item_id}")
+    validation = str(record.get("validation_status") or "").upper()
+    source_timestamp = str(record.get("source_timestamp_utc") or "")
+    if validation != "VALID":
+        raise SystemExit(f"FAIL: canonical market input not valid: {item_id} status={validation or 'UNKNOWN'} reason={record.get('reason') or ''}")
+    if source_timestamp[:10] != day:
+        raise SystemExit(f"FAIL: canonical market input not current: {item_id} source_day={source_timestamp[:10] or 'UNKNOWN'} day={day}")
+    raw_hash = str(record.get("raw_source_hash") or "")
+    price_hash = str(record.get("transformed_value_hash") or "")
+    if len(raw_hash) != 64 or len(price_hash) != 64:
+        raise SystemExit(f"FAIL: canonical market input hash missing: {item_id}")
+    price = _dec_str(record.get("value"), "market_data_inputs.market.price.SPY.value")
+    runtime_ref = _runtime_evaluation_ref(source_root, day)
+    event_ref = _market_inputs_event_ref(source_root, day, src)
+    bar = {
+        "close": price,
+        "market_session_date": day,
+        "source": "market_data_inputs_v1",
+        "symbol": sym,
+        "timestamp_utc": source_timestamp,
+    }
+    return {
+        "bars": [bar],
+        "day_utc": day,
+        "freshness_status": "CURRENT",
+        "runtime_evaluation_hash": runtime_ref.get("runtime_evaluation_hash", ""),
+        "schema_id": "C2_MARKET_DATA_SNAPSHOT_V1",
+        "schema_version": "v1",
+        "source_canonical_market_data_inputs_event_id": event_ref.get("event_id", ""),
+        "source_timestamp_utc": source_timestamp,
+        "source_provenance": {
+            "canonical_market_data_inputs_v1": {
+                "path": str(src),
+                "sha256": _sha256_file(src),
+                "event_id": event_ref.get("event_id", ""),
+                "event_hash": event_ref.get("event_hash", ""),
+                "data_item_id": item_id,
+                "raw_source_hash": raw_hash,
+                "transformed_value_hash": price_hash,
+                "source_timestamp_utc": source_timestamp,
+                "retrieval_timestamp_utc": str(record.get("retrieval_timestamp_utc") or record.get("retrieved_at_utc") or ""),
+                "freshness_status": "CURRENT",
+                "validation_status": validation,
+            },
+            "runtime_evaluation_v1": runtime_ref,
+        },
+        "spy_price_hash": price_hash,
+        "symbol": sym,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="build_defensive_tail_required_inputs_day_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
@@ -161,7 +270,8 @@ def main() -> int:
         raise SystemExit(f"FAIL: missing required source positions snapshot: {src_pos}")
     if not src_reg.exists():
         raise SystemExit(f"FAIL: missing required source regime snapshot: {src_reg}")
-    if not src_md.exists():
+    canonical_md_obj = _canonical_spy_market_snapshot(truth_root, day, sym)
+    if not canonical_md_obj and not src_md.exists():
         raise SystemExit(f"FAIL: missing required source market data jsonl: {src_md}")
 
     # Targets
@@ -205,35 +315,44 @@ def main() -> int:
         f"source_regime={src_reg} source_regime_sha256={_sha256_file(src_reg)}"
     )
 
-    # --- market_data_snapshot_v1 daily snapshot wrapper from governed yearly JSONL ---
-    md_rows = _read_jsonl_objects(src_md)
-    day_rows = [
-        row
-        for row in md_rows
-        if str(row.get("symbol") or "").strip().upper() == sym
-        and str(row.get("timestamp_utc") or "").startswith(day)
-    ]
-    md_obj = {
-        "bars": day_rows,
-        "day_utc": day,
-        "source_provenance": {
-            "market_data_yearly_jsonl": {
-                "path": str(src_md),
-                "sha256": _sha256_file(src_md),
-                "row_count": len(md_rows),
-                "matching_day_row_count": len(day_rows),
-            }
-        },
-        "schema_id": "C2_MARKET_DATA_SNAPSHOT_V1",
-        "schema_version": "v1",
-        "symbol": sym,
-    }
+    # --- market_data_snapshot_v1 daily snapshot wrapper ---
+    if canonical_md_obj:
+        md_obj = canonical_md_obj
+        source_market_data = md_obj["source_provenance"]["canonical_market_data_inputs_v1"]["path"]
+        source_market_data_sha = md_obj["source_provenance"]["canonical_market_data_inputs_v1"]["sha256"]
+        matching_day_rows = len(md_obj.get("bars") or [])
+    else:
+        md_rows = _read_jsonl_objects(src_md)
+        day_rows = [
+            row
+            for row in md_rows
+            if str(row.get("symbol") or "").strip().upper() == sym
+            and str(row.get("timestamp_utc") or "").startswith(day)
+        ]
+        md_obj = {
+            "bars": day_rows,
+            "day_utc": day,
+            "source_provenance": {
+                "market_data_yearly_jsonl": {
+                    "path": str(src_md),
+                    "sha256": _sha256_file(src_md),
+                    "row_count": len(md_rows),
+                    "matching_day_row_count": len(day_rows),
+                }
+            },
+            "schema_id": "C2_MARKET_DATA_SNAPSHOT_V1",
+            "schema_version": "v1",
+            "symbol": sym,
+        }
+        source_market_data = str(src_md)
+        source_market_data_sha = _sha256_file(src_md)
+        matching_day_rows = len(day_rows)
     md_bytes = _stable_json_bytes(md_obj)
     act_md = _atomic_write_idempotent(out_md, md_bytes)
     md_sha = _sha256_file(out_md) if out_md.exists() else _sha256_bytes(md_bytes)
     print(
         f"OK: market_data_snapshot_v1_snapshot action={act_md} path={out_md} sha256={md_sha} "
-        f"source_market_data={src_md} source_market_data_sha256={_sha256_file(src_md)} matching_day_rows={len(day_rows)}"
+        f"source_market_data={source_market_data} source_market_data_sha256={source_market_data_sha} matching_day_rows={matching_day_rows}"
     )
 
     print("OK: done=1")

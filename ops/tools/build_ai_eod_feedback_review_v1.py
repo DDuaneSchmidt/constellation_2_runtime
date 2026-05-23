@@ -21,6 +21,10 @@ from constellation_2.common.aegis_ai_feedback_engine_v1 import (  # noqa: E402
     write_evidence_gate_v1,
     write_research_task_queue_from_ai_feedback_v1,
 )
+from ops.aegis.event_append_transaction_v1 import (  # noqa: E402
+    contract_input_hashes_for_paths_v1,
+    emit_artifact_evidence_transaction_v1,
+)
 
 
 FILE_NAMES = {
@@ -83,19 +87,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     validate_ai_feedback_review_v1(review)
     review_path = write_ai_feedback_review_v1(truth_root=truth_root, payload=review)
-    task_path = None
-    if review["research_tasks_created"]:
-        task_path = write_research_task_queue_from_ai_feedback_v1(
-            truth_root=truth_root,
-            period_end=day,
-            generated_at_utc=generated_at,
-            tasks=review["research_tasks_created"],
-        )
-    print(_summary(evidence_gate=evidence_gate, review=review, evidence_path=evidence_path, review_path=review_path, task_path=task_path))
+    review_events = emit_artifact_evidence_transaction_v1(
+        truth_root=truth_root,
+        day_utc=day,
+        artifact_path=review_path,
+        payload=review,
+        producer_id="ops/tools/build_ai_eod_feedback_review_v1.py",
+        producer_version="v1",
+        run_id=f"build_ai_eod_feedback_review_v1:{day}:{generated_at}",
+        created_at_utc=generated_at,
+        input_hashes=contract_input_hashes_for_paths_v1([Path(str(row.get("path"))) for row in lineage if isinstance(row, dict) and str(row.get("path") or "")]),
+        validation_status="VALID" if "ai_used" in review else "INVALID",
+    )
+    task_path = write_research_task_queue_from_ai_feedback_v1(
+        truth_root=truth_root,
+        period_end=day,
+        generated_at_utc=generated_at,
+        tasks=review["research_tasks_created"],
+    )
+    print(_summary(evidence_gate=evidence_gate, review=review, evidence_path=evidence_path, review_path=review_path, task_path=task_path, event_ids=[str(row.get("event", {}).get("event_id") or "") for row in review_events]))
     return 0
 
 
-def _summary(*, evidence_gate: dict[str, Any], review: dict[str, Any], evidence_path: Path, review_path: Path, task_path: Path | None) -> str:
+def _summary(*, evidence_gate: dict[str, Any], review: dict[str, Any], evidence_path: Path, review_path: Path, task_path: Path | None, event_ids: list[str] | None = None) -> str:
     lines = [
         "AEGIS AI EOD FEEDBACK REVIEW",
         f"Evidence gate: {evidence_path}",
@@ -106,6 +120,7 @@ def _summary(*, evidence_gate: dict[str, Any], review: dict[str, Any], evidence_
         f"Findings: {len(review['findings'])}",
         f"Research tasks created: {len(review['research_tasks_created'])}",
         f"Research task queue: {task_path if task_path else 'not written'}",
+        f"Evidence event IDs: {','.join(event_ids or []) or 'none'}",
         "Safety: human review required; no broker action; no production mutation; no auto-promotion/demotion.",
     ]
     return "\n".join(lines)

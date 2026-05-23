@@ -261,6 +261,62 @@ def _tie_break_key(row: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+
+def _candidate_manifest_for_rollup(*, truth_root: Path, day_utc: str, source_rollup_path: Path | None, run_id: str) -> tuple[Path | None, dict[str, Any]]:
+    candidates: list[Path] = []
+    if source_rollup_path is not None:
+        try:
+            parent = source_rollup_path.resolve().parent.name
+            if parent:
+                candidates.append(Path(truth_root).resolve() / "reports" / "candidate_generation_manifest_v1" / day_utc / parent / "candidate_generation_manifest.v1.json")
+        except Exception:
+            pass
+    if run_id:
+        candidates.append(Path(truth_root).resolve() / "reports" / "candidate_generation_manifest_v1" / day_utc / run_id / "candidate_generation_manifest.v1.json")
+    base = Path(truth_root).resolve() / "reports" / "candidate_generation_manifest_v1" / day_utc
+    if base.exists():
+        candidates.extend(sorted(base.glob("*/candidate_generation_manifest.v1.json"), key=lambda item: (item.stat().st_mtime_ns, str(item)), reverse=True))
+    for path in candidates:
+        if path.exists() and path.is_file():
+            payload = _read_json(path)
+            if str(payload.get("day_utc") or "") == day_utc:
+                return path.resolve(), payload
+    return None, {}
+
+
+def _candidate_coverage_rows(candidate_manifest: dict[str, Any], scoring_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidate_rows = candidate_manifest.get("candidate_rows") if isinstance(candidate_manifest.get("candidate_rows"), list) else []
+    score_by_intent = {str(row.get("intent_id") or "").strip(): row for row in scoring_rows if isinstance(row, dict) and str(row.get("intent_id") or "").strip()}
+    coverage: list[dict[str, Any]] = []
+    for row in candidate_rows:
+        if not isinstance(row, dict):
+            continue
+        raw_intent_id = str(row.get("raw_intent_id") or "").strip()
+        score = score_by_intent.get(raw_intent_id, {}) if raw_intent_id else {}
+        if score:
+            status = "SCORED" if score.get("executable_eligible") else "NOT_EXECUTABLE"
+            reason = str(score.get("score_unavailable_reason") or "")
+        elif raw_intent_id:
+            status = "SCORE_UNAVAILABLE"
+            reason = "PORTFOLIO_SCORING_ROW_MISSING"
+        else:
+            status = "NOT_APPLICABLE_NO_INTENT"
+            reason = "NO_INTENT_DECLARED"
+        coverage.append({
+            "candidate_id": str(row.get("candidate_id") or raw_intent_id or ""),
+            "raw_intent_id": raw_intent_id,
+            "symbol": str(row.get("symbol_or_pair") or row.get("symbol") or "").upper(),
+            "sleeve_id": str(row.get("sleeve_id") or row.get("engine_id") or ""),
+            "candidate_status": str(row.get("status") or ""),
+            "market_data_mode": str(row.get("source_data_mode") or score.get("market_data_mode") or ""),
+            "score_status": status,
+            "score_unavailable_reason": reason,
+            "score_total": score.get("score_total") if score else None,
+            "rank": score.get("rank") if score else None,
+            "final_eod_certification_status": str(row.get("final_eod_certification_status") or score.get("final_eod_certification_status") or ""),
+        })
+    return coverage
+
 def build_portfolio_scoring_v1(
     *,
     day_utc: str,
@@ -276,6 +332,13 @@ def build_portfolio_scoring_v1(
     regime_confidence = _read_json(regime_path)
     regime_multiplier = _regime_confidence_multiplier(regime_confidence) if regime_confidence else 1.0
     gate = _load_gate(day_utc=day_utc, truth_root=truth_root, environment=environment, source_rollup_path=source_rollup_path, path=portfolio_gate_path_arg)
+    resolved_rollup_path = str(source_rollup_path.resolve()) if source_rollup_path is not None else str(gate.get("source_rollup_path") or "")
+    run_id = str(gate.get("run_id") or "")
+    market_data_mode = str(gate.get("market_data_mode") or gate.get("run_mode") or "")
+    final_eod_certification_status = str(gate.get("final_eod_certification_status") or "")
+    gate_candidate_lane = str(gate.get("candidate_lane") or gate.get("candidate_visibility_lane") or "").upper()
+    gate_certification_state = str(gate.get("certification_state") or final_eod_certification_status or "").upper()
+    execution_certified = gate_candidate_lane == "CERTIFIED" and gate_certification_state in {"CERTIFIED", "PASS", "VALID"}
     decisions = gate.get("decisions") if isinstance(gate.get("decisions"), list) else []
     outcome_by_intent = _outcomes_by_intent(gate)
     intent_rows = [row for row in decisions if isinstance(row, dict) and str(row.get("raw_intent_id") or "").strip()]
@@ -286,7 +349,7 @@ def build_portfolio_scoring_v1(
         outcome = outcome_by_intent.get(intent_id, {})
         intent = _intent_payload(row)
         decision = str(row.get("portfolio_gate_decision") or "").upper()
-        executable_eligible = decision == "ALLOW" and row.get("allowed_by_portfolio_gate") is True
+        executable_eligible = decision == "ALLOW" and row.get("allowed_by_portfolio_gate") is True and execution_certified
         if executable_eligible:
             raw_regime_alignment = _regime_alignment(row, state)
             components = {
@@ -311,13 +374,26 @@ def build_portfolio_scoring_v1(
         ]
         evidence_paths = [path for path in evidence_paths if path]
         reasons = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
-        scoring_reason = "SCORING_EXECUTABLE_ELIGIBLE" if executable_eligible else f"SCORING_NOT_EXECUTABLE_{decision or 'UNKNOWN'}"
+        if executable_eligible:
+            scoring_reason = "SCORING_EXECUTABLE_ELIGIBLE"
+        elif decision == "ALLOW" and row.get("allowed_by_portfolio_gate") is True and not execution_certified:
+            scoring_reason = "SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT"
+        else:
+            scoring_reason = f"SCORING_NOT_EXECUTABLE_{decision or 'UNKNOWN'}"
         rows.append(
             {
                 "rank": 0,
+                "candidate_id": str(row.get("candidate_id") or row.get("raw_intent_id") or ""),
                 "intent_id": intent_id,
                 "sleeve_id": str(row.get("sleeve_id") or ""),
                 "symbol": str(row.get("raw_intent_symbol") or "").upper(),
+                "run_id": run_id,
+                "market_data_mode": market_data_mode,
+                "final_eod_certification_status": final_eod_certification_status,
+                "final_eod_certification_pending": final_eod_certification_status.upper() == "PENDING",
+                "candidate_lane": gate_candidate_lane or str(row.get("candidate_lane") or ""),
+                "certification_state": gate_certification_state or str(row.get("certification_state") or ""),
+                "execution_firewall_status": "PASS" if execution_certified else "REJECTED_NON_CERTIFIED_INPUT",
                 "raw_signal_status": str(row.get("raw_signal_status") or "").upper(),
                 "portfolio_gate_decision": decision,
                 "allowed_by_portfolio_gate": bool(row.get("allowed_by_portfolio_gate")),
@@ -339,6 +415,9 @@ def build_portfolio_scoring_v1(
                 "evidence_paths": evidence_paths,
                 "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
                 "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
+                "source_rollup_path": resolved_rollup_path,
+                "score_status": "SCORED" if executable_eligible else "NOT_EXECUTABLE",
+                "score_unavailable_reason": "" if executable_eligible else ("NON_CERTIFIED_CANDIDATE_SNAPSHOT" if decision == "ALLOW" and row.get("allowed_by_portfolio_gate") is True and not execution_certified else f"PORTFOLIO_GATE_{decision or 'UNKNOWN'}"),
             }
         )
     rankable = [row for row in rows if row["executable_eligible"]]
@@ -346,6 +425,8 @@ def build_portfolio_scoring_v1(
     for rank, row in enumerate(rankable, start=1):
         row["rank"] = rank
     rows.sort(key=lambda row: (row["rank"] if row["rank"] else 999999, str(row.get("sleeve_id") or ""), str(row.get("intent_id") or "")))
+    candidate_manifest_path, candidate_manifest = _candidate_manifest_for_rollup(truth_root=truth_root, day_utc=day_utc, source_rollup_path=source_rollup_path, run_id=run_id)
+    candidate_coverage = _candidate_coverage_rows(candidate_manifest, rows)
     out_path = portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc)
     selected_candidate_intent_id = str(rankable[0].get("intent_id") or "") if rankable else ""
     if not gate:
@@ -364,6 +445,14 @@ def build_portfolio_scoring_v1(
         "status": status,
         "canonical_blocker": "" if gate else "PORTFOLIO_ACTIVATION_GATE_MISSING",
         "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+        "source_rollup_path": resolved_rollup_path,
+        "run_id": run_id,
+        "market_data_mode": market_data_mode,
+        "final_eod_certification_status": final_eod_certification_status,
+        "final_eod_certification_pending": final_eod_certification_status.upper() == "PENDING",
+        "candidate_lane": gate_candidate_lane,
+        "certification_state": gate_certification_state,
+        "execution_firewall_status": "PASS" if execution_certified else "REJECTED_NON_CERTIFIED_INPUT",
         "portfolio_state_path": str(state.get("artifact_path") or state_path),
         "regime_confidence_path": str(regime_path),
         "regime_confidence_level": str(regime_confidence.get("confidence_level") or "UNKNOWN") if regime_confidence else "UNKNOWN",
@@ -372,6 +461,9 @@ def build_portfolio_scoring_v1(
         "scoring_policy_version": SCORING_POLICY_VERSION,
         "intents_scored_count": len(rankable),
         "selected_candidate_intent_id": selected_candidate_intent_id,
+        "candidate_manifest_path": str(candidate_manifest_path or ""),
+        "candidate_coverage_count": len(candidate_coverage),
+        "candidate_coverage": candidate_coverage,
         "rankings": rows,
         "ranked_intents": rows,
         "policy": {

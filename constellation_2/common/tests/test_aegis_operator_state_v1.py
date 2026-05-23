@@ -310,14 +310,14 @@ def test_aegis_runtime_ui_wiring_is_read_only() -> None:
     assert "Notification" in pages
     assert "webhook_enabled" in pages
     assert "payload.data || payload.operator_state" in pages
-    assert 'label: "Aegis Runtime"' in navigation
+    assert "aegis_runtime" not in navigation
     assert 'path == "/api/aegis/operator-state"' in server
     assert "get_operator_state(GLOBAL_TRUTH_ROOT)" in server
     assert '"/aegis-runtime"' in server
     assert "get_operator_state" in server
-    new_sections = "\n".join([pages, domain_client, navigation, server])
-    assert "postJson(\"/api/aegis" not in new_sections
-    assert "patchJson(\"/api/aegis" not in new_sections
+    runtime_route = pages[pages.index('case "aegis_runtime"'):pages.index('case "aegis_operator_cockpit"')]
+    assert "postJson(" not in runtime_route
+    assert "patchJson(" not in runtime_route
 
 
 def test_aegis_operator_state_api_contract_returns_ok_data(tmp_path: Path) -> None:

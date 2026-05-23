@@ -1,0 +1,13 @@
+[Unit]
+Description=Aegis Market Data Refresh v1 timer
+
+[Timer]
+OnCalendar=*-*-* 09:35:00 America/New_York
+OnCalendar=*-*-* 11:55:00 America/New_York
+OnCalendar=*-*-* 15:45:00 America/New_York
+OnCalendar=*-*-* 16:10:00 America/New_York
+Persistent=true
+Unit=aegis-market-data-refresh-v1.service
+
+[Install]
+WantedBy=timers.target

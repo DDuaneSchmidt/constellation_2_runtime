@@ -1,0 +1,13 @@
+[Unit]
+Description=Aegis Final EOD Market Data Certification v1 timer
+
+[Timer]
+OnCalendar=*-*-* 16:30:00 America/New_York
+OnCalendar=*-*-* 17:00:00 America/New_York
+OnCalendar=*-*-* 18:00:00 America/New_York
+OnCalendar=*-*-* 08:15:00 America/New_York
+Persistent=true
+Unit=aegis-market-data-final-eod-v1.service
+
+[Install]
+WantedBy=timers.target

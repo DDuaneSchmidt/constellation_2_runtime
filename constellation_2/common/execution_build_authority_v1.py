@@ -122,6 +122,13 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return obj
 
 
+def _read_json_or_empty(path: Path) -> Dict[str, Any]:
+    try:
+        return _read_json(path)
+    except Exception:
+        return {}
+
+
 def _write_canonical_json(path: Path, obj: Dict[str, Any]) -> str:
     payload = json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -861,16 +868,41 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
         status = str(obj.get('status') or '').strip().upper()
         decision = str(auth.get('decision') or '').strip().upper()
         qty = int(auth.get('authorized_quantity') or 0)
+        schema_id = str(obj.get('schema_id') or '').strip()
+        if schema_id == 'engine_activity_authorization':
+            validation_status = str(obj.get('validation_status') or '').strip().upper()
+            auth_status = str(obj.get('authorization_status') or '').strip().upper()
+            if str(obj.get('day_utc') or '').strip() != ctx.day_utc:
+                return STATUS_STALE, f'ENGINE_ACTIVITY_AUTHORIZATION_WRONG_DAY:path={path}'
+            runtime_hash = str((_read_json_or_empty(ctx.canonical_truth_root / 'reports' / 'aegis_runtime_truth_kernel_v1' / ctx.day_utc / 'runtime_evaluation.v1.json')).get('deterministic_output_hash') or '').strip()
+            if runtime_hash and str(obj.get('runtime_evaluation_hash') or '').strip() != runtime_hash:
+                return STATUS_STALE, f'ENGINE_ACTIVITY_AUTHORIZATION_HASH_MISMATCH:expected_runtime={runtime_hash}:actual_runtime={obj.get("runtime_evaluation_hash")}:path={path}'
+            identity_path = (ctx.canonical_truth_root / 'reports' / 'candidate_identity_set_v1' / ctx.day_utc / ctx.intent_hash.lower() / 'candidate_identity_set.v1.json').resolve()
+            identity_hash = _sha256_file(identity_path) if identity_path.exists() else ''
+            if identity_hash and str(obj.get('candidate_identity_hash') or '').strip() != identity_hash:
+                return STATUS_STALE, f'ENGINE_ACTIVITY_AUTHORIZATION_HASH_MISMATCH:dependency=candidate_identity_set_v1:path={path}'
+            if str(obj.get('intent_hash') or '').strip().lower() != ctx.intent_hash.lower():
+                return STATUS_FAILED, f'ENGINE_ACTIVITY_AUTHORIZATION_INTENT_MISMATCH:path={path}'
+            if str(obj.get('candidate_id') or '').strip() != ctx.intent_id:
+                return STATUS_FAILED, f'ENGINE_ACTIVITY_AUTHORIZATION_CANDIDATE_MISMATCH:path={path}'
+            if bool(obj.get('broker_submit_transmit_allowed') is True) or bool(obj.get('autonomous_execution_allowed') is True):
+                return STATUS_FAILED, f'ENGINE_ACTIVITY_AUTHORIZATION_SCOPE_VIOLATION:path={path}'
+            if validation_status == 'VALID' and auth_status == 'AUTHORIZED' and status == 'AUTHORIZED' and decision == 'AUTHORIZED' and qty > 0:
+                return STATUS_PRESENT, 'ENGINE_ACTIVITY_AUTHORIZED'
+            blockers = ','.join(str(code) for code in obj.get('blocker_codes') or obj.get('blocker_reasons') or [] if str(code))
+            return STATUS_FAILED, f'ENGINE_ACTIVITY_AUTHORIZATION_REJECTED:status={status}:authorization_status={auth_status}:blockers={blockers}:path={path}'
         if status == 'AUTHORIZED' and decision == 'AUTHORIZED' and qty > 0:
             return STATUS_PRESENT, 'ENGINE_ACTIVITY_AUTHORIZED'
         return STATUS_FAILED, f'ENGINE_ACTIVITY_NOT_AUTHORIZED:status={status}:decision={decision}:authorized_quantity={qty}:path={path}'
 
     if dependency_id == 'capital_authority_allocation_v1':
-        if str(obj.get('schema_id') or '').strip() != 'C2_CAPITAL_AUTHORITY_ALLOCATION_V1':
+        schema_id = str(obj.get('schema_id') or '').strip()
+        if schema_id not in {'C2_CAPITAL_AUTHORITY_ALLOCATION_V1', 'capital_authority_allocation'}:
             return STATUS_FAILED, f'CAPITAL_AUTHORITY_SCHEMA_MISMATCH:path={path}'
         status = _status_value(obj)
-        if status and status != 'OK':
-            return STATUS_FAILED, f'CAPITAL_AUTHORITY_STATUS_NOT_OK:status={status}:path={path}'
+        validation_status = str(obj.get('validation_status') or '').strip().upper()
+        if status and status != 'OK' and validation_status != 'VALID':
+            return STATUS_FAILED, f'CAPITAL_AUTHORITY_STATUS_NOT_OK:status={status}:validation_status={validation_status}:path={path}'
         try:
             row = _bundle_b_authorized_row_for_intent(
                 obj,
@@ -1005,6 +1037,8 @@ def _materializable_now(results: Dict[str, Dict[str, Any]], manifest: Dict[str, 
     for dependency in manifest.get('dependencies', []):
         dep_id = str(dependency.get('dependency_id') or '').strip()
         result = results.get(dep_id, {})
+        if result.get('post_submit_only'):
+            continue
         if result.get('status') in {STATUS_MISSING, STATUS_STALE, STATUS_FAILED} and result.get('producer_ref') and not result.get('upstream_blockers'):
             out.append(dep_id)
     return out
@@ -1024,6 +1058,8 @@ def _run_materializers(ctx: CandidateContext, manifest: Dict[str, Any], results:
                 result = current_results.get(dep_id, {})
                 producer_ref = str(result.get('producer_ref') or '').strip()
                 if not producer_ref or producer_ref in executed_producers:
+                    continue
+                if result.get('post_submit_only'):
                     continue
                 if result.get('status') in {STATUS_MISSING, STATUS_STALE, STATUS_FAILED} and not result.get('upstream_blockers'):
                     producer_refs.append(producer_ref)
@@ -1091,7 +1127,16 @@ def _dependency_results_list(results: Dict[str, Dict[str, Any]], manifest: Dict[
 
 
 def _sealable(results: Dict[str, Dict[str, Any]], manifest: Dict[str, Any]) -> bool:
-    required = {str(x).strip() for x in manifest.get('seal_requires') or [] if str(x).strip()}
+    post_submit_only = {
+        str(dep.get('dependency_id') or '').strip()
+        for dep in manifest.get('dependencies', [])
+        if bool(dep.get('post_submit_only') is True)
+    }
+    required = {
+        str(x).strip()
+        for x in manifest.get('seal_requires') or []
+        if str(x).strip() and str(x).strip() not in post_submit_only
+    }
     return all(results.get(dep_id, {}).get('status') == STATUS_PRESENT for dep_id in required)
 
 
@@ -1254,7 +1299,7 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
         recovery_command='PYTHONPATH="$PWD" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py',
         account=ctx.ib_account,
         sleeve=ctx.sleeve_id,
-        artifact_id=f'execution_build_v1:{ctx.day_utc}:{ctx.submission_id}',
+        artifact_id=f'execution_build_v1:{ctx.day_utc}:{ctx.submission_id}:{build_sha[:16]}',
     )
 
     package_path = None
@@ -1363,7 +1408,7 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
         package_obj['canonical_json_hash'] = canonical_hash_for_c2_artifact_v1(package_obj)
         validate_against_repo_schema_v1(package_obj, repo_root, PACKAGE_SCHEMA_RELPATH)
         package_path = _package_path(ctx)
-        _write_canonical_json(package_path, package_obj)
+        package_sha = _write_canonical_json(package_path, package_obj)
         write_artifact_ledger_record_v1(
             artifact_path=package_path,
             artifact_type='execution_package_v1',
@@ -1374,7 +1419,7 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
             recovery_command='PYTHONPATH="$PWD" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py',
             account=ctx.ib_account,
             sleeve=ctx.sleeve_id,
-            artifact_id=f'execution_package_v1:{ctx.day_utc}:{ctx.submission_id}',
+            artifact_id=f'execution_package_v1:{ctx.day_utc}:{ctx.submission_id}:{package_sha[:16]}',
         )
 
     return {'context': ctx, 'manifest': manifest, 'results': results, 'build_path': build_path, 'build_obj': build_obj, 'package_path': package_path, 'package_obj': package_obj}

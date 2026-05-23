@@ -386,7 +386,7 @@ def _seed_complete_economic(canonical_truth: Path, sleeve_root: Path) -> None:
         },
     )
     _write_json(
-        sleeve_root / SLEEVE / ENV / 'allocation_v1' / 'capital_authority_allocation_v1' / DAY / 'capital_authority_allocation.v1.json',
+        canonical_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / DAY / 'capital_authority_allocation.v1.json',
         {
             'schema_id': 'C2_CAPITAL_AUTHORITY_ALLOCATION_V1',
             'schema_version': 1,
@@ -470,7 +470,6 @@ def test_build_primary_path_uses_only_sealed_upstream_packages(tmp_path: Path, m
     assert result['build_obj']['frozen_decision_input_bundle']['frozen'] is True
     assert result['build_obj']['constitutional_dependency_declaration']['declared_dependency_artifacts'] == [
         'economic_state_package_v1',
-        'trade_submit_readiness_c2_v1',
         'capital_authority_allocation_v1',
     ]
     assert 'canonical_authority_head_v1' not in dependency_ids
@@ -488,6 +487,34 @@ def test_build_primary_path_uses_only_sealed_upstream_packages(tmp_path: Path, m
     assert result['package_obj']['economic_state_package_ref']['dependency_id'] == 'economic_state_package_v1'
     ref_ids = {row['dependency_id'] for row in result['package_obj']['dependency_refs']}
     assert 'capital_authority_allocation_v1' in ref_ids
+
+
+
+def test_missing_broker_handshake_does_not_block_manual_construction_package(tmp_path: Path, monkeypatch) -> None:
+    canonical_truth, sleeve_root, candidate = _candidate_roots(tmp_path)
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    _seed_candidate(candidate, attempt_id='A1001')
+    _seed_raw_global_context(canonical_truth, sleeve_root)
+    _seed_execution_non_economic(canonical_truth, sleeve_root, INTENT_HASH)
+    _seed_complete_economic(canonical_truth, sleeve_root)
+    sleeve_truth = sleeve_root / SLEEVE / ENV
+    (sleeve_truth / 'ib_api_handshake' / DAY / 'ib_api_handshake.v1.json').unlink()
+    (sleeve_truth / 'trade_submit_readiness_c2_v1' / ENV / ACCOUNT / 'status.json').unlink()
+
+    _seal_global_context()
+    econ_module.run_economic_state_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', day_utc=DAY, sleeve_id=SLEEVE, environment=ENV, ib_account=ACCOUNT, materialize=False, emit_package=True)
+    result = build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=True)
+    by_id = {row['dependency_id']: row for row in result['build_obj']['dependency_results']}
+    assert by_id['ib_api_handshake_v1']['post_submit_only'] is True
+    assert by_id['trade_submit_readiness_c2_v1']['post_submit_only'] is True
+    assert by_id['ib_api_handshake_v1']['status'] == 'MISSING'
+    assert by_id['trade_submit_readiness_c2_v1']['status'] in {'MISSING', 'BLOCKED_BY_UPSTREAM'}
+    assert result['build_obj']['closure_status'] == 'COMPLETE'
+    assert result['build_obj']['first_real_blocker'] is None
+    assert result['package_obj'] is not None
+    ref_ids = {row['dependency_id'] for row in result['package_obj']['dependency_refs']}
+    assert 'ib_api_handshake_v1' not in ref_ids
+    assert 'trade_submit_readiness_c2_v1' not in ref_ids
 
 
 def test_stop_loss_bps_implied_only_blocks_package(tmp_path: Path, monkeypatch) -> None:
@@ -585,7 +612,7 @@ def test_missing_authorized_quantity_blocks_package_emission(tmp_path: Path, mon
     _seed_raw_global_context(canonical_truth, sleeve_root)
     _seed_execution_non_economic(canonical_truth, sleeve_root, INTENT_HASH)
     _seed_complete_economic(canonical_truth, sleeve_root)
-    allocation_path = sleeve_root / SLEEVE / ENV / 'allocation_v1' / 'capital_authority_allocation_v1' / DAY / 'capital_authority_allocation.v1.json'
+    allocation_path = canonical_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / DAY / 'capital_authority_allocation.v1.json'
     allocation_obj = json.loads(allocation_path.read_text(encoding='utf-8'))
     allocation_obj['decision_chain']['authorized_trade_intents'][0]['authorized_quantity'] = 0
     _write_json(allocation_path, allocation_obj)

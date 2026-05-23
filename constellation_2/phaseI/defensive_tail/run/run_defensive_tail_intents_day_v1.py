@@ -8,7 +8,7 @@ NON-NEGOTIABLE PROPERTIES:
 - Deterministic
 - Fail-closed
 - Uses ONLY existing truth spines (no new truth roots):
-    - market_data_snapshot_v1
+    - canonical market_data_inputs_v1, with legacy market_data_snapshot_v1 only for old fixtures
     - accounting_v1/nav
     - positions_snapshot_v2
     - monitoring_v1/engine_correlation_matrix
@@ -153,6 +153,60 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
         raise DefensiveTailError(f"TOP_LEVEL_NOT_OBJECT: {str(path)}")
     return obj
 
+def _canonical_truth_root_candidates() -> List[Path]:
+    roots: List[Path] = [TRUTH_ROOT]
+    parts = list(TRUTH_ROOT.parts)
+    if "truth_sleeves" in parts:
+        idx = parts.index("truth_sleeves")
+        if idx > 0:
+            roots.append(Path(*parts[:idx]) / "truth")
+    try:
+        from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
+        roots.append(resolve_canonical_truth_root().resolve())
+    except Exception:
+        pass
+    out: List[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        resolved = Path(root).expanduser().resolve()
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            out.append(resolved)
+    return out
+
+
+def _market_data_inputs_path(day_utc: str) -> Path:
+    for root in _canonical_truth_root_candidates():
+        path = (root / "reports" / "market_data_inputs_v1" / day_utc / "market_data_inputs.v1.json").resolve()
+        if path.exists() and path.is_file():
+            return path
+    return Path("")
+
+
+def _validate_canonical_market_input(day_utc: str, symbol: str) -> Path:
+    path = _market_data_inputs_path(day_utc)
+    if not str(path):
+        return Path("")
+    payload = _read_json_obj(path)
+    item_id = f"market.price.{symbol}"
+    for row in payload.get("input_records") if isinstance(payload.get("input_records"), list) else []:
+        if not isinstance(row, dict) or str(row.get("data_item_id") or "") != item_id:
+            continue
+        status = str(row.get("validation_status") or "").upper()
+        source_day = str(row.get("source_timestamp_utc") or "")[:10]
+        raw_hash = str(row.get("raw_source_hash") or "")
+        if status != "VALID":
+            raise DefensiveTailError(f"CANONICAL_MARKET_INPUT_NOT_VALID:{item_id}:{status}")
+        if source_day != day_utc:
+            raise DefensiveTailError(f"CANONICAL_MARKET_INPUT_NOT_CURRENT:{item_id}:{source_day or 'UNKNOWN'}")
+        if len(raw_hash) != 64:
+            raise DefensiveTailError(f"CANONICAL_MARKET_INPUT_RAW_HASH_MISSING:{item_id}")
+        return path
+    raise DefensiveTailError(f"CANONICAL_MARKET_INPUT_MISSING:{item_id}")
+
+
 
 def _dec_str(x: Any, field: str) -> Decimal:
     try:
@@ -219,7 +273,9 @@ class _Inputs:
 
 
 def _resolve_inputs(day_utc: str, symbol: str) -> _Inputs:
-    md_path = (MD_ROOT / day_utc / f"{symbol}.market_data_snapshot.v1.json").resolve()
+    md_path = _validate_canonical_market_input(day_utc, symbol)
+    if not str(md_path):
+        md_path = (MD_ROOT / day_utc / f"{symbol}.market_data_snapshot.v1.json").resolve()
     nav_path = (NAV_ROOT / day_utc / "nav_snapshot.v1.json").resolve()
     pos_path = (POS_ROOT / day_utc / "positions_snapshot.v2.json").resolve()
     cor_path = (COR_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()

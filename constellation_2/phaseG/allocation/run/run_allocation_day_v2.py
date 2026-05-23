@@ -46,10 +46,14 @@ SCHEMA_DECISION = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_decision.
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_failure.v1.schema.json"
 
 ENGINE_CAP_PCT = {
+    "C2_INTENT_SIMULATOR_V1": Decimal("0.40"),
     "C2_TREND_EQ_PRIMARY_V1": Decimal("0.40"),
     "C2_VOL_INCOME_DEFINED_RISK_V1": Decimal("0.40"),
     "C2_MEAN_REVERSION_EQ_V1": Decimal("0.20"),
+    "C2_EVENT_DISLOCATION_V1": Decimal("0.10"),
     "C2_DEFENSIVE_TAIL_V1": Decimal("0.05"),
+    "C2_CROSS_ASSET_TREND_V1": Decimal("0.20"),
+    "C2_MARKET_NEUTRAL_SPREAD_V1": Decimal("0.10"),
 }
 
 SUPPORTED_INTENT_SCHEMAS = {

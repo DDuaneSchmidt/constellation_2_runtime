@@ -111,6 +111,23 @@ def _stable_sha(payload: Dict[str, Any]) -> str:
     return hashlib.sha256((json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")).hexdigest()
 
 
+def _read_runtime_hash(truth_root: Path, day_utc: str) -> str:
+    runtime_path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
+    try:
+        obj = json.loads(runtime_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+
+
+def _cash_source_type(path: Path) -> str:
+    try:
+        obj = _read_json_obj(path)
+    except Exception:
+        return "UNKNOWN"
+    return str(obj.get("source_type") or "UNKNOWN").strip().upper() or "UNKNOWN"
+
+
 def _previous_day(day_utc: str) -> str:
     return (date.fromisoformat(day_utc) - timedelta(days=1)).isoformat()
 
@@ -796,8 +813,15 @@ def main(argv: List[str] | None = None) -> int:
             "accounts": accounts,
             "items": items,
             "reconciliation": reconciliation,
+            "runtime_evaluation_hash": _read_runtime_hash(truth_root, day_utc),
+            "source_type": "BROKER_EXPORT" if broker_rows else "SIMULATION_LEDGER",
+            "cash_ledger_source_type": _cash_source_type(paths["cash_snapshot"]) if paths["cash_snapshot"].exists() else "UNKNOWN",
+            "source_hash": _stable_sha({"input_manifest": input_manifest, "items": items, "accounts": accounts}),
+            "downstream_dependency_hashes": {"cash_ledger_snapshot_v1": _sha256_file(paths["cash_snapshot"]) if paths["cash_snapshot"].exists() else ZERO_SHA},
+            "output_hash": None,
             "canonical_json_hash": None,
         }
+        out["output_hash"] = _stable_sha({**out, "output_hash": "", "canonical_json_hash": None})
         out["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(out)
         validate_against_repo_schema_v1(out, REPO_ROOT, SCHEMA_OUT)
         payload = canonical_json_bytes_v1(out) + b"\n"

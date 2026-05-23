@@ -1,9 +1,10 @@
 [Unit]
-Description=Schedule Aegis Lite EOD report v1 at 15:50 America/New_York
+Description=Schedule Aegis Lite sleeve runs v1 at 09:50 UTC and 14:50 UTC daily
 Documentation=/home/node/constellation/docs/aegis_lite_timer_model.md
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York
+OnCalendar=*-*-* 09:50:00 UTC
+OnCalendar=*-*-* 14:50:00 UTC
 AccuracySec=30s
 Persistent=false
 Unit=aegis-lite-eod-report-v1.service

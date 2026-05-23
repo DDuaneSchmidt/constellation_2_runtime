@@ -198,7 +198,7 @@ def run_event_monitor_v1(
         for k, v in (snapshot.get("current_prices") if isinstance(snapshot.get("current_prices"), dict) else {}).items()
     }
 
-    registry_snapshot_path = _write_registry_snapshot(root=root, day_utc=day_utc, monitor_run_id=run_id, registry=registry)
+    registry_snapshot_path = _write_registry_snapshot(root=root, day_utc=day_utc, monitor_run_id=run_id, registry=registry, generated_at_utc=ts)
     events: list[dict[str, Any]] = []
     tactical_packets: list[dict[str, Any]] = []
     review_gates: list[dict[str, Any]] = []
@@ -562,10 +562,14 @@ def _runtime_truth_classification(*, snapshot: dict[str, Any], packet: dict[str,
     return "REAL_RUNTIME"
 
 
-def _write_registry_snapshot(*, root: Path, day_utc: str, monitor_run_id: str, registry: dict[str, Any]) -> Path:
+def _write_registry_snapshot(*, root: Path, day_utc: str, monitor_run_id: str, registry: dict[str, Any], generated_at_utc: str = "") -> Path:
     path = root / "reports" / "event_rules_registry_v1" / day_utc / _safe(monitor_run_id) / "event_rules_registry.v1.json"
+    payload = dict(registry)
+    payload["day_utc"] = day_utc
+    payload["generated_at_utc"] = generated_at_utc or utc_now_iso_v1()
+    payload["source_registry_generated_at_utc"] = str(registry.get("generated_at_utc") or "")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(canonical_json_bytes_v1(registry) + b"\n")
+    path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
     return path
 
 

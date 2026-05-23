@@ -111,7 +111,66 @@ def _status_from_outcome(outcome: dict[str, Any]) -> str:
     return status or "UNKNOWN"
 
 
-def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str, Any]) -> list[dict[str, Any]]:
+
+def _candidate_mode_fields(run_mode: str) -> dict[str, Any]:
+    mode = _upper(run_mode) or "INTRADAY_OPERATIONAL"
+    intraday = mode == "INTRADAY_OPERATIONAL"
+    return {
+        "candidate_data_status": "PROVISIONAL_CANDIDATE" if intraday else "FINAL_EOD_CERTIFIED_CANDIDATE",
+        "source_data_mode": mode,
+        "final_eod_certification_status": "PENDING" if intraday else "PASS",
+        "final_eod_certification_pending": intraday,
+        "manual_capture_eligible": not intraday,
+    }
+
+
+def _market_data_lineage_fields(truth_root: Path, day_utc: str, run_mode: str) -> dict[str, Any]:
+    path = Path(truth_root).resolve() / "reports" / "aegis_market_data_v1" / day_utc / "market_data.v1.json"
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            payload = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            payload = {}
+    mode = _upper(run_mode) or "INTRADAY_OPERATIONAL"
+    certification_state = _upper(payload.get("certification_state"))
+    final_status = _upper(payload.get("final_eod_certification_status"))
+    if not certification_state:
+        certification_state = "CERTIFIED" if mode == "FINAL_EOD_CERTIFIED" or final_status in {"VALID", "PASS", "CERTIFIED"} else "CERTIFICATION_PENDING"
+    candidate_lane = _upper(payload.get("candidate_lane")) or ("CERTIFIED" if certification_state == "CERTIFIED" else "PROVISIONAL")
+    snapshot_ids = payload.get("input_market_data_snapshot_ids") if isinstance(payload.get("input_market_data_snapshot_ids"), list) else []
+    if not snapshot_ids and str(payload.get("market_data_snapshot_id") or "").strip():
+        snapshot_ids = [str(payload.get("market_data_snapshot_id"))]
+    return {
+        "candidate_lane": candidate_lane,
+        "candidate_visibility_lane": candidate_lane,
+        "certification_state": certification_state,
+        "certification_label": "CERTIFIED" if candidate_lane == "CERTIFIED" and certification_state == "CERTIFIED" else "NON_CERTIFIED",
+        "input_market_data_snapshot_ids": [str(item) for item in snapshot_ids if str(item or "").strip()],
+        "market_data_snapshot_path": str(payload.get("market_data_snapshot_path") or ""),
+        "market_data_snapshot_hash": str(payload.get("market_data_snapshot_hash") or ""),
+        "execution_eligible": candidate_lane == "CERTIFIED" and certification_state == "CERTIFIED",
+    }
+
+
+def _apply_candidate_lane_fields(rows: list[dict[str, Any]], fields: dict[str, Any]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    execution_eligible = bool(fields.get("execution_eligible") is True)
+    for row in rows:
+        next_row = dict(row)
+        next_row["candidate_lane"] = str(fields.get("candidate_lane") or "PROVISIONAL")
+        next_row["certification_state"] = str(fields.get("certification_state") or "CERTIFICATION_PENDING")
+        next_row["certification_label"] = str(fields.get("certification_label") or "NON_CERTIFIED")
+        next_row["execution_eligible"] = execution_eligible
+        next_row["read_only"] = not execution_eligible
+        next_row["input_market_data_snapshot_ids"] = list(fields.get("input_market_data_snapshot_ids") or [])
+        next_row["manual_capture_eligible"] = execution_eligible
+        next_row["lineage_hash"] = _row_lineage_hash({key: value for key, value in next_row.items() if key != "lineage_hash"})
+        enriched.append(next_row)
+    return enriched
+
+def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str, Any], run_mode: str = "") -> list[dict[str, Any]]:
     engine_id = _text(outcome.get("engine_id") or outcome.get("sleeve_id"))
     output_intents = [row for row in _list(outcome.get("output_intents")) if isinstance(row, dict)]
     reason_codes = _strings(outcome.get("reason_codes"))
@@ -139,6 +198,7 @@ def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str
                 "allowed_by_portfolio_gate": False,
                 "input_artifact_paths": input_paths,
                 "output_artifact_paths": output_paths,
+                **_candidate_mode_fields(run_mode),
             }
             row["lineage_hash"] = _row_lineage_hash(row)
             rows.append(row)
@@ -164,6 +224,7 @@ def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str
             "allowed_by_portfolio_gate": False,
             "input_artifact_paths": input_paths,
             "output_artifact_paths": output_paths,
+            **_candidate_mode_fields(run_mode),
         }
         row["lineage_hash"] = _row_lineage_hash(row)
         rows.append(row)
@@ -267,12 +328,15 @@ def build_candidate_generation_manifest_v1(
     produced_at_utc: str,
     source_rollup_path: str = "",
     portfolio_gate: dict[str, Any] | None = None,
+    run_mode: str = "INTRADAY_OPERATIONAL",
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for outcome in outcomes:
         if isinstance(outcome, dict):
-            rows.extend(_candidate_rows_from_outcome(day_utc=day_utc, run_id=run_id, outcome=outcome))
+            rows.extend(_candidate_rows_from_outcome(day_utc=day_utc, run_id=run_id, outcome=outcome, run_mode=run_mode))
     rows = _apply_portfolio_gate(rows, portfolio_gate)
+    lineage_fields = _market_data_lineage_fields(Path(truth_root), day_utc, run_mode)
+    rows = _apply_candidate_lane_fields(rows, lineage_fields)
     rows.sort(key=lambda row: (str(row["engine_id"]), str(row["symbol_or_pair"]), str(row["candidate_id"])))
     status_counts: dict[str, int] = {}
     for row in rows:
@@ -284,6 +348,19 @@ def build_candidate_generation_manifest_v1(
         "run_id": run_id,
         "day_utc": day_utc,
         "environment": environment,
+        "run_mode": _upper(run_mode) or "INTRADAY_OPERATIONAL",
+        "market_data_mode": _upper(run_mode) or "INTRADAY_OPERATIONAL",
+        "candidate_generation_label": "FINAL_EOD_CERTIFIED" if lineage_fields["execution_eligible"] else "NON_CERTIFIED",
+        "candidate_lane": str(lineage_fields.get("candidate_lane") or "PROVISIONAL"),
+        "candidate_visibility_lane": str(lineage_fields.get("candidate_visibility_lane") or "PROVISIONAL"),
+        "certification_state": str(lineage_fields.get("certification_state") or "CERTIFICATION_PENDING"),
+        "certification_label": str(lineage_fields.get("certification_label") or "NON_CERTIFIED"),
+        "input_market_data_snapshot_ids": list(lineage_fields.get("input_market_data_snapshot_ids") or []),
+        "market_data_snapshot_path": str(lineage_fields.get("market_data_snapshot_path") or ""),
+        "market_data_snapshot_hash": str(lineage_fields.get("market_data_snapshot_hash") or ""),
+        "execution_eligible": bool(lineage_fields.get("execution_eligible") is True),
+        "read_only": not bool(lineage_fields.get("execution_eligible") is True),
+        "final_eod_certification_status": "PASS" if lineage_fields["execution_eligible"] else "PENDING",
         "produced_at_utc": produced_at_utc,
         "source_rollup_path": source_rollup_path,
         "portfolio_activation_gate_path": _text(portfolio_gate.get("artifact_path")) if isinstance(portfolio_gate, dict) else "",
@@ -296,6 +373,8 @@ def build_candidate_generation_manifest_v1(
         "execution_authority_granted": False,
         "order_submission_attempted": False,
         "trading_behavior_changed": False,
+        "certified_candidate_promotion_required": not bool(lineage_fields.get("execution_eligible") is True),
+        "execution_firewall_required": True,
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)

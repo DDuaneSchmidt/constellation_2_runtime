@@ -33,6 +33,15 @@ def _sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 
+def _read_runtime_hash(truth_root: Path, day_utc: str) -> str:
+    runtime_path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
+    try:
+        obj = json.loads(runtime_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+
+
 def _json_bytes(obj: Any) -> bytes:
     return (json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -227,6 +236,11 @@ def _write_bootstrap_stub(*, out_path: Path, day: str, producer_repo: str, produ
             "drawdown_abs": 0,
             "drawdown_pct": "0.000000",
         },
+        "runtime_evaluation_hash": _read_runtime_hash(TRUTH_ROOT, day),
+        "source_type": "STATIC_RISK_BUDGET_BOOTSTRAP",
+        "cash_hash": "",
+        "positions_hash": "",
+        "day0_bootstrap_classification": DAY0_RC_ALLOWED,
     }
 
     _write_nav_report(out_path, _json_bytes(out))
@@ -432,6 +446,11 @@ def main() -> int:
             "drawdown_abs": int(drawdown_abs),
             "drawdown_pct": str(drawdown_pct),
         },
+        "runtime_evaluation_hash": _read_runtime_hash(TRUTH_ROOT, day),
+        "source_type": str(cash.get("source_type") or pos.get("source_type") or "ACCOUNT_EVIDENCE"),
+        "cash_hash": _sha256_file(cash_path),
+        "positions_hash": _sha256_file(pos_path),
+        "day0_bootstrap_classification": "NOT_DAY0_BOOTSTRAP",
     }
 
     _write_nav_report(out_path, _json_bytes(out))

@@ -8,6 +8,7 @@ from typing import Any
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.aegis.runtime_truth_kernel_v1 import build_runtime_truth_kernel_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +106,7 @@ def build_aegis_chatgpt_control_packet_v1(
     root = Path(truth_root).expanduser().resolve()
     generated_at = generated_at_utc or now_utc_v1()
     generated_dt = _parse_time(generated_at) or datetime.now(UTC).replace(microsecond=0)
+    kernel = build_runtime_truth_kernel_v1(truth_root=root, day_utc=day_utc, generated_at_utc=generated_at)
     sources = _load_sources(root=root, day_utc=day_utc, generated_dt=generated_dt)
     payloads = {key: row["payload"] for key, row in sources.items()}
 
@@ -117,33 +119,18 @@ def build_aegis_chatgpt_control_packet_v1(
     ai_status = _build_ai_feedback_status(payloads)
     dataset_gaps = _build_dataset_gaps(payloads)
     actionable_items, blocked_items = _classify_actionable_items(payloads)
-    missing_or_stale = _stale_or_missing_sources(sources)
-    runtime_truth = _runtime_truth_classification(
-        sources=sources,
-        payloads=payloads,
-        actionable_items=actionable_items,
-        blocked_items=blocked_items,
-    )
-    trade_gate = _trade_advice_gate(
-        runtime_truth_classification=runtime_truth,
-        actionable_items=actionable_items,
-        lite_status=lite_status,
-    )
-    do_not_claim = _do_not_claim(
-        sources=sources,
-        payloads=payloads,
-        actionable_items=actionable_items,
-        event_status=event_status,
-        ai_status=ai_status,
-        dataset_gaps=dataset_gaps,
-    )
-    readiness = _readiness_state(
-        runtime_truth_classification=runtime_truth,
+    missing_or_stale = _kernel_missing_or_stale_sources(kernel)
+    runtime_truth = str(kernel.get("runtime_truth_classification") or "PARTIAL_CONTEXT")
+    trade_gate = _kernel_trade_gate(kernel)
+    do_not_claim = [str(item) for item in kernel.get("do_not_claim", []) if str(item)] if isinstance(kernel.get("do_not_claim"), list) else []
+    readiness = _readiness_state_from_kernel(
+        kernel=kernel,
         trade_gate=trade_gate,
-        missing_or_stale=missing_or_stale,
         actionable_items=actionable_items,
         blocked_items=blocked_items,
     )
+    runtime_evaluation_hash = str(kernel.get("runtime_evaluation_hash") or "")
+    runtime_evaluation_path = str((root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json").resolve())
     packet = {
         "schema_id": "aegis_chatgpt_control_packet",
         "schema_version": "v1",
@@ -152,6 +139,11 @@ def build_aegis_chatgpt_control_packet_v1(
         "generated_at": generated_at,
         "packet_version": PACKET_VERSION,
         "runtime_truth_classification": runtime_truth,
+        "runtime_evaluation_hash": runtime_evaluation_hash,
+        "runtime_evaluation_path": runtime_evaluation_path,
+        "packet_generated_at_utc": generated_at,
+        "packet_day_utc": day_utc,
+        "packet_freshness_status": "CURRENT" if runtime_evaluation_hash else "MISSING",
         "source_artifacts_used": _source_artifacts_used(sources),
         "source_artifact_timestamps": _source_timestamps(sources),
         "stale_or_missing_sources": missing_or_stale,
@@ -166,7 +158,15 @@ def build_aegis_chatgpt_control_packet_v1(
         "readiness_state": readiness,
         "current_actionable_items": actionable_items,
         "blocked_items": blocked_items,
-        "next_operator_actions": _next_operator_actions(readiness=readiness, trade_gate=trade_gate, payloads=payloads),
+        "next_operator_actions": _next_operator_actions(
+            readiness=readiness,
+            trade_gate=trade_gate,
+            payloads=payloads,
+            kernel=kernel,
+            truth_root=root,
+            day_utc=day_utc,
+            generated_at_utc=generated_at,
+        ),
         "do_not_claim": do_not_claim,
         "safety_assertions": _safety_assertions(),
         "trade_advice_allowed": trade_gate["trade_advice_allowed"],
@@ -190,6 +190,14 @@ def render_aegis_chatgpt_control_packet_summary_v1(packet: dict[str, Any]) -> st
         f"day_utc: {packet.get('day_utc')}",
         f"generated_at: {packet.get('generated_at')}",
         f"runtime_truth_classification: {packet.get('runtime_truth_classification')}",
+        f"runtime_evaluation_hash: {packet.get('runtime_evaluation_hash')}",
+        f"runtime_evaluation_path: {packet.get('runtime_evaluation_path')}",
+        f"packet_freshness_status: {packet.get('packet_freshness_status')}",
+        f"target_operating_mode: {(packet.get('readiness_state') or {}).get('target_operating_mode') or 'HUMAN_APPROVED_ADVISORY_RUNTIME'}",
+        f"human_approved_advisory_runtime_ready: {(packet.get('readiness_state') or {}).get('human_approved_advisory_runtime_ready')}",
+        f"advisory_status: {(packet.get('readiness_state') or {}).get('advisory_status') or 'ADVISORY_NOT_EVALUATED'}",
+        f"live_broker_trading_policy: {(packet.get('readiness_state') or {}).get('live_broker_trading_policy') or 'DISABLED_BY_DESIGN'}",
+        f"autonomous_execution_policy: {(packet.get('readiness_state') or {}).get('autonomous_execution_policy') or 'DISABLED_BY_DESIGN'}",
         f"trade_advice_allowed: {packet.get('trade_advice_allowed')}",
         f"manual_trade_capture_allowed: {packet.get('manual_trade_capture_allowed')}",
         f"reason_if_blocked: {packet.get('reason_if_blocked') or 'NONE'}",
@@ -565,83 +573,91 @@ def _event_packet_is_actionable(packet: dict[str, Any], payloads: dict[str, dict
     return str(packet.get("alert_gate_status") or "").upper() in ACTIONABLE_ALERT_STATUSES
 
 
-def _runtime_truth_classification(
-    *,
-    sources: dict[str, dict[str, Any]],
-    payloads: dict[str, dict[str, Any]],
-    actionable_items: list[dict[str, Any]],
-    blocked_items: list[dict[str, Any]],
-) -> str:
-    classes = {
-        str(payload.get("runtime_truth_classification") or "").upper()
-        for payload in payloads.values()
-        if payload and str(payload.get("runtime_truth_classification") or "")
-    }
-    classes.update(str(row.get("runtime_truth_classification") or "").upper() for row in actionable_items + blocked_items if row.get("runtime_truth_classification"))
-    if "DEMO_ONLY" in classes:
-        return "DEMO_ONLY"
-    if "DRY_RUN_ONLY" in classes:
-        return "DRY_RUN_ONLY"
-    if any(row["required_for_full_context"] and row["status"] != "PRESENT" for row in sources.values()):
-        return "PARTIAL_CONTEXT"
-    if any(row["required_for_full_context"] and row["staleness_status"] == "STALE" for row in sources.values()):
-        return "PARTIAL_CONTEXT"
-    lite = payloads.get("aegis_lite_operating_status", {})
-    broker_mode = str(lite.get("broker_mode") or payloads.get("aegis_lite_eod_report", {}).get("broker_mode") or "")
-    if broker_mode != "MANUAL_ONLY":
-        return "ADVISORY_ONLY"
-    if actionable_items:
-        return "REAL_RUNTIME"
-    return "ADVISORY_ONLY"
-
-
-def _trade_advice_gate(*, runtime_truth_classification: str, actionable_items: list[dict[str, Any]], lite_status: dict[str, Any]) -> dict[str, Any]:
-    if runtime_truth_classification != "REAL_RUNTIME":
-        return {
-            "trade_advice_allowed": False,
-            "manual_trade_capture_allowed": False,
-            "reason_if_blocked": f"RUNTIME_TRUTH_{runtime_truth_classification}_DOES_NOT_ALLOW_TRADE_ADVICE",
+def _kernel_missing_or_stale_sources(kernel: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = kernel.get("missing_or_stale_sources") if isinstance(kernel.get("missing_or_stale_sources"), list) else []
+    return [
+        {
+            "source": str(row.get("artifact_id") or ""),
+            "filename": Path(str(row.get("expected_path") or "")).name,
+            "status": str(row.get("status") or ""),
+            "staleness_status": "STALE" if str(row.get("status") or "") == "STALE" else str(row.get("status") or ""),
+            "required_for_full_context": bool(row.get("required", False)),
+            "reason_code": str(row.get("reason") or ""),
+            "generated_by_command": str(row.get("generated_by_command") or ""),
+            "downstream_capabilities_blocked": list(row.get("downstream_capabilities_blocked") or []),
+            "claim_implications": list(row.get("claim_implications") or []),
         }
-    if not actionable_items:
-        return {"trade_advice_allowed": False, "manual_trade_capture_allowed": False, "reason_if_blocked": "NO_CURRENT_ACTIONABLE_ITEM"}
-    if str(lite_status.get("broker_mode") or "") != "MANUAL_ONLY":
-        return {"trade_advice_allowed": False, "manual_trade_capture_allowed": False, "reason_if_blocked": "BROKER_MODE_NOT_MANUAL_ONLY"}
-    if bool(lite_status.get("broker_submit_required")):
-        return {"trade_advice_allowed": False, "manual_trade_capture_allowed": False, "reason_if_blocked": "BROKER_SUBMIT_REQUIRED_UNSAFE"}
-    return {"trade_advice_allowed": True, "manual_trade_capture_allowed": True, "reason_if_blocked": ""}
+        for row in rows
+        if isinstance(row, dict)
+    ]
 
 
-def _readiness_state(
+def _kernel_trade_gate(kernel: dict[str, Any]) -> dict[str, Any]:
+    evaluation = kernel.get("runtime_evaluation") if isinstance(kernel.get("runtime_evaluation"), dict) else {}
+    eval_caps = evaluation.get("capabilities") if isinstance(evaluation.get("capabilities"), dict) else {}
+    if eval_caps:
+        trade_eval = eval_caps.get("TRADE_ADVICE_ALLOWED") if isinstance(eval_caps.get("TRADE_ADVICE_ALLOWED"), dict) else {}
+        manual_eval = eval_caps.get("MANUAL_TRADE_CAPTURE_ALLOWED") if isinstance(eval_caps.get("MANUAL_TRADE_CAPTURE_ALLOWED"), dict) else {}
+        trade_allowed_eval = bool(trade_eval.get("allowed", False))
+        manual_allowed_eval = bool(manual_eval.get("allowed", False))
+        reason_eval = ""
+        if not trade_allowed_eval:
+            reason_eval = "KERNEL_BLOCKED_TRADE_ADVICE:RUNTIME_EVALUATION:" + str(trade_eval.get("reason") or "BLOCKED")
+        elif not manual_allowed_eval:
+            reason_eval = "KERNEL_BLOCKED_MANUAL_CAPTURE:RUNTIME_EVALUATION:" + str(manual_eval.get("reason") or "BLOCKED")
+        return {"trade_advice_allowed": trade_allowed_eval, "manual_trade_capture_allowed": manual_allowed_eval, "reason_if_blocked": reason_eval}
+
+    return {
+        "trade_advice_allowed": False,
+        "manual_trade_capture_allowed": False,
+        "reason_if_blocked": "RUNTIME_EVALUATION_MISSING",
+    }
+
+
+def _readiness_state_from_kernel(
     *,
-    runtime_truth_classification: str,
+    kernel: dict[str, Any],
     trade_gate: dict[str, Any],
-    missing_or_stale: list[dict[str, Any]],
     actionable_items: list[dict[str, Any]],
     blocked_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if trade_gate["manual_trade_capture_allowed"]:
-        classification = "READY_FOR_SUPERVISED_MANUAL_CAPTURE_REVIEW"
-    elif runtime_truth_classification in {"PARTIAL_CONTEXT", "BLOCKED", "DEMO_ONLY", "DRY_RUN_ONLY"}:
-        classification = "ADVISORY_ONLY"
-    else:
-        classification = "ADVISORY_ONLY"
+    classification = str(kernel.get("highest_readiness_layer") or "ADVISORY_ONLY")
     return {
         "classification": classification,
-        "runtime_truth_classification": runtime_truth_classification,
+        "runtime_truth_classification": str(kernel.get("runtime_truth_classification") or "PARTIAL_CONTEXT"),
+        "target_operating_mode": str(kernel.get("target_operating_mode") or "HUMAN_APPROVED_ADVISORY_RUNTIME"),
+        "human_approved_advisory_runtime_ready": bool(kernel.get("human_approved_advisory_runtime_ready")),
+        "advisory_status": str(kernel.get("advisory_status") or "ADVISORY_NOT_EVALUATED"),
+        "operator_action_required": bool(kernel.get("operator_action_required")),
+        "operator_action_reason": str(kernel.get("operator_action_reason") or ""),
+        "live_broker_trading_policy": str(kernel.get("live_broker_trading_policy") or "DISABLED_BY_DESIGN"),
+        "autonomous_execution_policy": str(kernel.get("autonomous_execution_policy") or "DISABLED_BY_DESIGN"),
+        "broker_submit_transmit_policy": str(kernel.get("broker_submit_transmit_policy") or "DISABLED_BY_DESIGN"),
         "manual_trade_capture_allowed": bool(trade_gate["manual_trade_capture_allowed"]),
         "actionable_item_count": len(actionable_items),
         "blocked_item_count": len(blocked_items),
-        "missing_or_stale_source_count": len(missing_or_stale),
+        "missing_or_stale_source_count": int(kernel.get("missing_or_stale_source_count") or 0),
         "primary_blocker": str(trade_gate["reason_if_blocked"] or ""),
+        "blocked_capabilities": list(kernel.get("blocked_capabilities") or []),
+        "kernel_authority": "aegis_runtime_truth_kernel_v1",
     }
 
 
-def _next_operator_actions(*, readiness: dict[str, Any], trade_gate: dict[str, Any], payloads: dict[str, dict[str, Any]]) -> list[str]:
+def _next_operator_actions(
+    *,
+    readiness: dict[str, Any],
+    trade_gate: dict[str, Any],
+    payloads: dict[str, dict[str, Any]],
+    kernel: dict[str, Any],
+    truth_root: Path,
+    day_utc: str,
+    generated_at_utc: str,
+) -> list[str]:
     if trade_gate["manual_trade_capture_allowed"]:
         return [
-            "Review the current actionable packet in Aegis Lite before any manual IB paper entry.",
-            "Enter at most one supervised paper trade manually, then immediately enter and confirm the protective stop.",
-            "Record a manual execution receipt after entry.",
+            "Use Aegis for human-approved advisory review only; broker submit/transmit remains disabled by policy.",
+            "If the operator manually executes outside Aegis, record the fill with npm run aegis:capture-manual-trade.",
+            "Manual capture is journaling/audit only and does not prove paper or live broker readiness.",
         ]
     perf = payloads.get("sleeve_performance_report", {})
     portfolio = perf.get("portfolio_summary") if isinstance(perf.get("portfolio_summary"), dict) else {}
@@ -650,37 +666,24 @@ def _next_operator_actions(*, readiness: dict[str, Any], trade_gate: dict[str, A
     if int(portfolio.get("missing_outcome_count") or 0):
         return ["Record missing trade outcomes before relying on sleeve performance."]
     if readiness.get("missing_or_stale_source_count"):
-        return ["Regenerate missing or stale Aegis Lite/Event/Research artifacts before asking ChatGPT for trade-capture guidance."]
-    return ["Use this packet for advisory review only; no current manual trade-capture guidance is allowed."]
+        return _kernel_recovery_actions(kernel=kernel, truth_root=truth_root, day_utc=day_utc, generated_at_utc=generated_at_utc)
+    return ["Use this packet for advisory review only; live broker trading and autonomous execution are disabled by design."]
 
 
-def _do_not_claim(
-    *,
-    sources: dict[str, dict[str, Any]],
-    payloads: dict[str, dict[str, Any]],
-    actionable_items: list[dict[str, Any]],
-    event_status: dict[str, Any],
-    ai_status: dict[str, Any],
-    dataset_gaps: dict[str, Any],
-) -> list[str]:
-    claims = ["No broker submit, transmit, or autonomous execution is allowed from this packet."]
-    if event_status.get("alert_transport_status") != "LIVE_EMAIL_PROVEN":
-        claims.append("Live email/SMS transport is not proven; current alert status is GATE_ONLY_NO_TRANSPORT.")
-    if not actionable_items:
-        claims.append("No real promoted runtime actionable candidate is proven by this packet.")
-    if sources.get("manual_trade_packet", {}).get("status") != "PRESENT":
-        claims.append("No current manual trade packet is present.")
-    if sources.get("manual_execution_receipt", {}).get("status") == "MISSING":
-        claims.append("Real IB paper lifecycle proof is not established by this packet.")
-    if int(dataset_gaps.get("missing_dataset_count") or 0) > 0 or dataset_gaps.get("status") != "PRESENT":
-        claims.append("Research dataset binding is incomplete or not current.")
-    if ai_status.get("deterministic_fallback_used"):
-        claims.append("AI feedback is deterministic fallback only unless ai_used=true is present in evidence.")
-    if sources.get("event_monitoring_status", {}).get("status") != "PRESENT":
-        claims.append("Event monitor is not proven current/enabled by this packet.")
-    if any(row["status"] != "PRESENT" for row in sources.values() if row["required_for_full_context"]):
-        claims.append("This packet has partial context; ChatGPT must not provide trade advice.")
-    return sorted(set(claims))
+def _kernel_recovery_actions(*, kernel: dict[str, Any] | None = None, truth_root: Path, day_utc: str, generated_at_utc: str) -> list[str]:
+    if kernel is None:
+        try:
+            kernel = build_runtime_truth_kernel_v1(truth_root=truth_root, day_utc=day_utc, generated_at_utc=generated_at_utc)
+        except Exception:
+            return ["Run npm run aegis:truth-kernel, then follow recovery_plan.v1.txt before asking ChatGPT for trade-capture guidance."]
+    actions = []
+    for item in kernel.get("recovery_plan", []) if isinstance(kernel.get("recovery_plan"), list) else []:
+        artifact_id = str(item.get("artifact_id") or "").strip()
+        command = str(item.get("generated_by_command") or "").strip()
+        blocks = ", ".join(str(value) for value in item.get("downstream_capabilities_expected_to_recover", []) if str(value))
+        if artifact_id and command:
+            actions.append(f"Regenerate {artifact_id}: run `{command}`; validate with `npm run aegis:audit`; blocks {blocks or 'no listed capability'}.")
+    return actions[:8] or ["Run npm run aegis:truth-kernel, then follow recovery_plan.v1.txt before asking ChatGPT for trade-capture guidance."]
 
 
 def _safety_assertions() -> dict[str, Any]:

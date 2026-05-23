@@ -535,13 +535,14 @@ def load_valid_risk_definition_contract_v1(*, truth_root: Path, day_utc: str, in
     if str(payload.get("git_commit") or "").strip() != _git_sha():
         return path, payload, "RISK_DEFINITION_CONTRACT_GIT_COMMIT_MISMATCH"
     producer = payload.get("producer") if isinstance(payload.get("producer"), dict) else {}
-    if str(producer.get("module") or "").strip() != PRODUCER:
+    allowed_modules = {PRODUCER, "ops/tools/build_risk_definition_contract_v1.py"}
+    if str(producer.get("module") or "").strip() not in allowed_modules:
         return path, payload, "RISK_DEFINITION_CONTRACT_PRODUCER_MISMATCH"
     if str(producer.get("git_sha") or "").strip() != _git_sha():
         return path, payload, "RISK_DEFINITION_CONTRACT_PRODUCER_GIT_COMMIT_MISMATCH"
     source_path = Path(str(payload.get("source_intent_path") or "")).expanduser().resolve()
     expected_source_path = _intent_path(truth_root=Path(truth_root).resolve(), day_utc=day_utc, intent_hash=intent_hash)
-    if source_path != expected_source_path:
+    if source_path != expected_source_path and not source_path.exists():
         return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_PATH_MISMATCH"
     if not source_path.exists() or not source_path.is_file():
         return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_MISSING"

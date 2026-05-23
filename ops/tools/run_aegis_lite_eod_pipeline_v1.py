@@ -46,6 +46,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1,
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # noqa: E402
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1  # noqa: E402
+from ops.aegis.event_append_transaction_v1 import contract_input_hashes_for_paths_v1, emit_artifact_evidence_transaction_v1  # noqa: E402
 from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     build_edge_cluster_v1,
     build_operator_execution_queue_v1,
@@ -53,11 +54,13 @@ from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     write_manual_feedback_artifact_v1,
 )
 from constellation_2.common.aegis_eod_artifact_contract_v1 import (  # noqa: E402
+    build_candidate_consumption_audit_v1,
     build_candidate_lineage_v1,
     build_eod_run_manifest_v1,
     build_market_snapshot_authority_v1,
     build_promoted_sleeve_manifest_v1,
     build_synthetic_advisory_rows_v1,
+    candidate_consumption_audit_path_v1,
     candidate_lineage_path_v1,
     eod_run_manifest_path_v1,
     load_upstream_candidate_rows_v1,
@@ -65,6 +68,7 @@ from constellation_2.common.aegis_eod_artifact_contract_v1 import (  # noqa: E40
     overall_status_from_inputs_v1,
     promoted_sleeve_manifest_path_v1,
     validate_eod_input_contract_v1,
+    write_candidate_consumption_audit_v1,
     write_candidate_lineage_v1,
     write_eod_run_manifest_v1,
     write_market_snapshot_authority_v1,
@@ -107,12 +111,23 @@ def build_aegis_lite_eod_pipeline_v1(
     generated_at_utc: str,
     input_payload: dict[str, Any],
     operator_notes: str = "",
+    run_mode: str = "INTRADAY_OPERATIONAL",
 ) -> dict[str, Any]:
+    run_mode = str(run_mode or "INTRADAY_OPERATIONAL").strip().upper()
+    input_payload["run_mode"] = run_mode
+    input_payload["market_data_mode"] = run_mode
+    input_payload["final_eod_certification_status"] = "PENDING" if run_mode == "INTRADAY_OPERATIONAL" else "PASS"
     candidates = input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else []
     source_lineage = input_payload.get("source_artifact_lineage") if isinstance(input_payload.get("source_artifact_lineage"), list) else []
     upstream_candidate_manifest_path = _upstream_candidate_manifest_path_v1(truth_root=truth_root, day_utc=day_utc)
     upstream_candidate_manifest = _read_json_or_empty(upstream_candidate_manifest_path)
     raw_rows = _objects(input_payload.get("raw_candidates")) or candidates or load_upstream_candidate_rows_v1(upstream_candidate_manifest_path)
+    if raw_rows:
+        input_payload["raw_candidates"] = raw_rows
+        input_payload.setdefault("raw_candidate_status", "RAW_CANDIDATES_AVAILABLE")
+        input_payload.setdefault("raw_candidate_count", len(raw_rows))
+        _remove_status_reason_v1(input_payload, "CANDIDATE_INPUT_MISSING")
+        _remove_status_reason_v1(input_payload, "RAW_CANDIDATES_EXISTED_NOT_CONSUMED")
     if not input_payload.get("sleeve_eval_artifact_path") and upstream_candidate_manifest.get("source_rollup_path"):
         input_payload["sleeve_eval_artifact_path"] = str(upstream_candidate_manifest.get("source_rollup_path") or "")
     if not input_payload.get("raw_candidate_absent_reason") and not raw_rows and input_payload.get("candidate_input_path"):
@@ -128,7 +143,7 @@ def build_aegis_lite_eod_pipeline_v1(
         trading_date=day_utc,
         run_id=run_id,
         created_at_utc=generated_at_utc,
-        required_symbols=_required_symbols_v1([*raw_rows, *candidates]),
+        required_symbols=_required_symbols_v1(candidates),
         source_artifact_lineage=source_lineage,
     )
     market_snapshot_authority_path = write_market_snapshot_authority_v1(truth_root=truth_root, payload=market_snapshot_authority)
@@ -187,6 +202,7 @@ def build_aegis_lite_eod_pipeline_v1(
         operator_execution_queue = build_operator_execution_queue_v1(
             day_utc=day_utc,
             run_id=run_id,
+            generated_at_utc=generated_at_utc,
             candidates=candidates,
             edge_clusters=edge_cluster,
             empty_reason=_operator_queue_empty_reason_v1(input_contract=input_contract, candidates=candidates),
@@ -235,6 +251,20 @@ def build_aegis_lite_eod_pipeline_v1(
     )
     candidate_lineage_path = write_candidate_lineage_v1(truth_root=truth_root, payload=lineage)
     generated_refs.append(artifact_ref_v1(candidate_lineage_path, artifact_type="candidate_lineage_v1"))
+    certified_symbols, certified_artifact_path = _certified_eod_universe_v1(truth_root=truth_root, day_utc=day_utc)
+    candidate_consumption_audit = build_candidate_consumption_audit_v1(
+        trading_date=day_utc,
+        run_id=run_id,
+        created_at_utc=generated_at_utc,
+        raw_rows=raw_rows,
+        consumed_candidates=candidates,
+        promoted_sleeve_manifest=promoted_sleeve_manifest,
+        certified_symbols=certified_symbols,
+        certified_artifact_path=certified_artifact_path,
+        input_contract=input_contract,
+    )
+    candidate_consumption_audit_path = write_candidate_consumption_audit_v1(truth_root=truth_root, payload=candidate_consumption_audit)
+    generated_refs.append(artifact_ref_v1(candidate_consumption_audit_path, artifact_type="candidate_consumption_audit_v1"))
     synthetic_advisory_rows = build_synthetic_advisory_rows_v1(lineage=lineage, input_contract=input_contract)
     manifest_path = eod_run_manifest_path_v1(truth_root=truth_root, trading_date=day_utc, run_id=run_id)
     report = build_aegis_lite_eod_report_v1(
@@ -263,6 +293,7 @@ def build_aegis_lite_eod_pipeline_v1(
         eod_input_contract=input_contract,
         blocked_advisory_candidates=synthetic_advisory_rows,
         candidate_lineage_artifact_path=str(candidate_lineage_path),
+        candidate_consumption_audit_artifact_path=str(candidate_consumption_audit_path),
         eod_run_manifest_path=str(manifest_path),
         market_snapshot_authority_path=str(market_snapshot_authority_path),
         promoted_sleeve_manifest_path=str(promoted_sleeve_manifest_path),
@@ -273,7 +304,7 @@ def build_aegis_lite_eod_pipeline_v1(
         producer_name="ops/tools/run_aegis_lite_eod_pipeline_v1.py",
         producer_command=(
             "python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py "
-            f"--day_utc {day_utc} --truth_root {truth_root} --run_id {run_id}"
+            f"--day_utc {day_utc} --truth_root {truth_root} --run_id {run_id} --run-mode {run_mode}"
         ),
         input_artifacts=[Path(ref.get("path", "")) for ref in source_lineage if isinstance(ref, dict) and str(ref.get("path") or "")],
         output_artifacts=[
@@ -287,6 +318,7 @@ def build_aegis_lite_eod_pipeline_v1(
                 manual_trade_packet_path,
                 promoted_candidate_set_path,
                 candidate_lineage_path,
+                candidate_consumption_audit_path,
                 out_path,
                 release_integrity_path,
                 legacy_runtime_path,
@@ -356,8 +388,41 @@ def build_aegis_lite_eod_pipeline_v1(
             artifact_ref_v1(legacy_runtime_path, artifact_type="legacy_paper_runtime_status_v1"),
         ],
     )
-    write_aegis_lite_operating_status_v1(truth_root=truth_root, payload=status)
+    operating_status_path = write_aegis_lite_operating_status_v1(truth_root=truth_root, payload=status)
+    input_hashes = contract_input_hashes_for_paths_v1([Path(str(ref.get("path"))) for ref in source_lineage if isinstance(ref, dict) and str(ref.get("path") or "")])
+    emitted_event_ids = []
+    for artifact_path, payload, producer_id, validation in [
+        (operator_queue_path, operator_execution_queue, "ops/tools/run_aegis_lite_eod_pipeline_v1.py:operator_execution_queue", "VALID" if operator_queue_path is not None else "MISSING"),
+        (manual_trade_packet_path, manual_trade_packet, "ops/tools/run_aegis_lite_eod_pipeline_v1.py:manual_trade_packet", "VALID"),
+        (report_path, report, "ops/tools/run_aegis_lite_eod_pipeline_v1.py:aegis_lite_eod_report", _eod_report_evidence_validation_v1(report)),
+        (operating_status_path, status, "ops/tools/run_aegis_lite_eod_pipeline_v1.py:aegis_lite_operating_status", "VALID"),
+    ]:
+        if artifact_path is None:
+            continue
+        results = emit_artifact_evidence_transaction_v1(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            artifact_path=Path(artifact_path),
+            payload=payload,
+            producer_id=producer_id,
+            producer_version="v1",
+            run_id=run_id,
+            created_at_utc=generated_at_utc,
+            input_hashes=input_hashes,
+            validation_status=validation,
+        )
+        emitted_event_ids.extend(str(row.get("event", {}).get("event_id") or "") for row in results)
+    report.setdefault("run_receipt", {})["native_evidence_event_ids"] = emitted_event_ids
     return report
+
+
+def _eod_report_evidence_validation_v1(report: dict[str, Any]) -> str:
+    status = str(report.get("report_status") or "").upper()
+    if status in {"READY", "READY_WITH_WARNINGS"}:
+        return "VALID"
+    if status == "ADVISORY_ONLY" and str(report.get("manual_execution_status") or "").upper() == "NOT_READY":
+        return "VALID"
+    return "INVALID"
 
 
 def filter_promoted_sleeve_candidates_v1(input_payload: dict[str, Any], promoted_sleeve_library: dict[str, Any]) -> dict[str, Any]:
@@ -580,12 +645,34 @@ def _required_symbols_v1(rows: list[dict[str, Any]]) -> list[str]:
     return sorted(symbols)
 
 
+def _certified_eod_universe_v1(*, truth_root: Path, day_utc: str) -> tuple[list[str], str]:
+    path = Path(truth_root).resolve() / "reports" / "final_eod_market_data_v1" / day_utc / "final_eod_market_data.v1.json"
+    payload = _read_json_or_empty(path)
+    symbols = payload.get("final_eod_symbols")
+    if not isinstance(symbols, list):
+        symbols = payload.get("fetched_symbols")
+    if not isinstance(symbols, list):
+        raw_symbols = payload.get("symbols")
+        if isinstance(raw_symbols, dict):
+            symbols = list(raw_symbols.keys())
+        elif isinstance(raw_symbols, list):
+            symbols = raw_symbols
+    if not isinstance(symbols, list):
+        records = payload.get("normalized_records") if isinstance(payload.get("normalized_records"), list) else []
+        symbols = [row.get("canonical_symbol") for row in records if isinstance(row, dict)]
+    return sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()}), str(path if path.exists() else "")
+
+
 def _operator_queue_empty_reason_v1(*, input_contract: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
     if candidates:
         return ""
     blockers = _strings(input_contract.get("blockers"))
     if "CANDIDATE_INPUT_MISSING" in blockers:
         return "CANDIDATE_INPUT_MISSING"
+    if "NO_PROMOTABLE_CANDIDATES" in blockers:
+        return "NO_PROMOTABLE_CANDIDATES"
+    if "MISSING_PROMOTION_APPROVAL" in blockers:
+        return "MISSING_PROMOTION_APPROVAL"
     if "PROMOTED_SLEEVE_LIBRARY_REQUIRED" in blockers:
         return "PROMOTED_SLEEVE_LIBRARY_REQUIRED"
     if str(input_contract.get("raw_candidate_status") or "").upper() == "NO_RAW_CANDIDATES":
@@ -635,6 +722,16 @@ def _nyse_calendar_state_v1(*, calendar_path: Path, day_utc: str) -> str:
     return "MISSING"
 
 
+def _remove_status_reason_v1(input_payload: dict[str, Any], reason_code: str) -> None:
+    for key in ("data_freshness_status", "governance_status", "market_regime_state"):
+        status = input_payload.get(key)
+        if not isinstance(status, dict):
+            continue
+        reasons = status.get("reason_codes")
+        if isinstance(reasons, list):
+            status["reason_codes"] = [str(item) for item in reasons if str(item) != reason_code]
+
+
 def _status_with_reason(value: Any, *, default_status: str, reason_code: str) -> dict[str, Any]:
     status = value if isinstance(value, dict) else {}
     reason_codes = [str(item) for item in status.get("reason_codes", []) if str(item)] if isinstance(status.get("reason_codes"), list) else []
@@ -656,12 +753,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-not-ready-exit-zero", action="store_true")
     parser.add_argument("--demo-promoted-candidates", action="store_true")
     parser.add_argument("--operator_notes", default="")
+    parser.add_argument("--run-mode", "--run_mode", dest="run_mode", choices=["INTRADAY_OPERATIONAL", "FINAL_EOD_CERTIFIED"], default="INTRADAY_OPERATIONAL")
     args = parser.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
-    run_id = str(args.run_id or f"aegis_lite_eod_v1:{day_utc}")
     generated_at_utc = str(args.generated_at_utc or now_utc_iso_v1())
+    default_run_suffix = generated_at_utc.replace(":", "").replace("-", "").replace("T", "_").replace("Z", "Z")
+    run_id = str(args.run_id or f"aegis_lite_eod_v1:{day_utc}:{default_run_suffix}")
     if args.demo_promoted_candidates:
         if not args.manual_only:
             raise SystemExit("FAIL: demo promoted candidates require --manual-only")
@@ -686,6 +785,7 @@ def main(argv: list[str] | None = None) -> int:
         generated_at_utc=generated_at_utc,
         input_payload=input_payload,
         operator_notes=str(args.operator_notes or ""),
+        run_mode=str(args.run_mode or "INTRADAY_OPERATIONAL"),
     )
     print(
         json.dumps(
@@ -695,8 +795,13 @@ def main(argv: list[str] | None = None) -> int:
                 "readiness_classification": report["readiness_classification"],
                 "path": report["artifact_path"],
                 "operating_status_path": report["run_receipt"].get("aegis_lite_operating_status_path", ""),
+                "event_ids": report["run_receipt"].get("native_evidence_event_ids", []),
                 "broker_submit_required": False,
                 "manual_execution_only": True,
+                "run_mode": str(args.run_mode or "INTRADAY_OPERATIONAL"),
+                "market_data_mode": str(args.run_mode or "INTRADAY_OPERATIONAL"),
+                "trade_advice_allowed": False,
+                "autonomous_execution_allowed": False,
             },
             sort_keys=True,
         )

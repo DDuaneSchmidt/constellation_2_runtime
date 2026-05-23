@@ -228,16 +228,19 @@ def test_projection_and_live_integrity_integration(tmp_path: Path) -> None:
     _write(lineage.evidence_lineage_index_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc), lineage.build_evidence_lineage_index_v1(ctx))
     _write(outcome.outcome_attribution_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc), outcome.build_outcome_attribution_v1(ctx))
 
-    proj = projection._projection_for(
+    proj = projection._projection_from_control_plane(
         ctx,
-        json.loads(_report(ctx, "aegis_day_run_v1", "day_run.v1.json").read_text()),
-        json.loads(_report(ctx, "aegis_requirement_graph_v1", "requirement_graph.v1.json").read_text()),
-        json.loads(lineage.evidence_lineage_index_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc).read_text()),
-        json.loads(consistency.state_consistency_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc).read_text()),
-        json.loads(freshness.truth_freshness_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc).read_text()),
-        json.loads(av_path.read_text()),
+        {
+            "final_status": "NOT_READY",
+            "current_phase": "BOD_INPUTS",
+            "current_domain": "MARKET_DATA",
+            "canonical_blocker": "MARKET_CLOSED",
+            "recovery_action": "Wait for the next market data gate.",
+            "submit_allowed": False,
+            "evidence_paths": [str(_report(ctx, "market_open_data_gate_v1", "market_open_data_gate.v1.json"))],
+        },
     )
-    assert proj["action_validity_status"] == "PASS"
+    assert proj["action_validity_status"] == "SUPPORTING"
     assert "Submit paper order" not in proj["next_valid_actions"]
 
     _write_truth_integrity_reports(ctx)
@@ -294,13 +297,23 @@ def test_unified_truth_kernel_missing_advisory_does_not_block_but_stale_authorit
     assert any(row["artifact_type"] == "broker_supply_v1" for row in payload["unknown_or_untrusted_artifacts"])
 
 
-def test_projection_and_live_consume_unified_truth_kernel(tmp_path: Path) -> None:
+def test_projection_consumes_control_plane_and_live_consumes_unified_truth_kernel(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _base_artifacts(ctx)
     payload = _write_truth_integrity_reports(ctx)
-    proj = projection._projection_from_kernel(ctx, payload)
+    proj = projection._projection_from_control_plane(
+        ctx,
+        {
+            "final_status": payload["final_status"],
+            "current_phase": payload["first_blocker_phase"],
+            "current_domain": payload["first_blocker_phase"],
+            "canonical_blocker": payload["canonical_blocker"],
+            "recovery_commands": [row["label"] for row in payload["allowed_operator_actions"]],
+            "submit_allowed": False,
+        },
+    )
     assert proj["final_status"] == payload["final_status"]
-    assert proj["next_valid_actions"] == [row["label"] for row in payload["allowed_operator_actions"]]
+    assert proj["integrity_context"]["final_status_source"] == "aegis_control_plane_v1"
 
     live_payload = live.build_live_intelligence_v1(ctx)
     assert live_payload["status"] == "NOT_READY"
@@ -309,33 +322,57 @@ def test_projection_and_live_consume_unified_truth_kernel(tmp_path: Path) -> Non
     assert live_payload["kernel_final_status_source"] == "aegis_day_run_ledger_v1"
 
 
-def test_projection_uses_concrete_blocker_evidence_for_known_hard_blockers(tmp_path: Path) -> None:
+def test_projection_uses_control_plane_blocker_evidence_for_known_hard_blockers(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    base_kernel = {
-        "final_status": "NOT_READY",
-        "final_status_source": "aegis_day_run_ledger_v1",
-        "first_blocker_phase": "BOD_INPUTS",
-        "first_blocker_owner": "risk_control",
-        "allowed_operator_actions": [{"label": "Rerun day"}],
-        "forbidden_operator_actions": [{"label": "Submit paper order"}],
-        "unsafe_actions": ["Submit paper order"],
-        "downstream_consequences": ["Submit remains blocked."],
-        "truth_confidence": "HIGH",
-        "trade_health": {},
-        "human_review_required": False,
-    }
 
-    kill = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "C2_KILL_SWITCH_ACTIVE", "canonical_blocker": "C2_KILL_SWITCH_ACTIVE"})
+    kill = projection._projection_from_control_plane(
+        ctx,
+        {
+            "final_status": "NOT_READY",
+            "current_phase": "SESSION_AUTHORITY",
+            "current_domain": "SESSION_IDENTITY",
+            "canonical_blocker": "C2_KILL_SWITCH_ACTIVE",
+            "recovery_action": "Clear the kill switch only with operator approval.",
+            "evidence_paths": [str(ctx.truth_root / "reports" / "global_kill_switch_state_v1" / DAY / "global_kill_switch_state.v1.json")],
+            "submit_allowed": False,
+        },
+    )
     assert kill["evidence_paths"]
     assert "global_kill_switch_state.v1.json" in kill["evidence_paths"][0]
     assert "kill switch" in kill["operator_next_action"].lower()
 
-    session = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "SESSION_AUTHORITY_MISSING", "canonical_blocker": "SESSION_AUTHORITY_MISSING"})
+    session = projection._projection_from_control_plane(
+        ctx,
+        {
+            "final_status": "NOT_READY",
+            "current_phase": "SESSION_AUTHORITY",
+            "current_domain": "SESSION_IDENTITY",
+            "canonical_blocker": "SESSION_AUTHORITY_MISSING",
+            "recovery_action": "Run run_paper_session_bootstrap_v1.py for the target day.",
+            "evidence_paths": [str(ctx.truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json")],
+            "submit_allowed": False,
+        },
+    )
     assert session["evidence_paths"]
     assert "paper_session_authority.v1.json" in session["evidence_paths"][0]
     assert "run_paper_session_bootstrap_v1.py" in session["operator_next_action"]
 
-    mismatch = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "TARGET_DAY_DATE_MISMATCH", "canonical_blocker": "TARGET_DAY_DATE_MISMATCH"})
+    mismatch = projection._projection_from_control_plane(
+        ctx,
+        {
+            "final_status": "NOT_READY",
+            "current_phase": "SESSION_AUTHORITY",
+            "current_domain": "SESSION_IDENTITY",
+            "canonical_blocker": "TARGET_DAY_DATE_MISMATCH",
+            "recovery_action": "Regenerate paper capital seed, operator statement, and pre-open bundle for the target day.",
+            "evidence_paths": [
+                str(ctx.truth_root / "reports" / "paper_capital_seed_v1" / DAY / "paper_capital_seed.v1.json"),
+                str(ctx.truth_root / "reports" / "operator_statement_v1" / DAY / "operator_statement.v1.json"),
+                str(ctx.truth_root / "reports" / "pre_open_bundle_v1" / DAY / "pre_open_bundle.v1.json"),
+            ],
+            "submit_allowed": False,
+        },
+    )
     assert "paper capital seed" in mismatch["operator_next_action"]
     assert "operator statement" in mismatch["operator_next_action"]
     assert "pre-open bundle" in mismatch["operator_next_action"]
@@ -352,8 +389,8 @@ def test_ui_readiness_kernel_uses_unified_truth_kernel_when_present(tmp_path: Pa
 
     ui = build_readiness_kernel_v1(day=DAY, truth_root=ctx.truth_root, sleeve_truth_root=ctx.execution_root)
     assert ui["overall_status"] == "BLOCKED"
-    assert ui["canonical_blocker"] == payload["canonical_blocker"]
-    assert ui["truth_resolution_source_path"].endswith("unified_truth_kernel.v1.json")
+    assert ui["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
+    assert ui["truth_resolution_source_path"] == ""
 
 
 def test_unified_truth_kernel_trade_health_is_advisory_when_present(tmp_path: Path) -> None:

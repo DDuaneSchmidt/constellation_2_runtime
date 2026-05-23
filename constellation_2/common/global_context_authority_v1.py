@@ -455,6 +455,13 @@ def run_global_context_authority_v1(*, repo_root: Path, operation_type: str, day
                 entry = {'dependency_id': dep_id, 'path': row['path'], 'sha256': row['sha256'], 'owner_ref': row['owner_ref'], 'role_class': row['role_class'], 'status': row['status']}
                 refs.append(entry)
                 ref_map[dep_id] = entry
+        activation_payload = {}
+        activation_ref = ref_map.get('day_activation_package_v1')
+        if isinstance(activation_ref, dict) and str(activation_ref.get('path') or '').strip():
+            try:
+                activation_payload = _read_json(Path(str(activation_ref.get('path'))))
+            except Exception:
+                activation_payload = {}
         package_obj = {
             'schema_id': 'global_context_package',
             'schema_version': 'v1',
@@ -466,12 +473,28 @@ def run_global_context_authority_v1(*, repo_root: Path, operation_type: str, day
             'context_hash': ctx.context_hash,
             'package_hash': None,
             'day_activation_package_ref': ref_map.get('day_activation_package_v1'),
+            'runtime_evaluation_hash': str(activation_payload.get('runtime_evaluation_hash') or ''),
+            'market_session_status': str(activation_payload.get('market_session_status') or ''),
+            'calendar_session_classification': str(activation_payload.get('calendar_session_classification') or ''),
+            'enabled_sleeves': activation_payload.get('enabled_sleeves') if isinstance(activation_payload.get('enabled_sleeves'), list) else [ctx.sleeve_id],
+            'disabled_sleeves': activation_payload.get('disabled_sleeves') if isinstance(activation_payload.get('disabled_sleeves'), list) else [],
+            'policy_version': str(activation_payload.get('policy_version') or 'global_context_authority.v1'),
+            'data_readiness_hash': str(activation_payload.get('data_readiness_hash') or ''),
+            'sleeve_readiness_hash': str(activation_payload.get('sleeve_readiness_hash') or ''),
+            'manual_intent_hash': str(activation_payload.get('manual_intent_hash') or ''),
+            'target_day_admission_ref': activation_payload.get('target_day_admission_ref') if isinstance(activation_payload.get('target_day_admission_ref'), dict) else {},
+            'validation_status': 'VALID',
             'build_ref': {'path': str(build_path), 'sha256': build_sha},
             'manifest_ref': str((ctx.repo_root / MANIFEST_REGISTRY_RELPATH).resolve()),
             'dependency_refs': refs,
             'seal_basis': 'global context closure achieved',
             'sealed': True,
             'sealed_utc': _anchor_utc(ctx.day_utc),
+            'broker_execution_allowed': False,
+            'broker_submit_transmit_allowed': False,
+            'order_routing_allowed': False,
+            'autonomous_execution_allowed': False,
+            'trade_advice_allowed': False,
         }
         package_obj['package_hash'] = canonical_hash_for_c2_artifact_v1(package_obj)
         validate_against_repo_schema_v1(package_obj, ctx.repo_root, PACKAGE_SCHEMA_RELPATH)

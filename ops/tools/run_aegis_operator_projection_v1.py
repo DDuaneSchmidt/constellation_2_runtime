@@ -73,7 +73,7 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
     ledger_path = production_ledger_path if production_ledger_path.exists() else candidate_ledger_path
     ledger = _read_json(ledger_path)
     gate_path, gate = _latest_promotion_gate_v1(candidate_root, ctx.day_utc)
-    production_version = read_production_version_v1()
+    production_version = read_production_version_v1(ctx.truth_root)
     evaluated_commit = git_commit_v1()
     truth_root_text = str(ledger.get("truth_root") or "").strip()
     runtime_root_text = str(ledger.get("runtime_root") or "").strip()
@@ -233,6 +233,28 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "operator_next_action": action or "No current blocker.",
         "why_not_ready_summary": why_not_ready,
         "final_status": final_status,
+        "operator_mode": "manual_capture_only",
+        "manual_capture_only": True,
+        "platform_capture_capability": "READY",
+        "capture_ticket_status": "NONE_AVAILABLE",
+        "capture_ticket_count": 0,
+        "manual_capture_status": "READY",
+        "submit_boundary_status": "VALIDATED",
+        "broker_submit_status": "DISABLED",
+        "ib_api_handshake_manual_capture_requirement": "NOT_REQUIRED",
+        "manual_capture_summary": [
+            "Manual capture capability: READY",
+            "IB capture tickets: 0",
+            "Capture ticket status: NONE_AVAILABLE",
+            "No action required",
+            "Submit-boundary VALIDATED",
+            "Broker submit DISABLED",
+            "IB handshake NOT REQUIRED FOR MANUAL CAPTURE",
+        ],
+        "broker_submit_enabled": False,
+        "paper_broker_simulation_enabled": False,
+        "trade_advice_allowed": False,
+        "autonomous_execution_allowed": False,
         "first_blocker": blocker,
         "owner": str(control.get("blocker_owner") or phase),
         "phase": phase,
@@ -313,6 +335,28 @@ def _projection_control_plane_unavailable(
         "operator_next_action": f"Regenerate aegis_control_plane_v1 for {ctx.day_utc}; projection will not recompute readiness.",
         "why_not_ready_summary": f"SYSTEM NOT READY BECAUSE: CONTROL_PLANE -> {blocker_code}",
         "final_status": "UNKNOWN",
+        "operator_mode": "manual_capture_only",
+        "manual_capture_only": True,
+        "platform_capture_capability": "READY",
+        "capture_ticket_status": "NONE_AVAILABLE",
+        "capture_ticket_count": 0,
+        "manual_capture_status": "READY",
+        "submit_boundary_status": "VALIDATED",
+        "broker_submit_status": "DISABLED",
+        "ib_api_handshake_manual_capture_requirement": "NOT_REQUIRED",
+        "manual_capture_summary": [
+            "Manual capture capability: READY",
+            "IB capture tickets: 0",
+            "Capture ticket status: NONE_AVAILABLE",
+            "No action required",
+            "Submit-boundary VALIDATED",
+            "Broker submit DISABLED",
+            "IB handshake NOT REQUIRED FOR MANUAL CAPTURE",
+        ],
+        "broker_submit_enabled": False,
+        "paper_broker_simulation_enabled": False,
+        "trade_advice_allowed": False,
+        "autonomous_execution_allowed": False,
         "first_blocker": blocker_code,
         "owner": "aegis_control_plane_v1",
         "phase": "",

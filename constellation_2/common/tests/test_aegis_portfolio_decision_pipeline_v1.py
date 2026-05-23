@@ -135,6 +135,92 @@ def test_cross_asset_macro_leadership_allowed_and_market_neutral_signal_only(tmp
     assert by_sleeve["C2_MARKET_NEUTRAL_SPREAD_V1"]["allowed_by_portfolio_gate"] is False
 
 
+def test_portfolio_gate_disposes_every_multi_output_intent(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _state(truth, day, regime="TREND", trend_strength="HIGH", equity_beta_state="HIGH")
+    trend = _outcome("C2_TREND_EQ_PRIMARY_V1", "AAA")
+    trend["output_intents"].append(
+        {
+            "intent_id": "c2_trend_eq_bbb_intent",
+            "intent_hash": "hash_c2_trend_eq_bbb_intent",
+            "intent_path": "/tmp/c2_trend_eq_bbb_intent.json",
+            "symbol": "BBB",
+        }
+    )
+    rollup = _rollup(tmp_path / "rollup.json", day, [trend])
+
+    gate = build_portfolio_activation_gate_v1(day_utc=day, truth_root=truth, source_rollup_path=rollup)
+    scoring = build_portfolio_scoring_v1(
+        day_utc=day,
+        truth_root=truth,
+        source_rollup_path=rollup,
+        portfolio_gate_path_arg=Path(gate["artifact_path"]),
+    )
+    payload = build_intent_arbitration(
+        day_utc=day,
+        truth_root=truth,
+        source_rollup_path=rollup,
+        portfolio_gate_path=Path(gate["artifact_path"]),
+        portfolio_scoring_path_arg=Path(scoring["artifact_path"]),
+    )
+
+    assert [row["raw_intent_id"] for row in gate["raw_sleeve_signals"]] == [
+        "c2_trend_eq_primary_v1_aaa_intent",
+        "c2_trend_eq_bbb_intent",
+    ]
+    assert len(gate["decisions"]) == 2
+    assert len(scoring["rankings"]) == 2
+    assert payload["status"] == "SELECTED"
+    assert len(payload["raw_candidate_intents"]) == 2
+    assert len(payload["candidate_intents"]) == 1
+    assert {row["rejection_reason"] for row in payload["rejected_or_filtered_intents"]} == {
+        "PORTFOLIO_GATE_SUPPRESSED"
+    }
+
+
+def test_portfolio_gate_preserves_source_rollup_lifecycle_over_latest_day_lifecycle(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _state(truth, day, regime="TREND", trend_strength="HIGH")
+    outcome = _outcome("C2_VOL_INCOME_DEFINED_RISK_V1", "IWM")
+    outcome["status"] = "BLOCKED"
+    outcome["canonical_blocker"] = "POSITION_STATE_STALE"
+    outcome["lifecycle_decision"] = "BLOCKED"
+    outcome["lifecycle_reason_codes"] = ["POSITION_STATE_STALE"]
+    outcome["output_intents"] = []
+    outcome["intent_signature"] = [
+        {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "intent_id": "stale_vol", "intent_hash": "hash_stale_vol", "symbol": "IWM"}
+    ]
+    rollup = _rollup(tmp_path / "rollup.json", day, [outcome])
+    lifecycle_path = truth / "reports/intent_lifecycle_state_v1" / day / "intent_lifecycle_state.v1.json"
+    _write_json(
+        lifecycle_path,
+        {
+            "schema_id": "intent_lifecycle_state",
+            "schema_version": "v1",
+            "day_utc": day,
+            "rows": [
+                {
+                    "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+                    "sleeve_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+                    "lifecycle_decision": "INTENT_CREATED",
+                    "lifecycle_reason_codes": ["SIGNAL_CHANGED"],
+                    "symbol": "IWM",
+                }
+            ],
+        },
+    )
+
+    gate = build_portfolio_activation_gate_v1(day_utc=day, truth_root=truth, source_rollup_path=rollup)
+
+    row = gate["decisions"][0]
+    assert row["raw_intent_id"] == ""
+    assert row["raw_signal_status"] == "BLOCKED"
+    assert row["portfolio_gate_decision"] == "DEGRADED"
+    assert row["lifecycle_decision"] == "BLOCKED"
+
+
 def test_arbitration_ignores_suppress_and_signal_only(tmp_path: Path) -> None:
     day = "2026-04-30"
     truth = tmp_path / "truth"

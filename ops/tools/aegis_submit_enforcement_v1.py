@@ -65,6 +65,19 @@ def _packet_path(runtime_root: Path | None = None) -> Path:
     return (root / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md").resolve()
 
 
+def _packet_json_path(runtime_root: Path | None, day_utc: str | None) -> Path | None:
+    if not day_utc:
+        return None
+    root = runtime_root or Path("/home/node/constellation_runtime_data/truth")
+    return (
+        root
+        / "reports"
+        / "aegis_chatgpt_control_packet_v1"
+        / str(day_utc)
+        / "aegis_chatgpt_control_packet.v1.json"
+    ).resolve()
+
+
 def _packet_metadata(path: Path) -> dict[str, str]:
     if not path.exists() or not path.is_file():
         return {}
@@ -81,9 +94,56 @@ def _packet_metadata(path: Path) -> dict[str, str]:
     return meta
 
 
-def packet_currentness_v1(*, runtime_root: Path | None = None, runtime_mode: str | None = None) -> dict[str, Any]:
-    path = _packet_path(runtime_root)
-    meta = _packet_metadata(path)
+def _packet_json_metadata(path: Path | None) -> dict[str, str]:
+    if path is None or not path.exists() or not path.is_file():
+        return {}
+    payload = _read_json(path)
+    if not payload:
+        return {}
+    return {
+        "day_utc": str(payload.get("packet_day_utc") or payload.get("day_utc") or ""),
+        "generated_at_utc": str(payload.get("packet_generated_at_utc") or payload.get("generated_at_utc") or payload.get("generated_at") or ""),
+        "runtime_evaluation_hash": str(payload.get("runtime_evaluation_hash") or ""),
+        "runtime_evaluation_path": str(payload.get("runtime_evaluation_path") or ""),
+        "packet_freshness_status": str(payload.get("packet_freshness_status") or ""),
+        "canonical_json_hash": str(payload.get("canonical_json_hash") or ""),
+    }
+
+
+def _packet_freshness_status(
+    *,
+    exists: bool,
+    packet_day_utc: str,
+    expected_day_utc: str,
+    packet_runtime_evaluation_hash: str,
+    runtime_evaluation_hash: str,
+    legacy_stale: bool,
+) -> str:
+    if not exists:
+        return "MISSING"
+    if expected_day_utc and packet_day_utc and packet_day_utc != expected_day_utc:
+        return "STALE"
+    if runtime_evaluation_hash and packet_runtime_evaluation_hash and packet_runtime_evaluation_hash != runtime_evaluation_hash:
+        return "HASH_MISMATCH"
+    if runtime_evaluation_hash and not packet_runtime_evaluation_hash:
+        return "STALE"
+    if legacy_stale:
+        return "STALE"
+    return "CURRENT"
+
+
+def packet_currentness_v1(
+    *,
+    runtime_root: Path | None = None,
+    runtime_mode: str | None = None,
+    day_utc: str | None = None,
+    runtime_evaluation_hash: str | None = None,
+    runtime_evaluation_path: str | None = None,
+) -> dict[str, Any]:
+    json_path = _packet_json_path(runtime_root, day_utc)
+    json_meta = _packet_json_metadata(json_path)
+    path = json_path if json_meta else _packet_path(runtime_root)
+    meta = json_meta or _packet_metadata(path)
     current_commit = _git_commit()
     packet_commit = str(meta.get("git_commit") or "").strip()
     packet_mode = str(meta.get("runtime_mode") or "").strip().upper()
@@ -91,18 +151,37 @@ def packet_currentness_v1(*, runtime_root: Path | None = None, runtime_mode: str
     dirty = _git_dirty_status()
     mode_mismatch = bool(expected_mode and packet_mode and packet_mode != expected_mode)
     missing_mode = bool(expected_mode and not packet_mode)
-    stale = not path.exists() or not packet_commit or packet_commit != current_commit or dirty != "CLEAN" or mode_mismatch or missing_mode
+    legacy_stale = bool(not json_meta and (not packet_commit or packet_commit != current_commit or dirty != "CLEAN" or mode_mismatch or missing_mode))
+    packet_day = str(meta.get("day_utc") or meta.get("packet_day_utc") or "").strip()
+    packet_runtime_hash = str(meta.get("runtime_evaluation_hash") or "").strip()
+    authority_hash = str(runtime_evaluation_hash or "").strip()
+    freshness_status = _packet_freshness_status(
+        exists=path.exists(),
+        packet_day_utc=packet_day,
+        expected_day_utc=str(day_utc or "").strip(),
+        packet_runtime_evaluation_hash=packet_runtime_hash,
+        runtime_evaluation_hash=authority_hash,
+        legacy_stale=legacy_stale,
+    )
+    stale = freshness_status != "CURRENT"
     return {
         "path": str(path),
         "exists": path.exists(),
         "generated_at_utc": str(meta.get("generated_at_utc") or ""),
+        "packet_generated_at_utc": str(meta.get("generated_at_utc") or ""),
+        "packet_day_utc": packet_day,
+        "runtime_evaluation_hash": authority_hash,
+        "runtime_evaluation_path": str(runtime_evaluation_path or meta.get("runtime_evaluation_path") or ""),
+        "packet_runtime_evaluation_hash": packet_runtime_hash,
+        "packet_freshness_status": freshness_status,
         "runtime_mode": packet_mode,
         "expected_runtime_mode": expected_mode,
         "packet_git_commit": packet_commit,
         "current_git_commit": current_commit,
         "current_git_dirty_status": dirty,
-        "status": "STALE" if stale else "CURRENT",
-        "canonical_blocker": "AEGIS_PACKET_STALE" if stale else "",
+        "status": freshness_status,
+        "canonical_blocker": f"AEGIS_PACKET_{freshness_status}" if stale else "",
+        "readiness_usage": "EXPLANATORY_ONLY",
     }
 
 

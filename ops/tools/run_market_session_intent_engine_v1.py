@@ -512,13 +512,25 @@ def run_scan_cycle_v1(
     truth_root: Path,
     environment: str = PAPER_MODE,
     cycle_id: str = "",
+    allow_deprecated_symbol_fallback: bool = False,
 ) -> dict[str, Any]:
     environment = str(environment or PAPER_MODE).strip().upper()
     cycle_id = _unique_cycle_id(truth_root=truth_root, day_utc=day_utc, requested_cycle_id=str(cycle_id or "").strip() or _default_cycle_id())
     started_dt = _now_dt()
     started = started_dt.isoformat().replace("+00:00", "Z")
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
-    rows = _scan_registry_rows()
+    raw_rows = _scan_registry_rows()
+    rows = [
+        sleeve_kernel._row_with_canonical_symbols(
+            row=row,
+            day_utc=day_utc,
+            truth_root=intent_truth_root,
+            allow_deprecated_symbol_fallback=allow_deprecated_symbol_fallback,
+        )
+        if isinstance(row, dict)
+        else row
+        for row in raw_rows
+    ]
     sleeve_kernel.align_registry_market_data_symbols_v1(
         intent_truth_root=intent_truth_root,
         requested_symbols=sleeve_kernel._requested_registry_symbols(rows),
@@ -785,6 +797,13 @@ def run_scan_cycle_v1(
         "started_at_utc": started,
         "completed_at_utc": _now_iso(),
     }
+    try:
+        from ops.aegis.operator_state.canonical_operator_state_builder_v1 import build_and_write_operator_state_snapshot_v1
+        snapshot, snapshot_path = build_and_write_operator_state_snapshot_v1(truth_root=truth_root, day_utc=day_utc)
+        payload["operator_state_snapshot_v1_path"] = str(snapshot_path)
+        payload["operator_state_snapshot_v1_id"] = str(snapshot.get("snapshot_id") or "")
+    except Exception:
+        pass
     return payload
 
 
@@ -794,8 +813,15 @@ def build_market_session_intent_engine(
     truth_root: Path,
     environment: str = PAPER_MODE,
     cycle_id: str = "",
+    allow_deprecated_symbol_fallback: bool = False,
 ) -> dict[str, Any]:
-    return run_scan_cycle_v1(day_utc=day_utc, truth_root=truth_root, environment=environment, cycle_id=cycle_id)
+    return run_scan_cycle_v1(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=environment,
+        cycle_id=cycle_id,
+        allow_deprecated_symbol_fallback=allow_deprecated_symbol_fallback,
+    )
 
 
 def run_loop_v1(
@@ -854,6 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cadence_seconds", type=int, default=60)
     parser.add_argument("--max_cycles", type=int, default=0)
     parser.add_argument("--stop_at_market_close", action="store_true")
+    parser.add_argument("--allow-deprecated-symbol-fallback", action="store_true")
     args = parser.parse_args(argv)
     if bool(args.once) == bool(args.loop):
         raise SystemExit("Specify exactly one of --once or --loop")
@@ -875,7 +902,12 @@ def main(argv: list[str] | None = None) -> int:
         if loop_payload["cycles_run"] == 0:
             print(json.dumps(loop_payload, sort_keys=True))
         return 0 if loop_payload["status"] == "PASS" else 2
-    payload = build_market_session_intent_engine(day_utc=day_utc, truth_root=truth_root, environment=environment)
+    payload = build_market_session_intent_engine(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=environment,
+        allow_deprecated_symbol_fallback=bool(args.allow_deprecated_symbol_fallback),
+    )
     print(
         json.dumps(
             _compact_cycle_output(payload),

@@ -483,6 +483,24 @@ def test_non_trading_day_remains_root_cause_when_session_artifacts_are_stale(mon
     assert payload["supporting_stale_dependencies"]
     assert any(row["blocking_reason"] == "STALE_ARTIFACT_GENERATED_AT_DAY_MISMATCH" for row in payload["failed_current_domain_dependencies"])
     assert projected["why_not_ready_summary"] == "SYSTEM NOT READY BECAUSE: SESSION_IDENTITY -> NON_TRADING_DAY"
+    assert projected["operator_mode"] == "manual_capture_only"
+    assert projected["manual_capture_only"] is True
+    assert projected["platform_capture_capability"] == "READY"
+    assert projected["capture_ticket_count"] == 0
+    assert projected["capture_ticket_status"] == "NONE_AVAILABLE"
+    assert projected["manual_capture_summary"] == [
+        "Manual capture capability: READY",
+        "IB capture tickets: 0",
+        "Capture ticket status: NONE_AVAILABLE",
+        "No action required",
+        "Submit-boundary VALIDATED",
+        "Broker submit DISABLED",
+        "IB handshake NOT REQUIRED FOR MANUAL CAPTURE",
+    ]
+    assert projected["broker_submit_enabled"] is False
+    assert projected["paper_broker_simulation_enabled"] is False
+    assert projected["trade_advice_allowed"] is False
+    assert projected["autonomous_execution_allowed"] is False
 
 
 def test_domain_precheck_surfaces_only_current_domain_failures_at_once(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
