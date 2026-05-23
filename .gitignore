@@ -57,3 +57,21 @@ constellation_2/runtime/truth/monitoring_v2/
 
 # Constellation runtime truth (authoritative on disk, never committed)
 constellation_2/runtime/
+
+# Aegis local operator/runtime artifacts
+artifacts/
+*.png
+research_*_v*.json
+research_*_v*.png
+research_data_readiness_audit_v1.json
+research_pipeline_data_resolution_report_v1.json
+ops/config/*.env
+research_lab/research_store/
+
+# Research Lab local acquisition outputs
+research_lab/local_data/ohlcv/csv_readiness_report.json
+research_lab/local_data/ohlcv/expected_csv_files.json
+research_lab/local_data/ohlcv/templates/*_template.csv
+
+# Generated Aegis projection audits
+docs/aegis/operator_ui_projection_audit.v1.*
