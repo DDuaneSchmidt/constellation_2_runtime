@@ -31,8 +31,8 @@ The largest footprint gaps are:
 
 | Area | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Repo-head EOD timer target | `PROVEN` | `ops/systemd/user/aegis-lite-eod-report-v1.timer` has `OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York`; `docs/aegis_lite_timer_model.md` says 15:50. | Repo intent is 15:50 ET. |
-| Active runtime EOD timer target | `PROVEN` | `systemctl --user status aegis-lite-eod-report-v1.timer` reports active timer at `15:50 ET`; current `aegis_lite_operating_status.v1` reports `target_time_et=15:50`. | Repo, active systemd, and runtime status agree. No evidence of 15:55. |
+| Repo-head EOD timer target | `PROVEN` | `ops/systemd/user/aegis-lite-eod-report-v1.timer` has `OnCalendar=*-*-* 09:50:00 UTC` and `OnCalendar=*-*-* 14:50:00 UTC`; `docs/aegis_lite_timer_model.md` says 09:50 UTC and 14:50 UTC. | Repo intent is 09:50 UTC and 14:50 UTC. |
+| Active runtime EOD timer target | `PROVEN` | `systemctl --user status aegis-lite-eod-report-v1.timer` reports active timer at `09:50 UTC and 14:50 UTC`; current `aegis_lite_operating_status.v1` reports `target_times_utc=[09:50,14:50]`. | Repo, active systemd, and runtime status agree. No evidence of 15:55. |
 | One official EOD run/day | `PRESENT_UNPROVEN` | Timer is a single systemd timer/service; service runs `run_current_release_tool_v1.sh run_aegis_lite_eod_pipeline_v1 ... --manual-only`. | Schedule is aligned, but full daily production-like proof still requires a promoted executable candidate. |
 | Current Lite EOD report | `PROVEN` | `/home/node/constellation_runtime_data/truth/reports/aegis_lite_eod_report_v1/2026-05-15/.../aegis_lite_eod_report.v1.json`. | Current report is `ADVISORY_ONLY` / `NOT_READY` with missing candidate and promoted sleeve blockers. |
 | Current operator execution queue | `PROVEN` | `/home/node/constellation_runtime_data/truth/reports/operator_execution_queue_v1/2026-05-15/.../operator_execution_queue.v1.json`. | Current queue exists, is manual-only/no broker, and has `execution_queue=[]`. |

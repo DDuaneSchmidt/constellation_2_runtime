@@ -67,7 +67,7 @@ These are not necessarily unsafe if treated as legacy diagnostics, but they are 
 
 The current legacy commands do not give ChatGPT one fixed-schema view of:
 
-- latest Aegis Lite EOD run, canonical 15:50 ET timer, broker mode, manual packets, execution queue, blocked packets, and promoted sleeve status.
+- latest Aegis Lite sleeve runs, canonical 09:50 UTC and 14:50 UTC timer, broker mode, manual packets, execution queue, blocked packets, and promoted sleeve status.
 - Event Monitoring enabled/running status, event rules registry version, event ledger, actionable/advisory/blocked packet separation, validity gate, alert gate, and alert transport truth.
 - Research Lab hypothesis/task/promotion state.
 - Operator Inbox open/stale/high-priority items.

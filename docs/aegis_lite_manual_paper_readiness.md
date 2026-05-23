@@ -16,7 +16,7 @@ Status legend:
 Current readiness for real manual paper trading today: `BLOCKED`.
 
 Reason:
-- Repo timer/source code, active user systemd, and current runtime operating status now use the canonical 15:50 ET EOD time.
+- Repo timer/source code, active user systemd, and current runtime operating status now use the canonical 09:50 UTC and 14:50 UTC sleeve runs time.
 - Current runtime queue/report exists, but no promoted executable candidate is present.
 - Current runtime is `ADVISORY_ONLY`, with no actionable manual trade packet or executable operator queue item.
 - P0 offline proof has validated the promoted-sleeve-only queue and dry lifecycle mechanics under `/tmp`, but that proof is not a live runtime trade authorization.
@@ -51,7 +51,7 @@ python3 ops/tools/build_aegis_operator_status_v1.py --truth_root /path/to/truth 
 
 ### Ready
 
-- Canonical Lite EOD timer/status alignment is 15:50 ET.
+- Canonical Lite EOD timer/status alignment is 09:50 UTC and 14:50 UTC.
 - Release/repo match is currently reported as `MATCH`.
 - Lite runtime status carries `broker_mode=MANUAL_ONLY`, `ib_automation_status=DEFERRED`, and `broker_required_for_runtime=false`.
 - Lite EOD fails closed when candidate input or promoted sleeve library is missing.
@@ -114,13 +114,13 @@ P0 proof result:
 Status: `READY`
 
 Repo/configured intent:
-- `ops/systemd/user/aegis-lite-eod-report-v1.timer` uses `OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York`.
-- `constellation_2/common/aegis_lite_operating_status_v1.py` now treats 15:50 ET as the canonical expected Lite EOD time.
-- `docs/aegis_lite_timer_model.md` documents 15:50 ET.
+- `ops/systemd/user/aegis-lite-eod-report-v1.timer` uses `OnCalendar=*-*-* 09:50:00 UTC` and `OnCalendar=*-*-* 14:50:00 UTC`.
+- `constellation_2/common/aegis_lite_operating_status_v1.py` now treats 09:50 UTC and 14:50 UTC as the canonical expected Lite EOD time.
+- `docs/aegis_lite_timer_model.md` documents 09:50 UTC and 14:50 UTC.
 
 Active runtime evidence:
-- `systemctl --user status aegis-lite-eod-report-v1.timer` reports the active user timer at 15:50 ET.
-- Current runtime `aegis_lite_operating_status.v1` reports `target_time_et=15:50`.
+- `systemctl --user status aegis-lite-eod-report-v1.timer` reports the active user timer at 09:50 UTC and 14:50 UTC.
+- Current runtime `aegis_lite_operating_status.v1` reports `target_times_utc=[09:50,14:50]`.
 - Current runtime `release_repo_match_status=MATCH`.
 
 ## EOD Manual Trade Packet
@@ -259,7 +259,7 @@ Status: `READY_WITH_MANUAL_STEPS`
 
 Documentation:
 - `docs/aegis_daily_research_cadence.md` defines the daily Aegis Research cadence.
-- The documented cadence covers pre-market Research review, intraday event awareness, the 15:50 ET Lite EOD run, after-close manual receipt/outcome updates, the offline Research Lab daily run, and weekly review.
+- The documented cadence covers pre-market Research review, intraday event awareness, the 09:50 UTC and 14:50 UTC Lite sleeve runs, after-close manual receipt/outcome updates, the offline Research Lab daily run, and weekly review.
 
 Command/status coverage:
 
@@ -268,7 +268,7 @@ Command/status coverage:
 | Pre-market hypothesis/task review | `READY_WITH_MANUAL_STEPS` | `list_research_hypotheses_v1.py`, `research_lab_register_hypothesis_v1.py`, `research_architecture_integrity_review_v1.py` | Review is CLI/JSON; no Research Lab UI is proven. |
 | Prior outcome review | `READY_WITH_MANUAL_STEPS` | Outcome/trade-outcome tools exist; Research import uses `ingest_trade_outcome_attribution_to_research_v1.py` | Missing receipts/outcomes require operator evidence. |
 | Intraday event awareness | `PRESENT_UNPROVEN` | `run_event_awareness_v1.py`, `run_event_tactical_review_v1.py`, `run_event_validity_gate_v1.py`, `run_trade_capture_alert_gate_v1.py` | Event UI and real email/SMS transport are not proven. |
-| Near-close canonical Lite EOD | `READY_WITH_MANUAL_STEPS` | `run_aegis_lite_eod_pipeline_v1.py` | Repo, active systemd, and runtime status agree on 15:50 ET; current output remains advisory because promoted executable candidates are missing. |
+| Near-close canonical Lite EOD | `READY_WITH_MANUAL_STEPS` | `run_aegis_lite_eod_pipeline_v1.py` | Repo, active systemd, and runtime status agree on 09:50 UTC and 14:50 UTC; current output remains advisory because promoted executable candidates are missing. |
 | Manual execution receipt update | `READY_WITH_MANUAL_STEPS` | Receipt schema/builder exist | Operator entry is manual; no Lite receipt UI form is proven. |
 | Outcome ledger update | `READY_WITH_MANUAL_STEPS` | `run_outcome_attribution_v1.py`, `run_trade_outcome_v1.py`, `ingest_trade_outcome_attribution_to_research_v1.py` | Performance measurement depends on manual receipt/outcome data without IB integration. |
 | Research Lab daily run | `READY_WITH_MANUAL_STEPS` | `run_research_lab_task_queue_v1.py` | Real dataset bindings remain incomplete; legacy `run_research_lab_v1.py` is compatibility-only. |
@@ -293,7 +293,7 @@ Aegis Lite is not ready for a real supervised IB paper smoke from current runtim
 It is mechanically ready for supervised dry-run/operator validation with manual steps. The P0 offline proof shows the existing architecture can produce a promoted executable queue, manual packet, receipt, outcome ledger, sleeve performance report, and offline Research feedback without broker automation.
 
 Before the first real supervised IB paper trade:
-- confirm the 15:50 ET timer/status remains aligned,
+- confirm the 09:50 UTC and 14:50 UTC timer/status remains aligned,
 - regenerate current Lite EOD artifacts with real promoted candidate input,
 - prove a real promoted candidate can produce a complete manual trade packet and operator queue,
 - keep maximum trade count at 1/day,

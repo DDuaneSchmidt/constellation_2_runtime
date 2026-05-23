@@ -12,7 +12,7 @@ Important basis note: the current working tree includes the new event-monitoring
 
 | # | Workflow | Classification | Operator-use verdict |
 | --- | --- | --- | --- |
-| 1 | Daily Aegis Lite EOD workflow | READY_WITH_MANUAL_STEPS | The canonical EOD path, 15:50 ET timer docs/status, manual packet generation, queue UI, and fail-closed behavior exist. Current runtime still has no real promoted executable candidate, so the workflow is usable for advisory/no-trade days but not yet proven for a real current trade. |
+| 1 | Daily Aegis Lite EOD workflow | READY_WITH_MANUAL_STEPS | The canonical EOD path, 09:50 UTC and 14:50 UTC timer docs/status, manual packet generation, queue UI, and fail-closed behavior exist. Current runtime still has no real promoted executable candidate, so the workflow is usable for advisory/no-trade days but not yet proven for a real current trade. |
 | 2 | Event monitoring workflow | PARTIAL | Event rules registry, monitor CLI, status artifact, ledger, and read-only `/aegis-events` surface exist in the working tree. Runtime scheduling, live market snapshot bindings, and operator proof on real data are not proven. |
 | 3 | Trade capture alert workflow | DESIGNED_NOT_IMPLEMENTED | Alert gate and ledger are implemented, but actual email/SMS transport is not wired. The current output is message-body/dry-run evidence only, not an operator interruption channel. |
 | 4 | Manual paper trade capture workflow | PARTIAL | Aegis Lite can produce a manual queue and manual trade packet. David can manually enter IB paper trades from the queue only when a current non-demo promoted executable candidate exists. That real runtime candidate path remains unproven. |
@@ -54,7 +54,7 @@ Status: READY_WITH_MANUAL_STEPS
 What works:
 - `run_aegis_lite_eod_pipeline_v1.py` writes EOD report, operator queue, edge cluster, overlap review, and manual trade packet.
 - `/aegis-lite` and `/api/aegis/lite-execution-queue` render the current Lite queue fail-closed.
-- Docs and status now describe 15:50 ET as canonical.
+- Docs and status now describe 09:50 UTC and 14:50 UTC as canonical.
 
 Incomplete from David's perspective:
 - Current runtime has no real promoted executable queue item.

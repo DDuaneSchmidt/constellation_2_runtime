@@ -28,6 +28,53 @@ The canonical artifact is:
 
 If required inputs are absent, the snapshot is still writable but fails closed with `stale_data_status=MISSING_INPUT` and explicit `MISSING_INPUT:<field>` reasons.
 
+## Canonical VIX Symbol Resolution
+
+Aegis treats volatility input as canonical symbol `VIX`. Market data paths must normalize these accepted aliases back to canonical `VIX`:
+
+- `VIX`
+- `^VIX`
+- `$VIX`
+- `vix`
+- `VIXCLS`
+
+Provider-specific mappings are centralized in `ops/aegis/market_data/symbol_alias_registry_v1.py` and surfaced through `aegis_symbol_map_v1`:
+
+- `LOCAL_CACHE`: checks canonical `VIX` first, then `^VIX`, `vix`, `VIXCLS`, and `$VIX` if present under `market_data_snapshot_v1/<alias>/<year>.jsonl`.
+- `STOOQ`: uses `^VIX` first, with `vix` as the deterministic secondary key. If Stooq requires an API key or returns no real quote, Aegis fails closed.
+- `FRED`: reserved mapping is `VIXCLS` when a FRED provider exists.
+- `CBOE`: reserved mapping is provider-native `VIX` when a CBOE provider exists.
+
+All downstream artifacts use canonical `VIX` in `requested_symbols`, `missing_symbols`, diagnostics, sleeve readiness, and blocked-sleeve explanations. Provider aliases may appear only as `provider_symbol` or provider attempt metadata.
+
+Resolution order is deterministic:
+
+1. Local cache canonical `VIX`.
+2. Local cache aliases.
+3. Configured primary provider.
+4. Configured fallback provider aliases.
+5. Fail closed with a missing `VIX` explanation.
+
+Aegis never fabricates, synthesizes, or substitutes VIX. If VIX is unavailable, `C2_VOL_INCOME_DEFINED_RISK_V1` remains blocked, readiness remains `READY_PARTIAL` when other sleeves can run, and operator review remains advisory-only.
+
+To add real local-cache VIX data, write a real source row to one of the accepted local-cache alias paths, for example:
+
+`/home/node/constellation_runtime_data/truth/market_data_snapshot_v1/VIX/2026.jsonl`
+
+or:
+
+`/home/node/constellation_runtime_data/truth/market_data_snapshot_v1/^VIX/2026.jsonl`
+
+Rows must contain a real source symbol and timestamp, such as `symbol`, `timestamp_utc`, `open`, `high`, `low`, `close`, and optional `volume`. Do not manually invent a value.
+
+Verify resolution with:
+
+- `npm run aegis:refresh-market-data`
+- `npm run aegis:data-registry`
+- `npm run aegis:sleeve-readiness`
+- `npm run aegis:candidate-diagnostics`
+- `npm run aegis:noon-preflight`
+
 ## Volatility Model
 
 Ruleset: `aegis_market_context_rules.v1`

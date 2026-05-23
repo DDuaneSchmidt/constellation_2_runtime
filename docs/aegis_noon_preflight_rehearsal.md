@@ -1,6 +1,6 @@
 # Aegis Noon Preflight Rehearsal
 
-The noon preflight rehearsal runs ahead of the canonical 15:50 ET Aegis Lite EOD run. Its purpose is fail-only operator notification: David should only be interrupted when the preflight fails, requires operator action, or predicts that the 15:50 EOD is likely to fail.
+The noon preflight rehearsal runs ahead of the canonical 09:50 UTC and 14:50 UTC Aegis Lite sleeve runs. Its purpose is fail-only operator notification: David should only be interrupted when the preflight fails, requires operator action, or predicts that the 09:50 UTC and 14:50 UTC sleeve run is likely to fail.
 
 The systemd source timer is `ops/systemd/user/aegis-noon-preflight-rehearsal-v1.timer`:
 
@@ -32,6 +32,20 @@ Valid result states are:
 
 `PASS`, no trade candidates, normal advisory-only state, and non-trading days do not alert.
 
+`READY_PARTIAL` is expected when candidate generation ran for sleeves whose required inputs are available while a separate sleeve remains blocked by a real missing input. The canonical example is `C2_VOL_INCOME_DEFINED_RISK_V1`, which requires canonical `VIX`.
+
+Noon preflight consumes the same canonical market-symbol resolver as market data refresh, candidate diagnostics, sleeve readiness, and fallback provider lookup. For VIX, aliases `VIX`, `^VIX`, `$VIX`, `vix`, and `VIXCLS` normalize to canonical `VIX`. Missing VIX is reported as `VIX`, not as a provider alias.
+
+If VIX cannot be sourced from local cache or the configured fallback provider, noon preflight keeps the VIX-dependent sleeve blocked and writes a stable missing-symbol explanation:
+
+- the blocked sleeve requires `market.volatility.VIX`
+- `VIX` was missing from local cache canonical and alias paths
+- fallback provider lookup failed
+- the run remains `READY_PARTIAL` when other sleeves can proceed to operator review
+- no execution is authorized
+
+This is fail-closed behavior. It is not a bypass and it does not create synthetic VIX data.
+
 ## Alert Rules
 
 An alert candidate is created only for:
@@ -48,7 +62,7 @@ An alert candidate is created only for:
 
 The alert subject is:
 
-`[Aegis Preflight FAIL] action needed before 15:50 EOD`
+`[Aegis Preflight FAIL] action needed before 09:50 UTC and 14:50 UTC sleeve run`
 
 The body includes result, failed validations, blockers, exact artifact paths, recommended operator action, whether canonical EOD is at risk, and confirmation that no trades or broker automation occurred.
 
@@ -73,4 +87,4 @@ The preflight runner does not:
 - mutate canonical EOD report or EOD manifest families
 - activate production
 
-The canonical 15:50 ET EOD remains the official daily decision run.
+The canonical 09:50 UTC and 14:50 UTC sleeve runs remains the official daily decision run.

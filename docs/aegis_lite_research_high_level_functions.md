@@ -6,8 +6,8 @@ This is the operator-facing functionality list after the Aegis Lite manual-paper
 
 ## Verification Notes
 
-- Repo timer intent: `ops/systemd/user/aegis-lite-eod-report-v1.timer` uses `15:50 America/New_York`.
-- Active user systemd and current runtime operating status report `aegis-lite-eod-report-v1.timer` at `15:50 America/New_York`.
+- Repo timer intent: `ops/systemd/user/aegis-lite-eod-report-v1.timer` uses `09:50 UTC and 14:50 UTC`.
+- Active user systemd and current runtime operating status report `aegis-lite-eod-report-v1.timer` at `09:50 UTC and 14:50 UTC`.
 - Actual email/SMS transport for trade capture alerts is not proven. The current alert path writes gate/ledger artifacts and message bodies with `DRY_RUN_MESSAGE_BODY_ONLY` / `NOT_SENT` delivery status.
 - `sleeve_performance_report.v1` is implemented and tested as an offline artifact/CLI report, and `build_and_print_sleeve_performance_report_v1.py` prints an operator-readable summary. No dedicated Lite UI panel is proven.
 - Daily Research cadence is documented and command-supported in pieces. It is not scheduled automation.
@@ -18,7 +18,7 @@ This is the operator-facing functionality list after the Aegis Lite manual-paper
 
 | # | Original claim | Accuracy | Current classification | Corrected operator-facing language |
 | --- | --- | --- | --- | --- |
-| 1 | Performs one canonical governed EOD run near market close. | `ACCURATE` | `PROVEN_RUNTIME_TIMER` | Repo, active user systemd, and runtime operating status define one canonical Lite EOD run at 15:50 ET. Current output is advisory because no promoted executable candidates are present. |
+| 1 | Performs one canonical governed EOD run near market close. | `ACCURATE` | `PROVEN_RUNTIME_TIMER` | Repo, active user systemd, and runtime operating status define one canonical Lite sleeve runs at 09:50 UTC and 14:50 UTC. Current output is advisory because no promoted executable candidates are present. |
 | 2 | Evaluates promoted sleeves against market regime, volatility, breadth, event, and behavioral conditions. | `NEEDS_REWORDING` | `PARTIAL` | Aegis Lite filters for promoted sleeves and consumes regime/data/governance/candidate context. Volatility, breadth, event, and behavioral context exist as artifact fields or adjacent layers, but full real dataset binding is not proven. |
 | 3 | Produces a complete manual trade packet for operator execution. | `ACCURATE` | `PROVEN_REPO` | The Lite EOD pipeline writes `manual_trade_packet.v1`; candidates fail closed when entry, stop, risk, sizing, sleeve, or source-hypothesis lineage is missing. Active runtime regeneration is still needed to prove current deployed output. |
 | 4 | Supports event-awareness functionality for unusual market conditions. | `ACCURATE` | `PROVEN_REPO` | Event awareness can create event ledgers, tactical packets, validity gates, and alert gates in offline/manual-only form. |
@@ -34,7 +34,7 @@ This is the operator-facing functionality list after the Aegis Lite manual-paper
 ## Corrected Aegis Lite Function List
 
 1. Aegis Lite is the manual-paper operating path for governed EOD trade recommendations.
-2. Repo, active user systemd, and current runtime status agree on one canonical EOD run at 15:50 ET.
+2. Repo, active user systemd, and current runtime status agree on one canonical EOD run at 09:50 UTC and 14:50 UTC.
 3. Lite evaluates only promoted sleeve candidates; unpromoted Research ideas cannot directly enter the operational queue.
 4. Lite writes an EOD report, operator execution queue, manual trade packet, edge cluster, overlap review, and operating status.
 5. Manual trade packets are complete only when entry, side, symbol, sizing, stop, risk, sleeve, and source-hypothesis lineage are present.
@@ -93,7 +93,7 @@ This is the operator-facing functionality list after the Aegis Lite manual-paper
 
 ### Designed / Scaffolded / Partial
 
-- Current actionable promoted-candidate proof. Timer/runtime alignment is 15:50, but current runtime remains advisory with no executable queue item.
+- Current actionable promoted-candidate proof. Timer/runtime alignment is 09:50 UTC and 14:50 UTC, but current runtime remains advisory with no executable queue item.
 - Actual operator UI for performance report, receipts, event alerts, Research hypotheses/results, and promotion candidates.
 - AI-assisted Research intake into the new canonical hypothesis path. Legacy AI batch intake exists; canonical generation is not proven.
 - Real Research dataset bindings for price, volatility, breadth, macro event calendar, and regime labels.
@@ -119,7 +119,7 @@ This is the operator-facing functionality list after the Aegis Lite manual-paper
 ## Do Not Claim Yet
 
 - Do not claim Aegis is ready for real manual IB paper trading today.
-- Do not claim the current 15:50 ET EOD output is actionable; current runtime remains advisory until a real promoted executable candidate exists.
+- Do not claim the current 09:50 UTC and 14:50 UTC sleeve runs output is actionable; current runtime remains advisory until a real promoted executable candidate exists.
 - Do not claim Aegis sends real SMS/email trade alerts.
 - Do not claim event awareness creates trades.
 - Do not claim Research Lab has fully bound historical price/volatility/breadth/macro/regime datasets.

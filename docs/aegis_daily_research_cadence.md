@@ -6,7 +6,7 @@ This cadence describes the daily operating rhythm for the pivoted Aegis Lite + A
 
 ## Operating Boundary
 
-Aegis Lite is the canonical manual-paper trading path. Its official daily production decision state is the once-per-trading-day EOD run at 15:50 ET.
+Aegis Lite is the canonical manual-paper trading path. Its official daily production decision state is the twice-daily UTC sleeve run at 09:50 UTC and 14:50 UTC.
 
 Aegis Research Lab is offline-only. It may ingest hypotheses, process queued research tasks, write evidence/results, and learn from Lite outcomes. It must not mutate Aegis Lite runtime, create trades, promote sleeves automatically, or authorize execution.
 
@@ -71,7 +71,7 @@ Manual-only / gaps:
 Purpose: run the canonical Aegis Lite EOD decision process.
 
 Canonical time:
-- 15:50 America/New_York on NYSE trading days.
+- 09:50 UTC and 14:50 UTC on NYSE trading days.
 - One official EOD run per trading day.
 - Event runs must not overwrite canonical EOD state.
 
@@ -89,7 +89,7 @@ Official outputs:
 - `aegis_lite_operating_status.v1`
 
 Manual-only / gaps:
-- Active runtime/systemd is aligned to 15:50 ET.
+- Active runtime/systemd is aligned to 09:50 UTC and 14:50 UTC.
 - Current real promoted non-demo candidate proof is still required before first trade.
 
 ### 4. After Close
@@ -170,7 +170,7 @@ Manual-only / gaps:
 | --- | --- | --- | --- |
 | Pre-market Research review | `READY_WITH_MANUAL_STEPS` | Partial | Hypotheses can be listed/registered; task review is CLI/JSON. |
 | During-market event awareness | `PRESENT_UNPROVEN` | Partial | Event/gate/ledger commands exist; no proven email/SMS transport or UI. |
-| Near-close Lite EOD | `READY_WITH_MANUAL_STEPS` | Present | Repo, active runtime, and systemd use 15:50 ET; real manual trading still requires a promoted executable candidate. |
+| Near-close Lite EOD | `READY_WITH_MANUAL_STEPS` | Present | Repo, active runtime, and systemd use 09:50 UTC and 14:50 UTC; real manual trading still requires a promoted executable candidate. |
 | After-close manual receipts/outcomes | `READY_WITH_MANUAL_STEPS` | Partial | Artifacts and `sleeve_performance_report.v1` exist; operator entry is manual and no UI form is proven. |
 | Research Lab daily run | `READY_WITH_MANUAL_STEPS` | Present | Offline executor exists; real dataset bindings remain incomplete. |
 | Weekly review | `PRESENT_UNPROVEN` | Partial | Sleeve/promotion tools exist; advisor benchmark comparison is missing. |
@@ -178,7 +178,7 @@ Manual-only / gaps:
 ## Stop Rules
 
 Stop and classify the day as not ready for real manual paper trading if:
-- Active Lite EOD timer/status is not 15:50 ET.
+- Active Lite EOD timer/status is not 09:50 UTC and 14:50 UTC.
 - No current Lite EOD report exists.
 - No current operator queue or manual trade packet exists.
 - Any candidate lacks entry, stop, risk, sizing, sleeve, or promoted-source lineage.

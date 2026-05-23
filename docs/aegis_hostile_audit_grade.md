@@ -61,8 +61,8 @@ Current readiness: **ADVISORY_ONLY for real IB paper trading**. The architecture
 10. **Can outcome-ledger feedback create production actions instead of offline research tasks?**
    New feedback/report paths generate or recommend offline tasks only. Sleeve report feedback has `lite_runtime_mutation_allowed=false`, `writes_research_task_queue=false`, and `automatic_promotion_allowed=false` in the smoke output and code (`constellation_2/common/aegis_sleeve_performance_report_v1.py:291`).
 
-11. **Is the 15:50 ET canonical EOD timer aligned across repo/docs/runtime/systemd?**
-   Yes. Repo timer uses `OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York` (`ops/systemd/user/aegis-lite-eod-report-v1.timer:6`), operating status code uses `LITE_EOD_TARGET_TIME_ET = "15:50"` (`constellation_2/common/aegis_lite_operating_status_v1.py:17`), active user systemd currently reports a 15:50 trigger, and runtime `aegis_lite_operating_status.v1` reports `target_time_et=15:50`.
+11. **Is the 09:50 UTC and 14:50 UTC canonical sleeve timer aligned across repo/docs/runtime/systemd?**
+   Yes. Repo timer uses `OnCalendar=*-*-* 09:50:00 UTC` and `OnCalendar=*-*-* 14:50:00 UTC` (`ops/systemd/user/aegis-lite-eod-report-v1.timer:6`), operating status code uses `LITE_EOD_TARGET_TIMES_UTC = ("09:50", "14:50")` (`constellation_2/common/aegis_lite_operating_status_v1.py:17`), active user systemd currently reports a 09:50 UTC and 14:50 UTC triggers, and runtime `aegis_lite_operating_status.v1` reports `target_times_utc=[09:50,14:50]`.
 
 12. **Is actual email/SMS delivery proven or merely scaffolded?**
    Scaffolded/gated only. The alert ledger records `WOULD_SEND` or `NOT_SENT` (`constellation_2/common/aegis_lite_event_awareness_v1.py:541`), and the CLI prints `email_sms_allowed` but does not call a transport (`ops/tools/run_trade_capture_alert_gate_v1.py:87`).
@@ -92,7 +92,7 @@ Current readiness: **ADVISORY_ONLY for real IB paper trading**. The architecture
 
 ## Current Runtime Truth
 
-- Active user systemd timer currently shows the Lite EOD timer waiting for **15:50 ET** on 2026-05-15.
+- Active user systemd timer currently shows the Lite EOD timer waiting for **09:50 UTC and 14:50 UTC** on 2026-05-15.
 - Runtime `aegis_lite_operating_status.v1` reports:
   - `readiness_classification=ADVISORY_ONLY`
   - `manual_execution_only=true`
@@ -115,7 +115,7 @@ Hostile conclusion: current runtime is safe, but not actionable.
 3. Research Lab promotion is strict and human-gated.
 4. Lite operational status and EOD report are fail-closed when candidate/promoted-sleeve inputs are missing.
 5. Current active release and repo commit match in runtime status.
-6. Canonical EOD timer is now operationally aligned to 15:50 ET, despite stale docs.
+6. Canonical EOD timer is now operationally aligned to 09:50 UTC and 14:50 UTC, despite stale docs.
 7. Event tactical packets are non-canonical and validity-gated.
 8. Trade capture alert gate is conservative and anti-spam aware.
 9. Sleeve performance report does not count missing receipt/outcome as zero return.
@@ -156,7 +156,7 @@ These must be fixed before a real manual IB paper trade:
 5. Have the operator manually record one receipt with fill, quantity, stop entered, stop price, and notes.
 6. Record outcome evidence without IB automation.
 7. Build `sleeve_performance_report.v1` from that real receipt/outcome.
-8. Keep readiness/high-level docs synchronized with the current 15:50 runtime evidence.
+8. Keep readiness/high-level docs synchronized with the current 09:50 UTC and 14:50 UTC runtime evidence.
 
 ## Misleading Claims To Avoid
 

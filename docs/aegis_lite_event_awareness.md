@@ -1,6 +1,6 @@
 # Aegis Lite Event Awareness
 
-Aegis Lite remains EOD-centered. The official daily decision state is produced by the canonical 15:50 ET EOD run.
+Aegis Lite remains EOD-centered. The official daily decision state is produced by the canonical 09:50 UTC and 14:50 UTC sleeve runs.
 
 The Event Awareness Layer is non-canonical. It reads `event_rules_registry.v1`, may surface unusual intraday conditions, request operator review, write `event_monitoring_status.v1` and `event_awareness_ledger.v1`, and produce an optional `event_tactical_packet.v1`.
 

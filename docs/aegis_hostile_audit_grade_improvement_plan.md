@@ -56,7 +56,7 @@ Problem:
 
 Concrete fix:
 - Produce one real, non-demo, human-approved promoted sleeve entry in `promoted_sleeve_library.v1`.
-- Run the canonical 15:50 Lite EOD path with explicit candidate input and promoted sleeve library.
+- Run the canonical 09:50 UTC and 14:50 UTC Lite sleeve path with explicit candidate input and promoted sleeve library.
 - Generate:
   - `aegis_lite_eod_report.v1`
   - non-empty `operator_execution_queue.v1`
@@ -160,24 +160,24 @@ Acceptance proof:
 - Alert ledger distinguishes `WOULD_SEND` from actual delivery.
 - UI/docs explicitly state no real email/SMS delivery exists.
 
-### P0.6 Keep 15:50 Runtime Alignment Proved
+### P0.6 Keep 09:50 UTC and 14:50 UTC Runtime Alignment Proved
 
 Lost points recovered: determinism, operator confidence.
 
 Problem:
-- The audit previously found timer drift; current evidence says 15:50. This must stay true before trading.
+- The audit previously found timer drift; current evidence says 09:50 UTC and 14:50 UTC. This must stay true before trading.
 
 Concrete fix:
 - Before each paper-trading smoke, run/read:
   - active user systemd timer status
   - `aegis_lite_operating_status.v1`
   - release integrity status
-- Fail closed if any source is not 15:50 ET or release match is not `MATCH`.
+- Fail closed if any source is not 09:50 UTC and 14:50 UTC or release match is not `MATCH`.
 
 Acceptance proof:
-- Current runtime/status artifact says `target_time_et=15:50`.
-- Active systemd timer trigger is near 15:50 ET.
-- Readiness report has no stale 15:35 claims.
+- Current runtime/status artifact says `target_times_utc=[09:50,14:50]`.
+- Active systemd timer trigger is near 09:50 UTC and 14:50 UTC.
+- Readiness report has no stale retired-time claims.
 
 ## P1: Required To Reach 90+ Hostile Audit Grade
 
@@ -380,7 +380,7 @@ Do not proceed to real manual paper trading if any of these are true:
 - Candidate lacks entry, stop, risk, quantity/sizing, symbol, side, sleeve, or source hypothesis.
 - Candidate is demo/dry-run only.
 - Release status is mismatch.
-- Active timer/status does not say 15:50 ET.
+- Active timer/status does not say 09:50 UTC and 14:50 UTC.
 - UI does not clearly show blocked/advisory vs executable.
 - Operator cannot record receipt immediately after manual entry.
 - Any path requires broker submit, IB transmit, or automated fill lifecycle.
@@ -389,4 +389,4 @@ Do not proceed to real manual paper trading if any of these are true:
 
 Do not redesign. Do not add broker automation. Do not add new architecture.
 
-The next highest-value improvement is **one real promoted executable candidate through the existing Lite EOD path**, followed by a **supervised dry lifecycle proof** and then a **single supervised IB paper trade smoke**. Dataset binding and operator read-model improvements are the next grade movers after that.
+The next highest-value improvement is **one real promoted executable candidate through the existing Lite sleeve path**, followed by a **supervised dry lifecycle proof** and then a **single supervised IB paper trade smoke**. Dataset binding and operator read-model improvements are the next grade movers after that.

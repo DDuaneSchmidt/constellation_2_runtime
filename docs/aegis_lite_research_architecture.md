@@ -50,7 +50,7 @@ The promoted sleeve library contains only production-eligible sleeves. Each slee
 
 ## Aegis Lite EOD Engine
 
-Aegis Lite runs once per trading day at the canonical 15:50 ET EOD timer. It evaluates promoted sleeves only, classifies regime, generates candidate trades, performs edge-overlap review, applies governance, and writes a complete manual execution report plus `manual_trade_packet.v1`. It does not submit orders or enable transmit.
+Aegis Lite runs once per trading day at the canonical 09:50 UTC and 14:50 UTC sleeve runs timer. It evaluates promoted sleeves only, classifies regime, generates candidate trades, performs edge-overlap review, applies governance, and writes a complete manual execution report plus `manual_trade_packet.v1`. It does not submit orders or enable transmit.
 
 The source boundary is `promoted_sleeve_library.v1`. The EOD engine wrapper filters candidate inputs to sleeves present in that library with `promotion_status=promoted`; research-only or unpromoted candidates are excluded before report generation.
 

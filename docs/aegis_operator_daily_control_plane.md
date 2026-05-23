@@ -6,7 +6,7 @@ This is the daily operator command surface for the pivoted Aegis Lite + Research
 
 ## Current Model
 
-- Aegis Lite EOD is canonical at 15:50 ET.
+- Aegis Lite sleeve runs are canonical at 09:50 UTC and 14:50 UTC.
 - Event monitoring is non-canonical and cannot overwrite EOD state.
 - Event monitoring may run automatically during market hours only after the operator explicitly enables the user timer.
 - Trades are entered manually in IB paper by David.
