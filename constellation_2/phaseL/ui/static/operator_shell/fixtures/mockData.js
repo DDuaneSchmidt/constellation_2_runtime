@@ -3,7 +3,7 @@ export const COMMAND_OVERVIEW_MOCK = {
   environment: "MOCK / UNAVAILABLE",
   data_source_state: "MOCK / UNAVAILABLE",
   fallback_badge: "MOCK / UNAVAILABLE",
-  as_of_label: "Data as of: MOCK / UNAVAILABLE",
+  as_of_label: "Updated: MOCK / UNAVAILABLE",
   summary: [
     { label: "System Status", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
     { label: "Exceptions", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },

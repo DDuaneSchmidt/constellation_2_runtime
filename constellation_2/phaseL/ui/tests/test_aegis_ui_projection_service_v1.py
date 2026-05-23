@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
 from types import SimpleNamespace
 
 import pytest
@@ -197,7 +198,7 @@ def test_runtime_status_projection_reads_nested_selected_intent(
 
 
 def test_aegis_runtime_route_and_offline_guidance_are_present() -> None:
-    pages = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/pages/index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(ROOT)
     main = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/main.js").read_text(encoding="utf-8")
     api_client = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/api_client/index.js").read_text(encoding="utf-8")
 

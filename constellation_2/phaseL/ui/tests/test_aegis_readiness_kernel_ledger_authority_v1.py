@@ -16,7 +16,7 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def test_final_readiness_comes_only_from_control_plane(tmp_path: Path) -> None:
+def test_final_readiness_comes_only_from_runtime_evaluation(tmp_path: Path) -> None:
     day = "2026-04-29"
     truth = tmp_path / "production_truth"
     sleeve = tmp_path / "sleeve"
@@ -43,12 +43,12 @@ def test_final_readiness_comes_only_from_control_plane(tmp_path: Path) -> None:
 
     payload = build_readiness_kernel_v1(day, truth_root=truth, sleeve_truth_root=sleeve)
 
-    assert payload["final_readiness_authority"] == "aegis_control_plane_v1"
+    assert payload["final_readiness_authority"] == "RuntimeEvaluation"
     assert payload["overall_status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
+    assert payload["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
 
 
-def test_supporting_surfaces_cannot_override_control_plane(tmp_path: Path) -> None:
+def test_supporting_surfaces_cannot_override_runtime_evaluation(tmp_path: Path) -> None:
     day = "2026-04-29"
     truth = tmp_path / "production_truth"
     sleeve = tmp_path / "sleeve"
@@ -76,5 +76,5 @@ def test_supporting_surfaces_cannot_override_control_plane(tmp_path: Path) -> No
     payload = build_readiness_kernel_v1(day, truth_root=truth, sleeve_truth_root=sleeve)
 
     assert payload["overall_status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "BROKER_EVENT_LOG_MISSING"
+    assert payload["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
     assert payload["supporting_evidence_only_paths"]["unified_truth_kernel"].endswith("unified_truth_kernel.v1.json")

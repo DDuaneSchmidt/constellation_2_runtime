@@ -9,6 +9,7 @@ import ops.tools.run_submission_lifecycle_refresh_v1 as submission_lifecycle_ref
 from constellation_2.common.advisory.execution_intent_v1 import ExecutionIntentV1
 from constellation_2.common.execution_kernel.execution_kernel_runner_v1 import run_execution_kernel_v1
 from constellation_2.common.execution_kernel.execution_lifecycle_runner_v1 import run_execution_lifecycle_v1
+from constellation_2.common.execution_kernel.execution_kernel_storage_v1 import execution_submission_record_path_v1
 from constellation_2.common.execution_kernel.execution_submission_record_v1 import ExecutionSubmissionRecordV1
 from constellation_2.common.runtime_control_kernel.runtime_control_runner_v1 import run_runtime_control_kernel_v1
 from constellation_2.phaseL.ui_api.common import (
@@ -1317,11 +1318,26 @@ def run_advisory_promote_command(body: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def run_submission_command(body: dict[str, Any]) -> dict[str, Any]:
+def _current_execution_intent_for_submit() -> tuple[Any | None, ExecutionSubmissionRecordV1 | None]:
     from constellation_2.phaseL.ui_api.kernel_operator_shell_diagnostic_v1 import (
         load_current_execution_intent_for_submit_v1,
     )
 
+    return load_current_execution_intent_for_submit_v1(
+        advisory_runtime_root=ADVISORY_RUNTIME_ROOT,
+        sleeve_truth_root=SLEEVE_TRUTH_ROOT,
+    )
+
+
+def _latest_submission_record() -> tuple[Path | None, ExecutionSubmissionRecordV1 | None]:
+    from constellation_2.phaseL.ui_api.kernel_operator_shell_diagnostic_v1 import (
+        _latest_submission_record_v1,
+    )
+
+    return _latest_submission_record_v1(sleeve_truth_root=SLEEVE_TRUTH_ROOT)
+
+
+def run_submission_command(body: dict[str, Any]) -> dict[str, Any]:
     execution_intent_id = _safe_str(body.get("execution_intent_id"))
     if not execution_intent_id:
         return _command_response(
@@ -1330,10 +1346,7 @@ def run_submission_command(body: dict[str, Any]) -> dict[str, Any]:
             reason_codes=["EXECUTION_INTENT_ID_REQUIRED"],
         )
 
-    current_intent, current_submission_record = load_current_execution_intent_for_submit_v1(
-        advisory_runtime_root=ADVISORY_RUNTIME_ROOT,
-        sleeve_truth_root=SLEEVE_TRUTH_ROOT,
-    )
+    current_intent, current_submission_record = _current_execution_intent_for_submit()
     if current_intent is None or current_submission_record is None:
         return _command_response(
             command_id="submit_authorized_execution",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
+
 import pytest
 
 from constellation_2.common.product_summary_kernel_v1 import materialize_product_summary_v1
@@ -81,7 +83,7 @@ def test_refinement_view_renders_governed_refinement_artifacts_only(
 
 def test_refinement_surface_remains_refinement_driven() -> None:
     root = Path(__file__).resolve().parents[4]
-    pages = (root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "pages" / "index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(root)
     refinement_section = pages.split("async function renderRefinementPage", 1)[1].split("async function renderAdvisoryPage", 1)[0]
     assert 'path: "/refinement"' in pages
     assert "fetchRefinement()" in refinement_section

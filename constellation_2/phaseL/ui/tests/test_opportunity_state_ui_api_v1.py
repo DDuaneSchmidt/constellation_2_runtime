@@ -43,6 +43,25 @@ def _seed_opportunity_runtime(
     )
     _materialize_tax_state(canonical_truth, sleeve_root, emit_artifact=True)
     monkeypatch.setattr("constellation_2.phaseL.ui_api.opportunity_state_read_model.GLOBAL_TRUTH_ROOT", canonical_truth)
+    readiness_payload = {
+        "ok": True,
+        "blocked": False,
+        "blocked_state": {"reason": "", "blocking_errors": []},
+        "authority_label": "governed_release_projection",
+        "scope": {"ib_account": ACCOUNT},
+        "baseline_gate": {"current_family_statuses": {"operator_status": "CERTIFIED_READY"}},
+        "governing_refs": [
+            {
+                "artifact_id": "release_baseline_gate_v1",
+                "artifact_path": "/tmp/release_baseline_gate.v1.json",
+                "artifact_sha256": "1" * 64,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "constellation_2.common.opportunity_state_kernel_v1.build_certified_operational_readiness_v1",
+        lambda **_: dict(readiness_payload),
+    )
     return canonical_truth, sleeve_root, stage_result, chain_path, _seed_deployment_state(canonical_truth)
 
 

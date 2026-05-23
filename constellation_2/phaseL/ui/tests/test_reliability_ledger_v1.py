@@ -1,4 +1,5 @@
 from __future__ import annotations
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -67,7 +68,7 @@ def _issue_payload(*, canonical_key: str, severity: str = "medium", category: st
 
 def test_reliability_routes_and_endpoints_are_wired() -> None:
     server = (ROOT / "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py").read_text(encoding="utf-8")
-    pages = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/pages/index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(ROOT)
     domain_client = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/domain_client/index.js").read_text(encoding="utf-8")
     api_client = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/api_client/index.js").read_text(encoding="utf-8")
     main_js = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/main.js").read_text(encoding="utf-8")
@@ -147,7 +148,7 @@ def test_reliability_routes_and_endpoints_are_wired() -> None:
 
 
 def test_reliability_ui_readability_contract_for_work_orders_and_verifications() -> None:
-    pages = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/pages/index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(ROOT)
     main_js = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/main.js").read_text(encoding="utf-8")
 
     work_orders_section = pages.split("async function renderReliabilityWorkOrdersPage()")[1].split("async function renderReliabilityWorkOrderDetailPage()")[0]

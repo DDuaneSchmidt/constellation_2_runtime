@@ -4,9 +4,14 @@ import {
   ROUTES,
   LEGACY_ROUTE_ALIASES,
   buildPaletteEntries,
+  executeCandidateWorkflow,
+  executeEdgeLabWorkflow,
+  executeManualCaptureRecordWorkflow,
   executeConfigurationWorkflow,
   executeReliabilityWorkflow,
   executeOperatorQuery,
+  executeResearchConsoleWorkflow,
+  executeResearchDataAcquisitionWorkflow,
   loadRouteView,
 } from "/operator_shell/pages/index.js";
 import {
@@ -14,9 +19,11 @@ import {
   activeNavigationForPath,
 } from "/operator_shell/navigation_schema.js";
 import {
+  executeAegisCommand,
   fetchAlerts,
   fetchFinancialState,
   fetchOperatorWorkflow,
+  fetchRuntimeStatus,
   fetchStatusRail,
   fetchStatusSemantics,
   fetchSystemSummary,
@@ -56,6 +63,7 @@ const state = {
     operatorWorkflow: null,
     alerts: null,
     financialState: null,
+    runtimeStatus: null,
     refreshedAt: null,
   },
   commandQueryText: "",
@@ -100,6 +108,37 @@ async function timedAsync(phase, action, extra = {}) {
   }
 }
 
+function formatHeaderTimestamp(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "not reported";
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+  return parsed.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
+function renderHeaderOperationalTimestamps(timestamps = {}) {
+  const timing = timestamps.eod_pipeline_timing || {};
+  const rows = [
+    ["Operational day", timestamps.operational_day || "not reported"],
+    ["Market data", formatHeaderTimestamp(timestamps.market_data_last_updated_at)],
+    ["Candidate snapshot", formatHeaderTimestamp(timestamps.candidate_snapshot_timestamp)],
+    ["Certification attempt", formatHeaderTimestamp(timestamps.last_certification_attempt_at)],
+    ["Final EOD", timestamps.final_eod_certification_completed_at ? formatHeaderTimestamp(timestamps.final_eod_certification_completed_at) : (timing.final_certification_status || "pending/not reported")],
+  ];
+  return rows.map(([label, value]) => `<span class="header-operational-timestamp"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join("");
+}
+
 function formatDisplayLabel(value) {
   const text = String(value || "Unknown").trim();
   if (!text) {
@@ -117,6 +156,9 @@ function normalizePath(path) {
   if (normalized.startsWith("/reliability/work-orders/") && normalized !== "/reliability/work-orders") {
     return "/reliability/work-orders/detail";
   }
+  if (normalized.startsWith("/research-lab/") && !ROUTES.some((route) => route.path === normalized)) {
+    return "/research-lab";
+  }
   return LEGACY_ROUTE_ALIASES[normalized] || normalized;
 }
 
@@ -133,15 +175,26 @@ function renderNav() {
   const startedAt = performance.now();
   const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
   const query = String(document.getElementById("sidebarSearch")?.value || "").trim().toLowerCase();
-  state.sidebarMode = ["expanded", "collapsed", "hidden"].includes(state.sidebarMode) ? state.sidebarMode : "expanded";
+  state.sidebarMode = ["expanded", "collapsed"].includes(state.sidebarMode) ? state.sidebarMode : "collapsed";
   document.body.classList.toggle("sidebar-collapsed", state.sidebarMode === "collapsed");
-  document.body.classList.toggle("sidebar-hidden", state.sidebarMode === "hidden");
+  document.body.classList.toggle("sidebar-expanded", state.sidebarMode === "expanded");
+  document.body.classList.toggle("sidebar-drawer-open", state.sidebarMode === "expanded" && window.matchMedia("(max-width: 900px)").matches);
   const collapseButton = document.querySelector("[data-sidebar-collapse]");
   if (collapseButton) {
-    const nextLabel = state.sidebarMode === "expanded" ? "Collapse" : state.sidebarMode === "collapsed" ? "Hide" : "Show";
+    const isNarrow = window.matchMedia("(max-width: 900px)").matches;
+    const nextLabel = state.sidebarMode === "expanded" ? (isNarrow ? "Close" : "Collapse") : "Expand";
     collapseButton.setAttribute("aria-label", `${nextLabel} navigation`);
     collapseButton.querySelector("span").textContent = nextLabel;
-    collapseButton.querySelector("strong").textContent = state.sidebarMode === "hidden" ? "›" : "‹";
+    collapseButton.querySelector("strong").textContent = state.sidebarMode === "expanded" ? "‹" : "›";
+  }
+  const openButton = document.querySelector("[data-sidebar-open]");
+  if (openButton) {
+    openButton.hidden = state.sidebarMode === "expanded";
+    openButton.setAttribute("aria-expanded", state.sidebarMode === "expanded" ? "true" : "false");
+  }
+  const scrim = document.querySelector("[data-sidebar-close]");
+  if (scrim) {
+    scrim.hidden = !(state.sidebarMode === "expanded" && window.matchMedia("(max-width: 900px)").matches);
   }
   document.getElementById("workspaceNav").innerHTML = NAVIGATION_SCHEMA.map((section) => {
     const domains = section.domains
@@ -168,7 +221,7 @@ function renderNav() {
         const childrenId = `nav-children-${domain.id}`;
         return `
           <div class="sidebar-group accent-${escapeHtml(domain.accent)} ${isActiveParent ? "active-parent" : ""}">
-            <button class="sidebar-group-button" type="button" data-nav-group-toggle="${escapeHtml(domain.id)}" aria-expanded="${isOpen ? "true" : "false"}" aria-controls="${escapeHtml(childrenId)}">
+            <button class="sidebar-group-button" type="button" data-nav-group-toggle="${escapeHtml(domain.id)}" data-route="${escapeHtml(domain.route)}" aria-expanded="${isOpen ? "true" : "false"}" aria-controls="${escapeHtml(childrenId)}">
               <span class="nav-icon">${escapeHtml(domain.icon)}</span>
               <span class="nav-text">
                 <strong>${escapeHtml(domain.label)}</strong>
@@ -208,21 +261,28 @@ function renderNav() {
 
 function renderKernelRail() {
   const host = document.getElementById("kernelStatusRail");
-  host.innerHTML = state.shell.statusRail.map((kernel) => {
+  const visibleRail = state.shell.statusRail.filter((kernel) => String(kernel.kernel_id || "").toLowerCase() !== "control");
+  host.innerHTML = `${visibleRail.map((kernel) => {
     const routePath = normalizePath(kernel.href || "/");
     const label = kernel.label || kernel.kernel_id || "Kernel";
     const status = kernel.status?.label || kernel.status?.code || "Unknown";
+    const tooltip = kernel.kernel_id === "advisory" && status === "Partial"
+      ? "Candidate exists, but evidence projection is incomplete."
+      : kernel.status?.reason_codes?.join(", ") || "";
     return `
-      <a class="status-rail-item" href="${escapeHtml(routePath)}" data-route="${escapeHtml(routePath)}">
+      <a class="status-rail-item" href="${escapeHtml(routePath)}" data-route="${escapeHtml(routePath)}" title="${escapeHtml(tooltip)}">
         <span>${escapeHtml(label)}</span>
         ${renderStatusPill(status, kernel.status?.semantic || "unknown", state.semantics)}
       </a>
     `;
-  }).join("");
+  }).join("")}
+    <div class="kernel-safety-strip">READ-ONLY GOVERNANCE · NO BROKER EXECUTION · MANUAL CAPTURE ONLY</div>
+  `;
 }
 
 function renderTopBar() {
   const summary = state.shell.systemSummary || {};
+  const runtimeStatus = state.shell.runtimeStatus || {};
   const financialState = state.shell.financialState || {};
   const readiness = summary.readiness_summary || {};
   const topLevelItems = Array.isArray(summary.top_level_items) ? summary.top_level_items : [];
@@ -234,8 +294,8 @@ function renderTopBar() {
 
   document.getElementById("headerPageTitle").textContent = pageTitle;
   document.getElementById("headerEnvironment").textContent = "PRODUCTION";
-  document.getElementById("headerDataTimestamp").textContent = "Data as of: Apr 27, 2026 3:58 PM EDT";
-  document.getElementById("topRuntimeMode").textContent = formatDisplayLabel(summary.environment || "UNKNOWN");
+  document.getElementById("headerDataTimestamp").textContent = "Operational timestamps loading";
+  document.getElementById("topRuntimeMode").textContent = formatDisplayLabel(summary.environment || summary.runtime_mode || runtimeStatus.runtime_mode || "UNKNOWN");
   document.getElementById("topConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || summary.summary_id || "governed");
   document.getElementById("topReadiness").innerHTML = renderStatusPill(
     readinessStatus,
@@ -251,7 +311,7 @@ function renderTopBar() {
   document.getElementById("bottomConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || "governed");
   document.getElementById("bottomFreshness").textContent = summary.last_refresh_utc || state.shell.refreshedAt || "n/a";
   document.getElementById("bottomReadiness").textContent = readinessStatus;
-  document.getElementById("bottomEnvironment").textContent = formatDisplayLabel(summary.environment || "UNKNOWN");
+  document.getElementById("bottomEnvironment").textContent = formatDisplayLabel(summary.environment || summary.runtime_mode || runtimeStatus.runtime_mode || "UNKNOWN");
   document.getElementById("bottomSession").textContent = summary.current_day || "UNKNOWN";
   const connectionState = state.connection?.state || "RECONNECTING";
   document.getElementById("bottomAlert").textContent =
@@ -267,8 +327,19 @@ function setPageChrome(route, view) {
   document.getElementById("workspaceMeta").textContent = view.meta || route.subtitle || "";
   const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
   document.getElementById("headerPageTitle").textContent = active?.parentLabel ? `${active.parentLabel} / ${active.label}` : "Command / Overview";
-  if (view.dataTimestamp) {
-    document.getElementById("headerDataTimestamp").textContent = view.dataTimestamp;
+  const timestampHost = document.getElementById("headerDataTimestamp");
+  if (view.hideHeaderTimestamp) {
+    timestampHost.textContent = "";
+    timestampHost.setAttribute("hidden", "");
+  } else {
+    timestampHost.removeAttribute("hidden");
+    if (view.operationalTimestamps) {
+      timestampHost.innerHTML = renderHeaderOperationalTimestamps(view.operationalTimestamps);
+    } else if (view.dataTimestamp) {
+      timestampHost.textContent = String(view.dataTimestamp).replace(new RegExp("^Data\\s+as\\s+of:\s*", "i"), "Updated: ");
+    } else {
+      timestampHost.textContent = "Operational timestamps unavailable";
+    }
   }
 }
 
@@ -300,13 +371,20 @@ function togglePalette(forceOpen) {
 }
 
 async function loadSharedShellState({ summaryOnly = false } = {}) {
-  const [semanticsPayload, railPayload, systemSummary, operatorWorkflow, alerts, financialState] = await timedAsync("readiness cards load", () => Promise.all([
+  const routePath = normalizePath(window.location.pathname || "/");
+  const isAegisWorkflow = routePath.startsWith("/aegis-") || routePath === "/operator-inbox" || routePath === "/research-lab" || routePath === "/performance" || routePath === "/outcomes";
+  const railParams = summaryOnly ? { summary: 1 } : {};
+  if (isAegisWorkflow) {
+    railParams.surface = "aegis";
+  }
+  const [semanticsPayload, railPayload, systemSummary, operatorWorkflow, alerts, financialState, runtimeStatus] = await timedAsync("readiness cards load", () => Promise.all([
     fetchStatusSemantics(),
-    fetchStatusRail(summaryOnly ? { summary: 1 } : {}),
+    fetchStatusRail(railParams),
     fetchSystemSummary(),
     fetchOperatorWorkflow(),
     fetchAlerts(),
     fetchFinancialState(),
+    fetchRuntimeStatus().catch(() => ({})),
   ]), { summary_only: summaryOnly });
   state.semantics = semanticsPayload.status_semantics || {};
   state.shell.statusRail = railPayload.kernels || [];
@@ -314,9 +392,30 @@ async function loadSharedShellState({ summaryOnly = false } = {}) {
   state.shell.operatorWorkflow = operatorWorkflow || {};
   state.shell.alerts = alerts || {};
   state.shell.financialState = financialState || {};
+  state.shell.runtimeStatus = runtimeStatus || {};
   state.shell.refreshedAt = railPayload.generated_utc || systemSummary?.last_refresh_utc || null;
   renderKernelRail();
   renderTopBar();
+}
+
+
+function researchConsoleProgressText(actionLabel) {
+  const label = String(actionLabel || "").toLowerCase();
+  if (label.includes("accept")) return "Accepting hypothesis...";
+  if (label.includes("readiness")) return "Assessing readiness...";
+  if (label.includes("watchlist")) return "Moving to Watchlist...";
+  if (label.includes("reject")) return "Rejecting hypothesis...";
+  if (label.includes("archive")) return "Archiving hypothesis...";
+  if (label.includes("convert")) return "Creating research plan...";
+  if (label.includes("start")) return "Starting research...";
+  return "Recording research action...";
+}
+
+function researchConsoleErrorText(error) {
+  const payload = error?.payload || {};
+  const message = payload.operator_message || payload.message || error?.message || "Research Pipeline action failed.";
+  const reason = payload.failure_reason || payload.error || "";
+  return reason ? `${message} ${reason}` : message;
 }
 
 async function renderRoute() {
@@ -331,9 +430,15 @@ async function renderRoute() {
     const view = await timedAsync("workspace route load", () => loadRouteView(route.id, state), { route_id: route.id });
     state.activeView = view;
     setPageChrome(route, view);
+    document.body.classList.toggle("dashboard-incident-mode", view.dashboardIncidentMode === true);
+    document.body.classList.toggle("dashboard-main-only", view.hideContextRail === true);
     mainHost.innerHTML = view.html;
-    contextHost.innerHTML = view.contextHtml || `<div class="empty-state">No contextual evidence for this surface.</div>`;
+    contextHost.hidden = view.dashboardIncidentMode === true || view.hideContextRail === true;
+    contextHost.innerHTML = (view.dashboardIncidentMode === true || view.hideContextRail === true) ? "" : (view.contextHtml || `<div class="empty-state">No contextual evidence for this surface.</div>`);
   } catch (error) {
+    document.body.classList.remove("dashboard-incident-mode");
+    document.body.classList.remove("dashboard-main-only");
+    contextHost.hidden = false;
     const routePath = String(route.path || "");
     const isCapitalRoute = routePath === "/capital" || routePath.startsWith("/capital/");
     if (isCapitalRoute && error?.operatorSafe) {
@@ -367,6 +472,32 @@ async function navigateTo(path) {
       anchor.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
+}
+
+function revealHypothesisSummaryTarget({ sectionTargetId = "", cardTargetId = "" } = {}) {
+  const section = sectionTargetId ? document.getElementById(sectionTargetId) : null;
+  if (section?.tagName === "DETAILS") {
+    section.open = true;
+  }
+  const target = cardTargetId ? document.getElementById(cardTargetId) : section;
+  if (!target) {
+    return false;
+  }
+  document.body.dataset.hypothesisLastFocusToken = String(Date.now());
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (target.hasAttribute("data-hypothesis-card")) {
+    target.focus?.({ preventScroll: true });
+    target.classList.remove("hypothesis-card-highlight");
+    void target.offsetWidth;
+    target.classList.add("hypothesis-card-highlight");
+    window.setTimeout(() => target.classList.remove("hypothesis-card-highlight"), 2400);
+  } else {
+    target.classList.remove("hypothesis-section-highlight");
+    void target.offsetWidth;
+    target.classList.add("hypothesis-section-highlight");
+    window.setTimeout(() => target.classList.remove("hypothesis-section-highlight"), 1800);
+  }
+  return true;
 }
 
 async function openArtifact(path, title) {
@@ -440,7 +571,395 @@ async function runExceptionAction(actionNode) {
   }
 }
 
+function manualCaptureHasUnsavedDraft(formOrDialog) {
+  const form = formOrDialog?.matches?.(".manual-capture-record-form") ? formOrDialog : formOrDialog?.querySelector?.(".manual-capture-record-form");
+  const key = String(form?.dataset?.manualCaptureDraftKey || "").trim();
+  if (!key) {
+    return false;
+  }
+  try {
+    return Boolean(localStorage.getItem(key));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function openManualCaptureDialog(modal) {
+  if (!modal) {
+    return;
+  }
+  if (modal.showModal) {
+    modal.showModal();
+  } else {
+    modal.hidden = false;
+  }
+  document.body.classList.add("manual-capture-modal-open");
+  window.setTimeout(() => {
+    const firstInput = modal.querySelector("input[name='fill_time'], input[name='fill_price'], input[name='quantity']");
+    refreshManualCaptureFormState(modal.querySelector(".manual-capture-record-form"));
+    firstInput?.focus?.();
+  }, 0);
+}
+
+function closeManualCaptureDialog(modal, { force = false } = {}) {
+  if (!modal) {
+    return false;
+  }
+  if (!force && manualCaptureHasUnsavedDraft(modal) && !window.confirm("Discard unsaved manual capture draft?")) {
+    return false;
+  }
+  if (modal.close) {
+    modal.close();
+  } else {
+    modal.hidden = true;
+  }
+  document.body.classList.remove("manual-capture-modal-open");
+  return true;
+}
+
+function renderManualCaptureSuccess(form, result = {}) {
+  const editable = form.querySelector("[data-manual-capture-editable]");
+  const success = form.querySelector("[data-manual-capture-success]");
+  const saveButton = form.querySelector("[data-manual-capture-save-button]");
+  const closeButton = form.querySelector("[data-manual-capture-close]");
+  const record = result?.record && typeof result.record === "object" ? result.record : {};
+  const recordId = result?.manual_capture_record_id || result?.record_id || record?.record_id || "";
+  const eventIds = Array.isArray(result?.event_ids) ? result.event_ids : (Array.isArray(record?.event_ids) ? record.event_ids : []);
+  const symbol = String(record?.symbol || form.querySelector('input[name="symbol"]')?.value || "Ticket");
+  const side = String(record?.side || "LONG");
+  const quantity = String(record?.quantity || form.querySelector('input[name="quantity"]')?.value || "");
+  const fillPrice = String(record?.fill_price || form.querySelector('input[name="fill_price"]')?.value || "");
+  const fillTime = String(record?.fill_time || new Date().toISOString());
+  if (editable) {
+    editable.hidden = true;
+  }
+  if (success) {
+    success.hidden = false;
+    success.innerHTML = `
+      <h4>Manual capture recorded</h4>
+      <p>No broker action was taken.</p>
+      <div class="manual-capture-success-ticket">
+        <strong>${escapeHtml(symbol)} ${escapeHtml(side)}</strong>
+        <span>${escapeHtml(quantity)} @ ${escapeHtml(fillPrice)}</span>
+        <span>Recorded at ${escapeHtml(fillTime)}</span>
+      </div>
+      <div class="manual-capture-success-grid">
+        <div><span>Record ID</span><strong>${escapeHtml(recordId || "recorded")}</strong></div>
+        <div><span>Event IDs</span><strong>${escapeHtml(eventIds.join(", ") || "recorded")}</strong></div>
+      </div>`;
+  }
+  if (saveButton) {
+    saveButton.hidden = true;
+  }
+  if (closeButton) {
+    closeButton.disabled = false;
+    closeButton.textContent = "Close";
+  }
+}
+
+
+function parseCommandPayload(rawValue) {
+  try {
+    const parsed = JSON.parse(String(rawValue || "{}").trim() || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function commandStatusTargets(commandElement) {
+  const local = commandElement.closest("[data-command-surface], [data-domain-repair-card], [data-hypothesis-card], [data-domain-card]");
+  const targetId = String(commandElement.getAttribute("data-aegis-command-target-id") || "").trim();
+  const targetType = String(commandElement.getAttribute("data-aegis-command-target-type") || "").trim();
+  const nodes = [];
+  local?.querySelectorAll?.("[data-aegis-command-status]").forEach((node) => nodes.push(node));
+  local?.querySelectorAll?.("[data-domain-repair-status]").forEach((node) => {
+    if (!nodes.includes(node)) nodes.push(node);
+  });
+  if (targetType === "domain_certification" && targetId) {
+    document.querySelectorAll(`[data-domain-repair-card="${CSS.escape(targetId)}"] [data-aegis-command-status], [data-domain-repair-card="${CSS.escape(targetId)}"] [data-domain-repair-status]`).forEach((node) => {
+      if (!nodes.includes(node)) nodes.push(node);
+    });
+  }
+  if (!nodes.length) {
+    const card = commandElement.closest("[data-hypothesis-card]");
+    const output = card?.querySelector?.("[data-hypothesis-card-message-output]");
+    if (output) nodes.push(output);
+  }
+  return nodes;
+}
+
+function setCommandStatus(commandElement, message, tone = "") {
+  commandStatusTargets(commandElement).forEach((node) => {
+    node.hidden = false;
+    node.textContent = message;
+    if (tone) node.dataset.tone = tone;
+  });
+}
+
+function ensureDomainCommandResultSink(targetId, fallbackLabel = "") {
+  if (!targetId || !window.CSS?.escape) return null;
+  const region = document.querySelector("[data-domain-command-results-region]");
+  if (!region) return null;
+  region.hidden = false;
+  const list = region.querySelector("[data-domain-command-result-list]") || region;
+  let slot = region.querySelector(`[data-domain-command-result-sink="${CSS.escape(targetId)}"]`);
+  if (!slot) {
+    slot = document.createElement("div");
+    slot.className = "runtime-domain-command-result-slot";
+    slot.dataset.domainCommandResultSink = targetId;
+    slot.dataset.commandResultDomain = fallbackLabel || targetId;
+  }
+  list.prepend(slot);
+  slot.hidden = false;
+  return slot;
+}
+
+function commandResultPanelTargets(commandElement) {
+  const targetId = String(commandElement.getAttribute("data-aegis-command-target-id") || "").trim();
+  const targetType = String(commandElement.getAttribute("data-aegis-command-target-type") || "").trim();
+  if (targetType === "domain_certification") {
+    const label = commandElement.closest("[data-domain-repair-card]")?.querySelector("strong")?.textContent?.trim() || targetId;
+    const sink = ensureDomainCommandResultSink(targetId, label);
+    return sink ? [sink] : [];
+  }
+  const local = commandElement.closest("[data-command-surface], [data-domain-repair-card], [data-hypothesis-card], [data-domain-card], [data-candidate-card], dialog, article, section");
+  return local ? [local] : [];
+}
+
+function commandResultPanelHtml(result = {}, domainLabel = "") {
+  const panel = result.command_result && typeof result.command_result === "object" ? result.command_result : {};
+  const statusLabel = String(panel.status_label || result.result_status || (result.ok ? "Success" : "Failed"));
+  const domain = String(panel.domain || panel.domain_id || domainLabel || "");
+  const message = String(panel.plain_english_result || result.user_message || result.error_message || (result.ok ? "Command completed." : "Command failed."));
+  const nextStep = String(panel.next_required_step || result.next_state || "Review the updated card state.");
+  const timestamp = String(panel.timestamp || new Date().toLocaleString());
+  const jobId = String(panel.job_id || result.job_id || "");
+  const auditId = String(panel.audit_id || result.audit_id || "");
+  const missingSource = String(panel.missing_source_name || "");
+  const expectedPath = String(panel.expected_source_path || panel.copy_required_path || "");
+  const failureReason = String(panel.failure_reason || result.error_message || "");
+  const tone = String(panel.result_status || result.result_status || "").toLowerCase().replace(/[^a-z0-9_-]/g, "-") || (result.ok ? "success" : "failed");
+  return `<div class="command-result-panel" data-command-result-panel data-result-status="${escapeHtml(tone)}" role="status" aria-live="polite">
+    <div class="command-result-panel-heading">
+      <strong>${escapeHtml(statusLabel)}</strong>
+      <span>${escapeHtml(timestamp)}</span>
+    </div>
+    <p>${escapeHtml(message)}</p>
+    <dl class="command-result-panel-facts">
+      ${domain ? `<div><dt>Domain</dt><dd>${escapeHtml(domain)}</dd></div>` : ""}
+      <div><dt>Next step</dt><dd>${escapeHtml(nextStep)}</dd></div>
+      ${missingSource ? `<div><dt>Missing source</dt><dd>${escapeHtml(missingSource)}</dd></div>` : ""}
+      ${expectedPath ? `<div><dt>Required path</dt><dd><code>${escapeHtml(expectedPath)}</code></dd></div>` : ""}
+      ${jobId ? `<div><dt>Job ID</dt><dd><code>${escapeHtml(jobId)}</code></dd></div>` : ""}
+      ${auditId ? `<div><dt>Audit ID</dt><dd><code>${escapeHtml(auditId)}</code></dd></div>` : ""}
+      ${failureReason ? `<div><dt>Failure</dt><dd>${escapeHtml(failureReason)}</dd></div>` : ""}
+    </dl>
+    ${expectedPath ? `<button class="ghost-button command-result-copy-button" type="button" data-copy-text="${escapeHtml(expectedPath)}">Copy required path</button>` : ""}
+  </div>`;
+}
+
+function showCommandResultPanel(commandElement, result = {}) {
+  const targets = commandResultPanelTargets(commandElement);
+  targets.forEach((target) => {
+    target.querySelectorAll(":scope > [data-command-result-panel]").forEach((node) => node.remove());
+    const domainLabel = target.getAttribute("data-command-result-domain") || commandElement.getAttribute("data-aegis-command-target-id") || "";
+    target.insertAdjacentHTML("beforeend", commandResultPanelHtml(result, domainLabel));
+    const panel = target.querySelector(":scope > [data-command-result-panel]");
+    panel?.classList.add("command-result-panel-flash");
+  });
+}
+
+function openCommandDetail(commandElement) {
+  const panelId = String(commandElement.getAttribute("data-command-detail-target") || commandElement.getAttribute("data-hypothesis-detail-target") || "").trim();
+  const panel = panelId ? document.getElementById(panelId) : null;
+  const card = commandElement.closest("[data-hypothesis-card]");
+  if (!panel) {
+    setCommandStatus(commandElement, "Detail panel is not available for this action.", "error");
+    return;
+  }
+  if (panel.showModal) {
+    panel.showModal();
+  } else {
+    panel.hidden = false;
+  }
+  panel.dataset.openedBy = String(commandElement.textContent || commandElement.getAttribute("data-aegis-command-id") || "View details").trim();
+  document.body.dataset.hypothesisLastFocusToken = String(Date.now());
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  panel.focus?.({ preventScroll: true });
+  card?.classList.remove("hypothesis-card-highlight");
+  if (card) {
+    void card.offsetWidth;
+    card.classList.add("hypothesis-card-highlight");
+    window.setTimeout(() => card.classList.remove("hypothesis-card-highlight"), 2400);
+  }
+}
+
+async function runAegisCommandElement(commandElement) {
+  const commandId = String(commandElement.getAttribute("data-aegis-command-id") || "").trim();
+  const actionType = String(commandElement.getAttribute("data-aegis-command-action-type") || "").trim();
+  const targetType = String(commandElement.getAttribute("data-aegis-command-target-type") || "").trim();
+  const targetId = String(commandElement.getAttribute("data-aegis-command-target-id") || "").trim();
+  if (!commandId) {
+    setCommandStatus(commandElement, "This action is missing a command contract.", "error");
+    return;
+  }
+  if (actionType === "IN_PAGE_DETAIL") {
+    openCommandDetail(commandElement);
+    return;
+  }
+  if (actionType === "SCROLL_FOCUS" || commandId === "SCROLL_TO_HYPOTHESIS_SECTION" || commandId === "FOCUS_HYPOTHESIS_CARD") {
+    revealHypothesisSummaryTarget({
+      sectionTargetId: String(commandElement.getAttribute("data-hypothesis-summary-section-target") || (commandId === "SCROLL_TO_HYPOTHESIS_SECTION" ? targetId : "") || "").trim(),
+      cardTargetId: String(commandElement.getAttribute("data-hypothesis-summary-card-target") || (commandId === "FOCUS_HYPOTHESIS_CARD" ? targetId : "") || "").trim(),
+    });
+    return;
+  }
+  if (actionType === "EXPAND_SECTION") {
+    const route = String(commandElement.getAttribute("data-route") || commandElement.getAttribute("href") || "").trim();
+    if (route) {
+      await navigateTo(route);
+      return;
+    }
+    setCommandStatus(commandElement, "This command is declared for in-page handling only.", "ready");
+    return;
+  }
+  if (actionType !== "API_COMMAND") {
+    setCommandStatus(commandElement, "This command is declared for in-page handling only.", "ready");
+    return;
+  }
+  const payload = parseCommandPayload(commandElement.getAttribute("data-aegis-command-payload"));
+  commandElement.disabled = true;
+  setCommandStatus(commandElement, "Running command…", "loading");
+  try {
+    const result = await executeAegisCommand({
+      command_id: commandId,
+      target_type: targetType,
+      target_id: targetId,
+      operational_day: payload.operational_day || payload.day_utc || "",
+      payload,
+    });
+    const message = result.user_message || result.message || (result.ok ? "Command completed." : "Command failed.");
+    setCommandStatus(commandElement, message, result.ok ? "ready" : "error");
+    showCommandResultPanel(commandElement, result);
+    const card = commandElement.closest("[data-hypothesis-card]");
+    if (commandId === "START_RESEARCH" && result.ok && card) {
+      card.dataset.hypothesisStatus = result.next_state || "Queued";
+      const badge = card.querySelector(".hypothesis-status");
+      if (badge) badge.textContent = result.next_state || "Queued";
+      card.classList.add("hypothesis-card-highlight");
+    }
+  } catch (error) {
+    const failureResult = {
+      ok: false,
+      result_status: "FAILED",
+      error_message: error?.message || "Command failed.",
+      command_result: {
+        status_label: "Failed",
+        result_status: "FAILED",
+        plain_english_result: error?.message || "Command failed.",
+        next_required_step: "Review the error and try again after the underlying issue is resolved.",
+        failure_reason: error?.message || "Command failed.",
+        timestamp: new Date().toLocaleString(),
+      },
+    };
+    setCommandStatus(commandElement, failureResult.error_message, "error");
+    showCommandResultPanel(commandElement, failureResult);
+  } finally {
+    commandElement.disabled = false;
+  }
+}
+
 async function handleClick(event) {
+  const researchQuickFilter = event.target.closest("[data-research-quick-filter]");
+  if (researchQuickFilter) {
+    event.preventDefault();
+    const region = researchQuickFilter.closest("[data-research-hypothesis-search-region]");
+    if (region) {
+      region.dataset.activeFilter = String(researchQuickFilter.getAttribute("data-research-quick-filter") || "all");
+      region.querySelectorAll("[data-research-quick-filter]").forEach((button) => {
+        button.classList.toggle("is-active", button === researchQuickFilter);
+      });
+    }
+    applyResearchHypothesisFilters(researchQuickFilter);
+    return;
+  }
+
+  const manualCaptureOpen = event.target.closest("[data-manual-capture-open]");
+  if (manualCaptureOpen) {
+    event.preventDefault();
+    const modalId = String(manualCaptureOpen.getAttribute("data-manual-capture-open") || "").trim();
+    openManualCaptureDialog(modalId ? document.getElementById(modalId) : null);
+    return;
+  }
+
+  const manualCaptureClose = event.target.closest("[data-manual-capture-close]");
+  if (manualCaptureClose) {
+    event.preventDefault();
+    const modal = manualCaptureClose.closest("[data-manual-capture-dialog]");
+    const form = modal?.querySelector?.(".manual-capture-record-form");
+    const success = form?.querySelector?.("[data-manual-capture-success]");
+    closeManualCaptureDialog(modal, { force: Boolean(success && !success.hidden) });
+    return;
+  }
+
+  const aegisCommandAction = event.target.closest("[data-aegis-command-id]");
+  if (aegisCommandAction) {
+    event.preventDefault();
+    await runAegisCommandElement(aegisCommandAction);
+    return;
+  }
+
+  const candidateModalOpen = event.target.closest("[data-candidate-open-modal]");
+  if (candidateModalOpen) {
+    event.preventDefault();
+    const modalId = String(candidateModalOpen.getAttribute("data-candidate-open-modal") || "").trim();
+    const modal = modalId ? document.getElementById(modalId) : null;
+    if (modal?.showModal) {
+      modal.showModal();
+    } else if (modal) {
+      modal.hidden = false;
+    }
+    return;
+  }
+
+  const candidateModalClose = event.target.closest("[data-candidate-close-modal]");
+  if (candidateModalClose) {
+    event.preventDefault();
+    const modal = candidateModalClose.closest("dialog");
+    if (modal?.close) {
+      modal.close();
+    } else if (modal) {
+      modal.hidden = true;
+    }
+    return;
+  }
+
+  const edgeModalOpen = event.target.closest("[data-edge-open-modal]");
+  if (edgeModalOpen) {
+    event.preventDefault();
+    const modalId = String(edgeModalOpen.getAttribute("data-edge-open-modal") || "").trim();
+    const modal = modalId ? document.getElementById(modalId) : null;
+    if (modal?.showModal) {
+      modal.showModal();
+    } else if (modal) {
+      modal.hidden = false;
+    }
+    return;
+  }
+
+  const edgeModalClose = event.target.closest("[data-edge-close-modal]");
+  if (edgeModalClose) {
+    event.preventDefault();
+    const modal = edgeModalClose.closest("dialog");
+    if (modal?.close) {
+      modal.close();
+    } else if (modal) {
+      modal.hidden = true;
+    }
+    return;
+  }
+
   const copyButton = event.target.closest("[data-copy-source], [data-copy-text]");
   if (copyButton) {
     event.preventDefault();
@@ -477,6 +996,61 @@ async function handleClick(event) {
         // Keep UI fail-closed; no throwing on clipboard failures.
       }
     }
+    return;
+  }
+
+  const hypothesisDetailAction = event.target.closest("[data-hypothesis-detail-target]");
+  if (hypothesisDetailAction) {
+    event.preventDefault();
+    const panelId = String(hypothesisDetailAction.getAttribute("data-hypothesis-detail-target") || "").trim();
+    const panel = panelId ? document.getElementById(panelId) : null;
+    const card = hypothesisDetailAction.closest("[data-hypothesis-card]");
+    if (panel) {
+      panel.hidden = false;
+      panel.dataset.openedBy = String(hypothesisDetailAction.getAttribute("data-hypothesis-detail-action") || "View details");
+      document.body.dataset.hypothesisLastFocusToken = String(Date.now());
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      panel.focus?.({ preventScroll: true });
+      card?.classList.remove("hypothesis-card-highlight");
+      if (card) {
+        void card.offsetWidth;
+        card.classList.add("hypothesis-card-highlight");
+        window.setTimeout(() => card.classList.remove("hypothesis-card-highlight"), 2400);
+      }
+    }
+    return;
+  }
+
+  const hypothesisCardMessage = event.target.closest("[data-hypothesis-card-message]");
+  if (hypothesisCardMessage) {
+    event.preventDefault();
+    const card = hypothesisCardMessage.closest("[data-hypothesis-card]");
+    const output = card?.querySelector("[data-hypothesis-card-message-output]");
+    if (output) {
+      output.hidden = false;
+      output.textContent = String(hypothesisCardMessage.getAttribute("data-hypothesis-card-message") || "This action is not available for the current hypothesis state.");
+      document.body.dataset.hypothesisLastFocusToken = String(Date.now());
+      output.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    return;
+  }
+
+  const hypothesisSummaryCardTarget = event.target.closest("[data-hypothesis-summary-card-target]");
+  if (hypothesisSummaryCardTarget) {
+    event.preventDefault();
+    revealHypothesisSummaryTarget({
+      sectionTargetId: String(hypothesisSummaryCardTarget.getAttribute("data-hypothesis-summary-section-target") || "").trim(),
+      cardTargetId: String(hypothesisSummaryCardTarget.getAttribute("data-hypothesis-summary-card-target") || "").trim(),
+    });
+    return;
+  }
+
+  const hypothesisSummarySectionTarget = event.target.closest("[data-hypothesis-summary-section-target]");
+  if (hypothesisSummarySectionTarget) {
+    event.preventDefault();
+    revealHypothesisSummaryTarget({
+      sectionTargetId: String(hypothesisSummarySectionTarget.getAttribute("data-hypothesis-summary-section-target") || "").trim(),
+    });
     return;
   }
 
@@ -531,6 +1105,13 @@ async function handleClick(event) {
   const groupToggle = event.target.closest("[data-nav-group-toggle]");
   if (groupToggle) {
     event.preventDefault();
+    if (state.sidebarMode === "collapsed") {
+      const route = normalizePath(groupToggle.getAttribute("data-route") || "/aegis-opportunities");
+      history.pushState({}, "", route);
+      await renderRoute();
+      renderNav();
+      return;
+    }
     const groupId = String(groupToggle.getAttribute("data-nav-group-toggle") || "").trim();
     if (state.sidebarOpenGroups.has(groupId)) {
       state.sidebarOpenGroups.delete(groupId);
@@ -544,7 +1125,25 @@ async function handleClick(event) {
   const sidebarCollapse = event.target.closest("[data-sidebar-collapse]");
   if (sidebarCollapse) {
     event.preventDefault();
-    state.sidebarMode = state.sidebarMode === "expanded" ? "collapsed" : state.sidebarMode === "collapsed" ? "hidden" : "expanded";
+    state.sidebarMode = state.sidebarMode === "expanded" ? "collapsed" : "expanded";
+    localStorage.setItem("aegis.sidebar.mode", state.sidebarMode);
+    renderNav();
+    return;
+  }
+
+  const sidebarOpen = event.target.closest("[data-sidebar-open]");
+  if (sidebarOpen) {
+    event.preventDefault();
+    state.sidebarMode = "expanded";
+    localStorage.setItem("aegis.sidebar.mode", state.sidebarMode);
+    renderNav();
+    return;
+  }
+
+  const sidebarClose = event.target.closest("[data-sidebar-close]");
+  if (sidebarClose) {
+    event.preventDefault();
+    state.sidebarMode = "collapsed";
     localStorage.setItem("aegis.sidebar.mode", state.sidebarMode);
     renderNav();
     return;
@@ -582,6 +1181,13 @@ async function handleClick(event) {
     return;
   }
 
+  const refreshRouteButton = event.target.closest("[data-refresh-route]");
+  if (refreshRouteButton) {
+    event.preventDefault();
+    await renderRoute();
+    return;
+  }
+
   const artifactButton = event.target.closest("[data-artifact-path]");
   if (artifactButton) {
     event.preventDefault();
@@ -599,6 +1205,19 @@ async function handleClick(event) {
 }
 
 async function handleKeydown(event) {
+  const manualForm = event.target.closest?.(".manual-capture-record-form");
+  if (manualForm && event.key === "Enter" && !event.target.matches?.("textarea")) {
+    const saveButton = manualForm.querySelector("[data-manual-capture-save-button]");
+    if (!validateManualCaptureForm(manualForm, { showErrors: true }) || saveButton?.disabled) {
+      event.preventDefault();
+      return;
+    }
+    if (!event.target.matches?.("[data-manual-capture-save-button]")) {
+      event.preventDefault();
+      manualForm.requestSubmit?.(saveButton);
+      return;
+    }
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     togglePalette(true);
@@ -606,6 +1225,11 @@ async function handleKeydown(event) {
   }
   if (event.key === "Escape") {
     togglePalette(false);
+    if (window.matchMedia("(max-width: 900px)").matches && state.sidebarMode === "expanded") {
+      state.sidebarMode = "collapsed";
+      localStorage.setItem("aegis.sidebar.mode", state.sidebarMode);
+      renderNav();
+    }
     return;
   }
   const exceptionCard = event.target.closest?.("[data-exception-card]");
@@ -615,7 +1239,380 @@ async function handleKeydown(event) {
   }
 }
 
+function manualCaptureDraftPayload(form) {
+  const payload = {};
+  form.querySelectorAll("[data-manual-capture-draft-field]").forEach((field) => {
+    const key = field.getAttribute("data-manual-capture-draft-field");
+    if (!key || field.disabled) {
+      return;
+    }
+    payload[key] = field.value || "";
+  });
+  payload.updated_at = new Date().toISOString();
+  return payload;
+}
+
+function saveManualCaptureDraft(form) {
+  const key = String(form?.dataset?.manualCaptureDraftKey || "").trim();
+  if (!key) {
+    return;
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify(manualCaptureDraftPayload(form)));
+  } catch (_error) {
+    // Draft preservation is best-effort and never evidence authority.
+  }
+}
+
+function clearManualCaptureDraft(form) {
+  const key = String(form?.dataset?.manualCaptureDraftKey || "").trim();
+  if (!key) {
+    return;
+  }
+  try {
+    localStorage.removeItem(key);
+  } catch (_error) {
+    // Best-effort only.
+  }
+}
+
+function clearManualCaptureFieldErrors(form) {
+  form.querySelectorAll("[data-field-error-for]").forEach((node) => {
+    node.textContent = node.getAttribute("data-field-error-for") === "fill_time" ? "Saved as UTC." : "";
+    node.dataset.tone = "";
+  });
+  const summary = form.querySelector("[data-manual-capture-validation-summary]");
+  if (summary) {
+    summary.dataset.tone = "";
+  }
+}
+
+function operatorManualCaptureMessage(error) {
+  const raw = String(error?.payload?.human_message || error?.payload?.message || error?.message || "Manual capture could not be recorded.");
+  const technicalPatterns = ["captured_manually", "capture_status", "ManualCaptureDomain", "lineage hash", "construction contract", "RuntimeEvaluation"];
+  if (technicalPatterns.some((pattern) => raw.includes(pattern))) {
+    if (raw.toLowerCase().includes("fill_time") || raw.toLowerCase().includes("fill time")) {
+      return "Fill time is required.";
+    }
+    if (raw.toLowerCase().includes("refresh") || raw.toLowerCase().includes("lineage") || raw.toLowerCase().includes("runtime")) {
+      return "This ticket changed since the page loaded. Refresh and try again.";
+    }
+    return "Manual capture could not be recorded. Refresh the ticket and try again.";
+  }
+  return raw;
+}
+
+function applyManualCaptureFieldErrors(form, fieldErrors = {}) {
+  const entries = Object.entries(fieldErrors || {});
+  entries.forEach(([field, message]) => {
+    const node = form.querySelector(`[data-field-error-for="${field}"]`);
+    if (node) {
+      node.textContent = String(message || "Invalid value.");
+      node.dataset.tone = "error";
+    }
+  });
+  const summary = form.querySelector("[data-manual-capture-validation-summary]");
+  if (summary && entries.length) {
+    summary.textContent = entries.map(([, message]) => String(message)).join(" ");
+    summary.dataset.tone = "error";
+  }
+}
+
+function validateManualCaptureForm(form, { showErrors = false } = {}) {
+  if (!form) {
+    return false;
+  }
+  const data = new FormData(form);
+  const fieldErrors = {};
+  const rawFillTime = String(data.get("fill_time") || "").trim();
+  const fillPrice = String(data.get("fill_price") || "").trim();
+  const quantity = String(data.get("quantity") || "").trim();
+  if (!rawFillTime) {
+    fieldErrors.fill_time = "Fill time is required.";
+  } else if (Number.isNaN(new Date(rawFillTime).getTime())) {
+    fieldErrors.fill_time = "Fill time format is invalid.";
+  }
+  if (!fillPrice) {
+    fieldErrors.fill_price = "Fill price is required.";
+  } else if (!Number.isFinite(Number(fillPrice)) || Number(fillPrice) <= 0) {
+    fieldErrors.fill_price = "Fill price must be positive.";
+  }
+  if (!quantity) {
+    fieldErrors.quantity = "Quantity is required.";
+  } else if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) {
+    fieldErrors.quantity = "Quantity must be positive.";
+  }
+  clearManualCaptureFieldErrors(form);
+  if (showErrors && Object.keys(fieldErrors).length) {
+    applyManualCaptureFieldErrors(form, fieldErrors);
+  }
+  const saveButton = form.querySelector("[data-manual-capture-save-button]");
+  if (saveButton) {
+    saveButton.disabled = Object.keys(fieldErrors).length > 0;
+    saveButton.title = saveButton.disabled ? "Complete fill time, fill price, and quantity first." : "Record capture";
+  }
+  return Object.keys(fieldErrors).length === 0;
+}
+
+function refreshManualCaptureFormState(form) {
+  validateManualCaptureForm(form, { showErrors: false });
+}
+
+function setManualCaptureSaving(form, saving) {
+  form?.querySelectorAll?.("input, textarea, select, button").forEach((node) => {
+    if (node.matches?.("[data-manual-capture-close]") && !saving) {
+      node.disabled = false;
+      return;
+    }
+    node.disabled = Boolean(saving);
+  });
+  form?.classList?.toggle("is-saving", Boolean(saving));
+}
+
+function applyResearchHypothesisFilters(root = document) {
+  const pageRoot = root.closest?.("[data-research-page-root]") || document.querySelector("[data-research-page-root]") || document;
+  const searchInput = pageRoot.querySelector("[data-research-hypothesis-search]");
+  const filterRegion = pageRoot.querySelector("[data-research-hypothesis-search-region]");
+  const rawQuery = String(searchInput?.value || "").trim();
+  const query = rawQuery.toLowerCase();
+  if (query && filterRegion) {
+    filterRegion.dataset.activeFilter = "all";
+    filterRegion.querySelectorAll("[data-research-quick-filter]").forEach((button) => {
+      button.classList.toggle("is-active", button.getAttribute("data-research-quick-filter") === "all");
+    });
+  }
+  const activeFilter = query ? "all" : String(filterRegion?.dataset?.activeFilter || "all").trim().toLowerCase() || "all";
+  const inventoryRows = Array.from(pageRoot.querySelectorAll("[data-research-inventory-row]"));
+  const filterTargets = inventoryRows.length ? inventoryRows : Array.from(pageRoot.querySelectorAll("[data-research-discovery-card]"));
+  let visibleCount = 0;
+  filterTargets.forEach((row) => {
+    const text = String(row.getAttribute("data-research-search") || "").toLowerCase();
+    const tokens = String(row.getAttribute("data-research-filter-tokens") || "all").toLowerCase().split(/\s+/);
+    const matchQuery = !query || text.includes(query);
+    const matchFilter = activeFilter === "all" || tokens.includes(activeFilter);
+    const match = matchQuery && matchFilter;
+    row.hidden = !match;
+    if (match) visibleCount += 1;
+  });
+  const countNode = pageRoot.querySelector("[data-research-hypothesis-search-count]");
+  if (countNode) {
+    countNode.textContent = rawQuery ? `${visibleCount} results for ${rawQuery}` : `${visibleCount} hypotheses`;
+  }
+  const noResults = pageRoot.querySelector("[data-research-no-results]");
+  if (noResults) {
+    noResults.hidden = visibleCount !== 0;
+  }
+}
+
+function handleInput(event) {
+  const researchSearch = event.target.closest?.("[data-research-hypothesis-search]");
+  if (researchSearch) {
+    applyResearchHypothesisFilters(researchSearch);
+    return;
+  }
+
+  const form = event.target.closest?.(".manual-capture-record-form");
+  if (!form || !event.target.matches?.("[data-manual-capture-draft-field]")) {
+    return;
+  }
+  saveManualCaptureDraft(form);
+  validateManualCaptureForm(form, { showErrors: true });
+}
+
+function handleReset(event) {
+  const form = event.target.closest?.(".manual-capture-record-form");
+  if (!form) {
+    return;
+  }
+  clearManualCaptureDraft(form);
+  clearManualCaptureFieldErrors(form);
+}
+
+function handleCancel(event) {
+  const modal = event.target.closest?.("[data-manual-capture-dialog]");
+  if (!modal) {
+    return;
+  }
+  if (manualCaptureHasUnsavedDraft(modal) && !window.confirm("Discard unsaved manual capture draft?")) {
+    event.preventDefault();
+    return;
+  }
+  document.body.classList.remove("manual-capture-modal-open");
+}
+
 async function handleSubmit(event) {
+  const candidateActionForm = event.target.closest(".candidate-action-form");
+  if (candidateActionForm) {
+    event.preventDefault();
+    const formData = new FormData(candidateActionForm);
+    const statusNode = candidateActionForm.querySelector("[data-candidate-action-status]");
+    if (statusNode) {
+      statusNode.textContent = "Recording...";
+      statusNode.dataset.tone = "loading";
+    }
+    try {
+      const result = await executeCandidateWorkflow(formData, state);
+      if (statusNode) {
+        statusNode.textContent = result?.operator_statement || result?.message || "Operator action recorded.";
+        statusNode.dataset.tone = "ready";
+      }
+      const dialog = candidateActionForm.closest("dialog");
+      if (dialog?.close) {
+        dialog.close();
+      }
+      await renderRoute();
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.payload?.message || error?.message || "Operator action failed.";
+        statusNode.dataset.tone = "error";
+      }
+    }
+    return;
+  }
+
+
+  const manualCaptureRecordForm = event.target.closest(".manual-capture-record-form");
+  if (manualCaptureRecordForm) {
+    event.preventDefault();
+    const formData = new FormData(manualCaptureRecordForm);
+    if (event.submitter?.name) {
+      formData.set(event.submitter.name, event.submitter.value || "");
+    }
+    saveManualCaptureDraft(manualCaptureRecordForm);
+    if (!validateManualCaptureForm(manualCaptureRecordForm, { showErrors: true })) {
+      return;
+    }
+    const statusNode = manualCaptureRecordForm.querySelector("[data-manual-capture-record-status]");
+    if (statusNode) {
+      statusNode.textContent = "Recording capture...";
+      statusNode.dataset.tone = "loading";
+    }
+    setManualCaptureSaving(manualCaptureRecordForm, true);
+    try {
+      const result = await executeManualCaptureRecordWorkflow(formData, state);
+      clearManualCaptureDraft(manualCaptureRecordForm);
+      setManualCaptureSaving(manualCaptureRecordForm, false);
+      renderManualCaptureSuccess(manualCaptureRecordForm, result);
+      if (statusNode) {
+        statusNode.textContent = result?.operator_statement || result?.message || "Manual capture recorded. No broker action was taken.";
+        statusNode.dataset.tone = "ready";
+      }
+    } catch (error) {
+      setManualCaptureSaving(manualCaptureRecordForm, false);
+      applyManualCaptureFieldErrors(manualCaptureRecordForm, error?.fieldErrors || error?.payload?.field_errors || {});
+      if (statusNode) {
+        statusNode.textContent = operatorManualCaptureMessage(error);
+        statusNode.dataset.tone = "error";
+      }
+      refreshManualCaptureFormState(manualCaptureRecordForm);
+    }
+    return;
+  }
+
+  const edgeLabActionForm = event.target.closest(".edge-lab-action-form");
+  if (edgeLabActionForm) {
+    event.preventDefault();
+    const formData = new FormData(edgeLabActionForm);
+    const statusNode = edgeLabActionForm.querySelector("[data-edge-lab-action-status]");
+    if (statusNode) {
+      statusNode.textContent = "Working...";
+      statusNode.dataset.tone = "loading";
+    }
+    try {
+      const result = await executeEdgeLabWorkflow(formData, state);
+      if (statusNode) {
+        statusNode.textContent = result?.message || "Edge Lab action completed.";
+        statusNode.dataset.tone = "ready";
+      }
+      const dialog = edgeLabActionForm.closest("dialog");
+      if (dialog?.close) {
+        dialog.close();
+      }
+      await renderRoute();
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.payload?.message || error?.message || "Edge Lab action failed.";
+        statusNode.dataset.tone = "error";
+      }
+    }
+    return;
+  }
+
+  const researchDataAcquisitionForm = event.target.closest(".research-data-acquisition-form");
+  if (researchDataAcquisitionForm) {
+    event.preventDefault();
+    const formData = new FormData(researchDataAcquisitionForm);
+    const statusNode = researchDataAcquisitionForm.closest(".research-data-acquisition-plan")?.querySelector("[data-research-data-acquisition-status]");
+    if (statusNode) {
+      statusNode.textContent = "Queueing background refresh job...";
+      statusNode.dataset.tone = "loading";
+    }
+    try {
+      const result = await executeResearchDataAcquisitionWorkflow(formData, state);
+      if (statusNode) {
+        statusNode.textContent = result?.job_id ? `Background refresh queued: ${result.job_id} (${result.status || "QUEUED"})` : (result?.message || (result?.ok ? "Background refresh queued." : "Refresh job returned with warnings."));
+        statusNode.dataset.tone = result?.ok === false ? "error" : "ready";
+      }
+      await renderRoute();
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.payload?.message || error?.message || "Market data fetch failed.";
+        statusNode.dataset.tone = "error";
+      }
+    }
+    return;
+  }
+
+  const researchConsoleForm = event.target.closest(".research-console-form");
+  if (researchConsoleForm) {
+    event.preventDefault();
+    const formData = new FormData(researchConsoleForm);
+    const submitter = event.submitter || researchConsoleForm.querySelector('button[type="submit"]');
+    const statusNode = researchConsoleForm.querySelector("[data-research-console-status]") || document.querySelector("[data-research-console-status]");
+    const actionLabel = submitter?.textContent?.trim() || "Research action";
+    const progressText = researchConsoleProgressText(actionLabel);
+    const card = researchConsoleForm.closest("[data-hypothesis-card]") || researchConsoleForm.closest("[data-research-proposal-card]") || researchConsoleForm.closest("tr");
+    const buttons = Array.from(researchConsoleForm.querySelectorAll("button"));
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.dataset.originalText = button.dataset.originalText || button.textContent || "";
+    });
+    if (submitter) {
+      submitter.textContent = progressText;
+    }
+    card?.classList.add("research-action-pending");
+    if (statusNode) {
+      statusNode.textContent = progressText;
+      statusNode.dataset.tone = "loading";
+    }
+    try {
+      const result = await executeResearchConsoleWorkflow(formData, state);
+      if (statusNode) {
+        statusNode.textContent = result?.operator_message || result?.message || "Research Pipeline action completed.";
+        statusNode.dataset.tone = "ready";
+      }
+      await renderRoute();
+    } catch (error) {
+      state.researchConsoleWorkflow = {
+        lastAction: String(formData.get("research_action") || ""),
+        lastResult: null,
+        lastError: error?.payload || { message: error?.message || "Research Pipeline action failed." },
+      };
+      buttons.forEach((button) => {
+        button.disabled = false;
+        if (button.dataset.originalText) {
+          button.textContent = button.dataset.originalText;
+        }
+      });
+      card?.classList.remove("research-action-pending");
+      if (statusNode) {
+        statusNode.textContent = researchConsoleErrorText(error);
+        statusNode.dataset.tone = "error";
+      }
+    }
+    return;
+  }
+
   const reliabilityFilterForm = event.target.closest(".reliability-filter-form");
   if (reliabilityFilterForm) {
     event.preventDefault();
@@ -735,6 +1732,9 @@ export async function bootOperatorShell() {
   window.addEventListener("popstate", () => {
     renderRoute();
   });
+  window.addEventListener("resize", () => {
+    renderNav();
+  });
   window.addEventListener("aegis:connection-state", (event) => {
     state.connection = {
       ...state.connection,
@@ -752,6 +1752,18 @@ export async function bootOperatorShell() {
   });
   document.body.addEventListener("click", (event) => {
     handleClick(event);
+  });
+  document.body.addEventListener("input", (event) => {
+    handleInput(event);
+  });
+  document.body.addEventListener("change", (event) => {
+    handleInput(event);
+  });
+  document.body.addEventListener("reset", (event) => {
+    handleReset(event);
+  });
+  document.body.addEventListener("cancel", (event) => {
+    handleCancel(event);
   });
   document.body.addEventListener("submit", (event) => {
     handleSubmit(event);

@@ -68,8 +68,14 @@ def _control_plane_path(root: Path, day: str) -> Path:
     return (root / "reports" / "aegis_control_plane_v1" / day / "control_plane.v1.json").resolve()
 
 
-def _packet_status(root: Path, runtime_mode: str) -> Dict[str, Any]:
-    return packet_currentness_v1(runtime_root=root, runtime_mode=runtime_mode)
+def _packet_status(root: Path, runtime_mode: str, day_utc: str, runtime_evaluation_hash: str, runtime_evaluation_path: Path) -> Dict[str, Any]:
+    return packet_currentness_v1(
+        runtime_root=root,
+        runtime_mode=runtime_mode,
+        day_utc=day_utc,
+        runtime_evaluation_hash=runtime_evaluation_hash,
+        runtime_evaluation_path=str(runtime_evaluation_path),
+    )
 
 
 def _production_version_status(root: Path, runtime_mode: str) -> Dict[str, Any]:
@@ -559,6 +565,44 @@ def _overall_from_kernel(kernel: Dict[str, Any]) -> Tuple[str, str, str]:
     return ("NOT_READY", blocker, action)
 
 
+def _runtime_evaluation_authority(root: Path, day: str) -> Tuple[Dict[str, Any], Path, str]:
+    direct = (root / "reports" / "aegis_runtime_truth_kernel_v1" / day / "runtime_evaluation.v1.json").resolve()
+    doc, error = read_json_dict(direct)
+    if doc:
+        return (doc, direct, error)
+    return ({}, direct, error or "FILE_NOT_FOUND")
+
+
+def _overall_from_runtime_evaluation(evaluation: Dict[str, Any], error: str) -> Tuple[str, str, str]:
+    if not evaluation:
+        return ("BLOCKED", "RUNTIME_EVALUATION_MISSING", "Generate RuntimeEvaluation before using readiness views.")
+    caps = evaluation.get("capabilities") if isinstance(evaluation.get("capabilities"), dict) else {}
+    blocked = [name for name, row in caps.items() if isinstance(row, dict) and not bool(row.get("allowed", False))]
+    if error:
+        return ("BLOCKED", "RUNTIME_EVALUATION_READ_WARNING", "Inspect RuntimeEvaluation authority artifact.")
+    if blocked:
+        return ("BLOCKED", ",".join(sorted(blocked)[:5]), "Resolve RuntimeEvaluation blockers; UI is a derived view only.")
+    return ("READY", "", "No operator action required.")
+
+
+
+def _maturity_capture_projection(root: Path, day: str) -> Dict[str, Any]:
+    path = root / "reports" / "aegis_operational_maturity_hardening_v1" / day / "operational_maturity_hardening.v1.json"
+    doc, _error = read_json_dict(path)
+    if not isinstance(doc, dict) or not doc:
+        return {
+            "platform_capture_capability": "NOT_READY",
+            "capture_ticket_status": "NONE_AVAILABLE",
+            "capture_ticket_count": 0,
+            "operator_next_action": "No action required",
+        }
+    return {
+        "platform_capture_capability": str(doc.get("platform_capture_capability") or "NOT_READY"),
+        "capture_ticket_status": str(doc.get("capture_ticket_status") or "NONE_AVAILABLE"),
+        "capture_ticket_count": int(doc.get("capture_ticket_count") or 0),
+        "operator_next_action": str((doc.get("capture_ticket_projection") or {}).get("operator_next_action") or "No action required") if isinstance(doc.get("capture_ticket_projection"), dict) else "No action required",
+    }
+
 def build_readiness_kernel_v1(
     day: Optional[str] = None,
     *,
@@ -573,10 +617,17 @@ def build_readiness_kernel_v1(
     runtime_mode = runtime_mode_from_truth_root_v1(root)
     control_path = _control_plane_path(root, resolved_day)
     control, control_error = read_json_dict(control_path)
+    runtime_evaluation, runtime_evaluation_path, runtime_evaluation_error = _runtime_evaluation_authority(root, resolved_day)
+    runtime_overall_status, runtime_blocker, runtime_action = _overall_from_runtime_evaluation(runtime_evaluation, runtime_evaluation_error)
     control = control if isinstance(control, dict) else {}
-    packet = _packet_status(root, runtime_mode)
+    runtime_evaluation_hash = _as_text(runtime_evaluation.get("deterministic_output_hash")) if runtime_evaluation else ""
+    runtime_caps = runtime_evaluation.get("capabilities") if isinstance(runtime_evaluation.get("capabilities"), dict) else {}
+    packet = _packet_status(root, runtime_mode, resolved_day, runtime_evaluation_hash, runtime_evaluation_path)
     production_version = _production_version_status(root, runtime_mode)
     submit = _submit_projection(root, sleeve_root, resolved_day, runtime_mode)
+    capture_projection = _maturity_capture_projection(root, resolved_day)
+    if capture_projection["platform_capture_capability"] == "NOT_READY" and bool((runtime_caps.get("MANUAL_TRADE_CAPTURE_ALLOWED") or {}).get("allowed", False)):
+        capture_projection = {**capture_projection, "platform_capture_capability": "READY"}
     if not control:
         layers: List[Dict[str, Any]] = []
         overall_status = "UNKNOWN"
@@ -605,15 +656,43 @@ def build_readiness_kernel_v1(
         "environment": environment,
         "runtime_mode": runtime_mode,
         "truth_root": str(root),
-        "primary_ui_authority": "aegis_control_plane_v1",
-        "primary_authority_path": str(control_path),
+        "primary_ui_authority": "RuntimeEvaluation",
+        "primary_authority_path": str(runtime_evaluation_path),
         "control_plane_error": control_error or "",
-        "overall_status": overall_status,
-        "canonical_blocker": canonical_blocker,
+        "runtime_evaluation_error": runtime_evaluation_error or "",
+        "runtime_evaluation_hash": runtime_evaluation_hash,
+        "runtime_evaluation_path": str(runtime_evaluation_path),
+        "runtime_evaluation_capabilities": runtime_caps,
+        "trade_advice_allowed": bool((runtime_caps.get("TRADE_ADVICE_ALLOWED") or {}).get("allowed", False)) if runtime_caps else False,
+        "manual_trade_capture_allowed": bool((runtime_caps.get("MANUAL_TRADE_CAPTURE_ALLOWED") or {}).get("allowed", False)) if runtime_caps else False,
+        "platform_capture_capability": capture_projection["platform_capture_capability"],
+        "capture_ticket_status": capture_projection["capture_ticket_status"],
+        "capture_ticket_count": capture_projection["capture_ticket_count"],
+        "capture_ticket_operator_next_action": capture_projection["operator_next_action"],
+        "operator_mode": "manual_capture_only",
+        "manual_capture_only": True,
+        "manual_capture_status": capture_projection["platform_capture_capability"],
+        "submit_boundary_status": "VALIDATED",
+        "broker_submit_status": "DISABLED",
+        "ib_api_handshake_manual_capture_requirement": "NOT_REQUIRED",
+        "manual_capture_summary": [
+            f"Manual capture capability: {capture_projection['platform_capture_capability']}",
+            f"IB capture tickets: {capture_projection['capture_ticket_count']}",
+            f"Capture ticket status: {capture_projection['capture_ticket_status']}",
+            capture_projection["operator_next_action"],
+            "Submit-boundary VALIDATED",
+            "Broker submit DISABLED",
+            "IB handshake NOT REQUIRED FOR MANUAL CAPTURE",
+        ],
+        "broker_submit_enabled": False,
+        "paper_broker_simulation_enabled": False,
+        "autonomous_execution_allowed": False,
+        "overall_status": runtime_overall_status,
+        "canonical_blocker": runtime_blocker or canonical_blocker,
         "current_phase": current_phase,
         "blocker_owner": blocker_owner,
-        "operator_next_action": operator_next_action,
-        "recovery_action": operator_next_action,
+        "operator_next_action": runtime_action or operator_next_action,
+        "recovery_action": runtime_action or operator_next_action,
         "recovery_commands": recovery_commands,
         "evidence_paths": evidence_paths,
         "deferred_phases": deferred_phases,
@@ -626,8 +705,8 @@ def build_readiness_kernel_v1(
         "production_version": production_version,
         "production_version_status": production_version.get("status"),
         "promoted_commit": production_version.get("promoted_commit"),
-        "final_readiness_authority": "aegis_control_plane_v1",
-        "truth_resolution_source_path": str(control_path) if control else "",
+        "final_readiness_authority": "RuntimeEvaluation",
+        "truth_resolution_source_path": str(runtime_evaluation_path) if runtime_evaluation else "",
         "unified_truth_kernel_status": "SUPPORTING_EVIDENCE_ONLY",
         "supporting_evidence_only_paths": {
             "requirement_graph": _supporting_path(root, "aegis_requirement_graph_v1", resolved_day, "requirement_graph.v1.json"),

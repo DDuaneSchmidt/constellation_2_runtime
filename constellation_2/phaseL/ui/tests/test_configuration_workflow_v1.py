@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
 
 from constellation_2.phaseL.ui_api.configuration_workflow_v1 import (
     ConfigurationWorkflowApiError,
@@ -42,7 +43,7 @@ def _valid_payload() -> dict[str, object]:
 
 
 def test_configuration_route_and_endpoints_are_wired() -> None:
-    pages = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/pages/index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(ROOT)
     navigation = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/navigation_schema.js").read_text(encoding="utf-8")
     server = (ROOT / "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py").read_text(encoding="utf-8")
     domain_client = (
@@ -318,7 +319,7 @@ def test_reject_endpoint_sets_rejected_state(monkeypatch: pytest.MonkeyPatch, tm
 
 
 def test_locked_fields_are_not_exposed_as_editable_inputs() -> None:
-    pages = (ROOT / "constellation_2/phaseL/ui/static/operator_shell/pages/index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(ROOT)
     assert 'name="kill_switch.state"' not in pages
     assert 'name="broker.transmit_arming"' not in pages
     assert "Locked-By-Design Safety Fields" in pages

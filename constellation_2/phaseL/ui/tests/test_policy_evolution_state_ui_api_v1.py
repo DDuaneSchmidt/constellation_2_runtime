@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
+
 import pytest
 
 from constellation_2.common.policy_evolution_state_kernel_v1 import materialize_policy_evolution_state_v1
@@ -111,15 +113,13 @@ def test_policy_view_renders_governed_policy_artifacts_only(
 
 def test_command_and_policy_surfaces_are_policy_driven() -> None:
     root = Path(__file__).resolve().parents[4]
-    pages = (root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "pages" / "index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(root)
     system_summary = (root / "constellation_2" / "phaseL" / "ui_api" / "system_summary_read_model.py").read_text(encoding="utf-8")
     domain_client = (root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "domain_client" / "index.js").read_text(encoding="utf-8")
-    command_section = pages.split("async function renderCommandPage", 1)[1].split("async function renderPortfolioPage", 1)[0]
     policy_section = pages.split("async function renderPolicyPage", 1)[1].split("async function renderAdvisoryPage", 1)[0]
-    assert "policy_evolution_state_v1" in command_section
-    assert "fetchRefinement()" not in command_section
-    assert "fetchFinancialState()" not in command_section
     assert 'path: "/policy"' in pages
     assert "fetchPolicyEvolution()" in policy_section
+    assert "fetchRefinement()" not in policy_section
+    assert "fetchFinancialState()" not in policy_section
     assert "build_policy_evolution_view" in system_summary
     assert 'query("/api/policy-evolution")' in domain_client

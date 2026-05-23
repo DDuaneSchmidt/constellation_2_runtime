@@ -13,11 +13,12 @@ Constellation 2.0 — Phase L — Live Ops Dashboard
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,6 +38,207 @@ from constellation_2.common.runtime_contract_v1 import (
     resolve_canonical_truth_root,
     resolve_truth_sleeves_root,
 )
+from ops.aegis.runtime_truth_kernel_v1 import build_runtime_truth_kernel_v1, read_runtime_state_history_summary_v1
+from ops.tools.aegis_submit_enforcement_v1 import packet_currentness_v1
+from ops.aegis.intelligence_common_v1 import intelligence_summaries_v1, latest_json_v1
+from ops.aegis.canonical_operator_state_v1 import build_canonical_operator_state_v1, write_canonical_operator_state_v1
+from ops.aegis.candidate_lifecycle_v1 import append_candidate_review_action_v1, update_candidate_outcomes_v1
+from ops.aegis.position_management_v1 import (
+    append_position_event_correction_v1,
+    append_position_risk_plan_v1,
+    append_stop_event_v1,
+    build_position_management_v1,
+    write_position_management_reports_v1,
+)
+from ops.aegis.journal.journal_event_v1 import build_journal_timeline_v1, write_journal_timeline_v1
+from ops.aegis.candidate_manual_capture_v1 import append_manual_external_capture_v1
+from ops.aegis.candidate_decision_support_v1 import (
+    build_candidate_decision_support_payload_v1,
+    find_candidate_for_decision_support_v1,
+    build_candidate_decision_support_brief_v1,
+)
+from ops.aegis.operator_command_v1 import (
+    build_operator_projections_v1,
+    execute_operator_command_v1,
+    operator_command_registry_v1,
+)
+from ops.aegis.operator_action_command_contracts_v1 import (
+    command_registry_v1 as aegis_command_registry_v1,
+    execute_aegis_command_v1,
+    validate_command_registry_v1 as validate_aegis_command_registry_v1,
+)
+from ops.aegis.domain_certification_v1 import build_domain_certification_report_v1
+from ops.aegis.domain_repair_orchestrator_v1 import run_domain_repair_orchestration_v1
+from ops.aegis.repair_center_projection_v1 import build_repair_center_projection_v1
+from ops.aegis.data_remediation_v1 import (
+    classify_data_blockers_v1,
+    get_remediation_attempt_v1,
+    latest_remediation_v1,
+    run_data_remediation_v1,
+)
+from ops.aegis.operator_state.canonical_operator_state_builder_v1 import (
+    load_or_build_operator_state_snapshot_response_v1,
+    api_envelope_v1 as operator_state_api_envelope_v1,
+)
+from ops.aegis.operator_state.current_operator_truth_resolver_v1 import (
+    api_envelope_v1 as current_operator_truth_api_envelope_v1,
+    resolve_current_operator_truth_v1,
+)
+from ops.aegis.operator_state.manual_capture_record_v1 import (
+    append_manual_capture_record_v1,
+    latest_manual_capture_record_v1,
+    list_manual_capture_records_v1,
+)
+from ops.aegis.thesis_graph.thesis_graph_v1 import load_or_build_thesis_graph_response_v1
+# Compatibility: legacy trade_candidate_projection_v1 remains in snapshots; manual-capture authority is TradeLifecycleCase -> ReadinessDomainEvaluation -> TradeTicketProjection.
+from ops.aegis.trade_lifecycle.paper_trade_construction_v1 import (
+    latest_paper_trade_construction_v1,
+    paper_trade_construction_view_v1,
+)
+from ops.aegis.trade_lifecycle.trade_lifecycle_case_v1 import latest_trade_lifecycle_case_v1
+from ops.aegis.trade_lifecycle.trade_case_projection_v1 import trade_case_projection_v1
+from ops.aegis.trade_lifecycle.trade_ticket_projection_v1 import (
+    latest_trade_ticket_projection_v1,
+    trade_ticket_projection_v1,
+)
+from ops.aegis.universe.canonical_universe_authority_v1 import (
+    canonical_universe_health_v1,
+    latest_canonical_universe_authority_v1,
+)
+from ops.aegis.trade_lifecycle.readiness_domain_evaluation_v1 import (
+    blockers_by_domain_v1,
+    domain_status_map_v1,
+    latest_readiness_domain_evaluations_v1,
+)
+from ops.aegis.eod_opportunity_outcome_report_v1 import (
+    build_eod_opportunity_outcome_report_v1,
+    eod_sleeve_history_v1,
+    read_eod_opportunity_outcome_report_by_id_v1,
+    read_eod_opportunity_outcome_report_v1,
+    read_latest_eod_opportunity_outcome_report_v1,
+)
+from ops.aegis.candidate_review_ledger_v1 import build_candidate_review_ledger_v1, filter_candidate_review_ledger_v1, write_candidate_review_ledger_v1
+from ops.aegis.research_hypothesis_classification_v1 import (
+    build_research_hypothesis_classification_v1,
+    write_research_hypothesis_classification_v1,
+)
+from ops.aegis.research_lab.research_pipeline_v1 import (
+    append_research_review_decision_v1,
+    append_triage_record_v1,
+    build_research_pipeline_v1,
+    build_research_plan_v1,
+    run_research_test_v1,
+    write_research_pipeline_v1,
+    write_research_plan_v1,
+    write_research_test_result_v1,
+)
+from ops.aegis.research_lab.research_lab_routes import (
+    research_lab_blocked_evidence_console_v1,
+    research_lab_blocked_work_console_v1,
+    research_lab_console_action_failure_response_v1,
+    research_lab_console_assess_hypothesis_v1,
+    research_lab_console_convert_hypothesis_v1,
+    research_lab_console_dossier_v1,
+    research_lab_console_review_hypothesis_v1,
+    research_lab_console_v1,
+    research_lab_challenger_comparison_report_v1,
+    research_lab_challenger_comparison_reports_v1,
+    research_lab_challenger_evidence_batch_v1,
+    research_lab_challenger_evidence_batches_v1,
+    research_lab_challenger_evidence_completeness_v1,
+    research_lab_challenger_evidence_lineage_v1,
+    research_lab_challenger_blockers_v1,
+    research_lab_backlog_priority_v1,
+    research_lab_challenger_track_v1,
+    research_lab_challenger_tracks_v1,
+    research_lab_challenger_variant_v1,
+    research_lab_challenger_variants_v1,
+    research_lab_edge_lab_projection_v1,
+    research_lab_expectancy_drift_latest_v1,
+    research_lab_evidence_console_v1,
+    research_lab_evidence_inventory_v1,
+    research_lab_evidence_chain_v1,
+    research_lab_evidence_summary_v1,
+    research_lab_health_v1,
+    research_lab_human_review_dossier_v1,
+    research_lab_human_review_dossiers_v1,
+    research_lab_human_review_decision_latest_v1,
+    research_lab_human_review_decision_read_model_v1,
+    research_lab_human_review_decision_v1,
+    research_lab_human_review_decisions_v1,
+    research_lab_human_review_dossier_decisions_v1,
+    research_lab_human_review_decision_paper_trial_proposals_v1,
+    research_lab_hypothesis_intake_batch_latest_v1,
+    research_lab_hypothesis_intake_batch_v1,
+    research_lab_hypothesis_intake_batches_v1,
+    research_lab_hypothesis_intake_decision_latest_v1,
+    research_lab_hypothesis_intake_decision_v1,
+    research_lab_hypothesis_intake_decisions_v1,
+    research_lab_hypothesis_proposal_batch_latest_v1,
+    research_lab_hypothesis_proposal_batch_v1,
+    research_lab_hypothesis_proposal_batches_v1,
+    research_lab_hypothesis_proposal_latest_v1,
+    research_lab_hypothesis_proposal_review_batch_latest_v1,
+    research_lab_hypothesis_proposal_review_batch_v1,
+    research_lab_hypothesis_proposal_review_batches_v1,
+    research_lab_hypothesis_proposal_review_latest_v1,
+    research_lab_hypothesis_proposal_review_v1,
+    research_lab_hypothesis_proposal_reviews_for_proposal_v1,
+    research_lab_hypothesis_proposal_reviews_v1,
+    research_lab_hypothesis_proposal_v1,
+    research_lab_hypothesis_queue_v1,
+    research_lab_projection_health_v1,
+    research_lab_rebuild_projections_v1,
+    research_lab_validate_projections_v1,
+    research_lab_hypothesis_proposals_v1,
+    research_lab_hypothesis_proposal_assess_readiness_v1,
+    research_lab_hypothesis_proposal_dossier_v1,
+    research_lab_hypothesis_proposal_review_append_v1,
+    research_lab_research_intake_queue_v1,
+    research_lab_research_plans_console_v1,
+    research_lab_integrity_latest_summary_v1,
+    research_lab_integrity_report_latest_v1,
+    research_lab_integrity_report_v1,
+    research_lab_integrity_reports_v1,
+    research_lab_operator_home_v1,
+    research_lab_observation_candidate_batch_latest_v1,
+    research_lab_observation_candidate_batch_v1,
+    research_lab_observation_candidate_batches_v1,
+    research_lab_observation_candidate_latest_v1,
+    research_lab_observation_candidate_v1,
+    research_lab_observation_candidates_v1,
+    research_lab_observation_cluster_batch_latest_v1,
+    research_lab_observation_cluster_batch_v1,
+    research_lab_observation_cluster_batches_v1,
+    research_lab_observation_cluster_latest_v1,
+    research_lab_observation_cluster_v1,
+    research_lab_observation_cluster_hypothesis_proposals_v1,
+    research_lab_observation_clusters_v1,
+    research_lab_paper_trial_inventory_v1,
+    research_lab_paper_trial_proposal_latest_v1,
+    research_lab_paper_trial_proposal_v1,
+    research_lab_paper_trial_proposals_v1,
+    research_lab_paper_trial_summary_v1,
+    research_lab_paper_trials_console_v1,
+    research_lab_regime_fragility_latest_v1,
+    research_lab_research_hypothesis_latest_v1,
+    research_lab_research_backlog_console_v1,
+    research_lab_research_hypothesis_v1,
+    research_lab_research_hypotheses_v1,
+    research_lab_sleeve_review_center_console_v1,
+    research_lab_sleeve_v1,
+    research_lab_sleeve_comparison_v1,
+    research_lab_sleeve_stability_latest_v1,
+    research_lab_sleeve_stability_v1,
+    research_lab_sleeves_v1,
+    research_lab_status_latest_v1,
+    research_lab_status_report_v1,
+    research_lab_start_research_options_v1,
+    research_lab_start_research_v1,
+    research_lab_status_reports_v1,
+    research_lab_explicit_action_placeholder_v1,
+)
+from ops.tools.write_aegis_operator_brief_v1 import build_operator_brief_v1, write_operator_brief_v1
 from constellation_2.phaseL.ui_api import (
     STATUS_SEMANTICS,
     build_action_inventory,
@@ -164,6 +366,194 @@ RUNTIME_ROOT = Path(os.environ.get("C2_RUNTIME_STATE_ROOT", "/home/node/constell
 PROJECTION_CONTRACT_VERSION = "aegis_ui_projection.v1"
 PERFORMANCE_SHOWCASE_FAMILY = "aegis_performance_showcase_v1"
 PERFORMANCE_SHOWCASE_HTML = "aegis_performance_showcase.v1.html"
+EDGE_LAB_UI_ACTION_FAMILY = "aegis_edge_lab_ui_actions_v1"
+
+
+class EdgeLabWorkflowApiError(Exception):
+    def __init__(self, message: str, *, status_code: HTTPStatus = HTTPStatus.BAD_REQUEST, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.details = details or {}
+
+
+def _edge_lab_safety_fields() -> Dict[str, bool]:
+    return {
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "automatic_sleeve_mutation_allowed": False,
+        "human_approval_required": True,
+    }
+
+
+def _edge_lab_request_hash(payload: Dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _edge_lab_action_id(payload: Dict[str, Any]) -> str:
+    return hashlib.sha256(f"{_utc_now_iso()}|{_edge_lab_request_hash(payload)}".encode("utf-8")).hexdigest()[:24]
+
+
+def _edge_lab_day(day: Optional[str]) -> str:
+    return day if isinstance(day, str) and _is_day_str(day) else date.today().isoformat()
+
+
+def _edge_lab_item(payload: Dict[str, Any], hypothesis_id: str) -> Dict[str, Any]:
+    for item in payload.get("items") or []:
+        if str(item.get("hypothesis_id") or "") == str(hypothesis_id):
+            return item
+    raise EdgeLabWorkflowApiError("Hypothesis not found.", status_code=HTTPStatus.NOT_FOUND, details={"hypothesis_id": hypothesis_id})
+
+
+def _edge_lab_regenerate(root: Path, day: str) -> Dict[str, Any]:
+    classification = build_research_hypothesis_classification_v1(truth_root=root, day_utc=day)
+    classification_paths = write_research_hypothesis_classification_v1(truth_root=root, day_utc=day, payload=classification)
+    pipeline = build_research_pipeline_v1(truth_root=root, day_utc=day)
+    pipeline_paths = write_research_pipeline_v1(truth_root=root, day_utc=day, payload=pipeline)
+    canonical = build_canonical_operator_state_v1(truth_root=root, repo_root=REPO_ROOT, day_utc=day)
+    canonical_paths = write_canonical_operator_state_v1(truth_root=root, day_utc=day, payload=canonical)
+    brief = build_operator_brief_v1(canonical=canonical, canonical_path=Path(canonical_paths["json"]))
+    brief_paths = write_operator_brief_v1(truth_root=root, day_utc=day, payload=brief)
+    return {
+        "classification": classification_paths,
+        "research_pipeline": pipeline_paths,
+        "canonical_operator_state": canonical_paths,
+        "operator_brief": brief_paths,
+        "pipeline": pipeline,
+    }
+
+
+def _append_edge_lab_ui_action(root: Path, day: str, event: Dict[str, Any]) -> Path:
+    out_dir = root / "reports" / EDGE_LAB_UI_ACTION_FAMILY / day
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "edge_lab_ui_actions.v1.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+    return path
+
+
+def _edge_lab_action_response(root: Path, day: str, request_payload: Dict[str, Any], *, action_type: str, hypothesis_id: str, from_gate: str, to_gate: str, generated_artifacts: Dict[str, Any], result: Dict[str, Any], operator: str, reason: str, success: bool = True, error: str = "") -> Dict[str, Any]:
+    refreshed = _edge_lab_regenerate(root, day)
+    updated_item = _edge_lab_item(refreshed["pipeline"], hypothesis_id)
+    event = {
+        "action_id": _edge_lab_action_id(request_payload),
+        "hypothesis_id": hypothesis_id,
+        "from_gate": from_gate,
+        "to_gate": updated_item.get("current_gate") or to_gate,
+        "action_type": action_type,
+        "operator": operator,
+        "reason": reason,
+        "timestamp_utc": _utc_now_iso(),
+        "request_payload_hash": _edge_lab_request_hash(request_payload),
+        "generated_artifacts": generated_artifacts,
+        **_edge_lab_safety_fields(),
+        "success": success,
+        "error": error,
+    }
+    action_log = _append_edge_lab_ui_action(root, day, event)
+    return {
+        "ok": success,
+        "day_utc": day,
+        "hypothesis_id": hypothesis_id,
+        "from_gate": from_gate,
+        "to_gate": updated_item.get("current_gate"),
+        "message": _edge_lab_message(action_type, updated_item, result),
+        "hypothesis": updated_item,
+        "result": result,
+        "generated_artifacts": generated_artifacts,
+        "edge_lab_ui_action_log": str(action_log),
+        **_edge_lab_safety_fields(),
+    }
+
+
+def _edge_lab_message(action_type: str, item: Dict[str, Any], result: Dict[str, Any]) -> str:
+    if action_type == "TRIAGE":
+        gate = str(item.get("current_gate") or "")
+        if gate == "TEST_PLAN":
+            return "Queued for test planning."
+        if gate == "REJECTED_ARCHIVED":
+            return "Hypothesis rejected or archived."
+        return "Hypothesis triage recorded."
+    if action_type == "BUILD_PLAN":
+        if str(item.get("current_gate") or "") == "TESTING":
+            return "Research plan created. Ready for testing."
+        return "Research plan created; gate blocker remains visible."
+    if action_type == "RUN_TEST":
+        status = str(result.get("test_status") or "UNKNOWN")
+        if status == "DATA_NEEDED":
+            blocker = str(result.get("blocker") or "")
+            if blocker == "EARNINGS_EVENT_CALENDAR_REQUIRED":
+                return "Cannot run test yet. External earnings calendar required."
+            if blocker == "EVENT_WINDOW_OHLCV_DATA_REQUIRED":
+                return "Cannot run test yet. Event-window OHLCV dataset required."
+            return str(result.get("result_summary") or "Cannot run test yet. Required research data is missing.")
+        if status == "TEST_NOT_IMPLEMENTED":
+            return "Test runner not implemented for this event study."
+        return "Research test result generated for review."
+    if action_type == "REVIEW":
+        return "Research review decision recorded."
+    return "Edge Lab action completed."
+
+
+def execute_edge_lab_workflow_action_v1(*, truth_root: Path, day_utc: str, endpoint: str, request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    root = Path(truth_root).expanduser().resolve()
+    day = _edge_lab_day(day_utc)
+    hypothesis_id = str(request_payload.get("hypothesis_id") or "").strip()
+    if not hypothesis_id:
+        raise EdgeLabWorkflowApiError("hypothesis_id is required.", details={"field": "hypothesis_id"})
+    operator = str(request_payload.get("operator") or "David").strip() or "David"
+    reason = str(request_payload.get("reason") or "").strip()
+    pipeline = build_research_pipeline_v1(truth_root=root, day_utc=day)
+    item = _edge_lab_item(pipeline, hypothesis_id)
+    from_gate = str(item.get("current_gate") or "UNKNOWN")
+
+    if endpoint == "triage":
+        decision = str(request_payload.get("decision") or "").strip().upper()
+        if not reason:
+            raise EdgeLabWorkflowApiError("reason is required for triage.")
+        allowed = {
+            "QUEUE_TEST_PLAN": {"from": {"INBOX", "TRIAGE"}, "to": "TEST_PLAN"},
+            "REJECT": {"from": {"INBOX", "TRIAGE"}, "to": "REJECTED_ARCHIVED"},
+            "ARCHIVE": {"from": {"INBOX", "TRIAGE"}, "to": "REJECTED_ARCHIVED"},
+            "NEEDS_CLARIFICATION": {"from": {"INBOX"}, "to": "TRIAGE"},
+        }
+        spec = allowed.get(decision)
+        if not spec or from_gate not in spec["from"]:
+            raise EdgeLabWorkflowApiError("Invalid research pipeline transition.", status_code=HTTPStatus.CONFLICT, details={"from_gate": from_gate, "decision": decision})
+        event = append_triage_record_v1(truth_root=root, day_utc=day, hypothesis_id=hypothesis_id, decision=decision, reason=reason, operator=operator)
+        return _edge_lab_action_response(root, day, request_payload, action_type="TRIAGE", hypothesis_id=hypothesis_id, from_gate=from_gate, to_gate=spec["to"], generated_artifacts={"triage_event": event.get("path", "")}, result=event, operator=operator, reason=reason)
+
+    if endpoint == "build-plan":
+        if from_gate != "TEST_PLAN":
+            raise EdgeLabWorkflowApiError("Invalid research pipeline transition.", status_code=HTTPStatus.CONFLICT, details={"from_gate": from_gate, "required_gate": "TEST_PLAN"})
+        plan = build_research_plan_v1(truth_root=root, day_utc=day, hypothesis_id=hypothesis_id)
+        paths = write_research_plan_v1(truth_root=root, day_utc=day, payload=plan)
+        return _edge_lab_action_response(root, day, request_payload, action_type="BUILD_PLAN", hypothesis_id=hypothesis_id, from_gate=from_gate, to_gate="TESTING", generated_artifacts=paths, result=plan, operator=operator, reason=reason or "UI confirmed build research test plan.")
+
+    if endpoint == "run-test":
+        if from_gate != "TESTING":
+            raise EdgeLabWorkflowApiError("Invalid research pipeline transition.", status_code=HTTPStatus.CONFLICT, details={"from_gate": from_gate, "required_gate": "TESTING"})
+        result = run_research_test_v1(truth_root=root, day_utc=day, hypothesis_id=hypothesis_id)
+        paths = write_research_test_result_v1(truth_root=root, day_utc=day, payload=result)
+        return _edge_lab_action_response(root, day, request_payload, action_type="RUN_TEST", hypothesis_id=hypothesis_id, from_gate=from_gate, to_gate="RESULT_REVIEW", generated_artifacts=paths, result=result, operator=operator, reason=reason or "UI confirmed run research test.")
+
+    if endpoint == "review":
+        decision = str(request_payload.get("decision") or "").strip().upper()
+        if not reason:
+            raise EdgeLabWorkflowApiError("reason is required for review.")
+        allowed = {
+            "PAPER_TEST_CANDIDATE": "PAPER_TRIAL",
+            "SLEEVE_REVIEW_CANDIDATE": "SLEEVE_REVIEW",
+            "REJECTED": "REJECTED_ARCHIVED",
+            "REJECT": "REJECTED_ARCHIVED",
+            "ARCHIVE": "REJECTED_ARCHIVED",
+            "NEEDS_MORE_EVIDENCE": "RESULT_REVIEW",
+        }
+        if from_gate != "RESULT_REVIEW" or decision not in allowed:
+            raise EdgeLabWorkflowApiError("Invalid research pipeline transition.", status_code=HTTPStatus.CONFLICT, details={"from_gate": from_gate, "decision": decision})
+        event = append_research_review_decision_v1(truth_root=root, day_utc=day, hypothesis_id=hypothesis_id, decision=decision, reason=reason, operator=operator)
+        return _edge_lab_action_response(root, day, request_payload, action_type="REVIEW", hypothesis_id=hypothesis_id, from_gate=from_gate, to_gate=allowed[decision], generated_artifacts={"review_event": event.get("path", "")}, result=event, operator=operator, reason=reason)
+
+    raise EdgeLabWorkflowApiError("Endpoint not found.", status_code=HTTPStatus.NOT_FOUND, details={"endpoint": endpoint})
 
 
 def _known_truth_roots() -> List[Path]:
@@ -301,6 +691,14 @@ def _latest_packet_path() -> Path:
     ).resolve()
 
 
+def _json_error_payload(message: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(message)
+    except Exception:
+        return {"message": message}
+    return payload if isinstance(payload, dict) else {"message": message}
+
+
 def _projection_day(raw_day: Optional[str] = None) -> str:
     if isinstance(raw_day, str) and _is_day_str(raw_day):
         return raw_day
@@ -309,6 +707,92 @@ def _projection_day(raw_day: Optional[str] = None) -> str:
     if days:
         return days[-1]
     return date.today().isoformat()
+
+
+def _operator_truth_day(raw_day: Optional[str] = None) -> str:
+    if isinstance(raw_day, str) and _is_day_str(raw_day):
+        return raw_day
+    return date.today().isoformat()
+
+
+def _enqueue_data_remediation_job_v1(*, truth_root: Path, day_utc: str, playbook_id: str, request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    playbook = playbook_id or "refresh_required_symbol_data"
+    job_key = {"day_utc": day_utc, "playbook_id": playbook, "symbols": request_payload.get("symbols") or []}
+    job_id = f"data-remediation-job:{day_utc}:{hashlib.sha256(json.dumps(job_key, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]}"
+    out_dir = Path(truth_root).expanduser().resolve() / "reports" / "aegis_data_remediation_jobs_v1" / day_utc
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{job_id.replace(':', '_')}.json"
+    market_path = Path(truth_root).expanduser().resolve() / "reports" / "aegis_market_data_v1" / day_utc / "market_data.v1.json"
+    market: Dict[str, Any] = {}
+    try:
+        market = json.loads(market_path.read_text(encoding="utf-8")) if market_path.exists() else {}
+    except Exception:
+        market = {}
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    current_truth: Dict[str, Any] = {}
+    current_day_status: Dict[str, Any] = {}
+    try:
+        current_truth = resolve_current_operator_truth_v1(truth_root=truth_root, day_utc=day_utc)
+        current_day_status = current_truth.get("current_day_status") if isinstance(current_truth.get("current_day_status"), dict) else {}
+    except Exception:
+        current_truth = {}
+        current_day_status = {}
+    dynamic_status = {
+        "last_attempt": market.get("last_attempt") if isinstance(market.get("last_attempt"), dict) else {"attempted_at_utc": str(market.get("generated_at_utc") or current_day_status.get("last_attempt_time") or ""), "provider_status": str(market.get("status") or current_day_status.get("status") or ""), "error": str(market.get("failure_reason") or current_day_status.get("blocker") or "")},
+        "last_error": str(market.get("failure_reason") or current_day_status.get("blocker") or ""),
+        "next_retry_utc": str(market.get("next_retry_utc") or current_day_status.get("next_retry_utc") or (now + timedelta(minutes=15)).isoformat().replace("+00:00", "Z")),
+        "validation_status": str(market.get("freshness_state") or market.get("validation_status") or current_day_status.get("validation_status") or current_day_status.get("freshness_state") or market.get("operator_market_data_state") or "UNKNOWN"),
+    }
+    if out_path.exists():
+        try:
+            existing = json.loads(out_path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                refreshed = {**existing, **dynamic_status, "job_already_existed": True, "job_path": str(out_path)}
+                out_path.write_text(json.dumps({k: v for k, v in refreshed.items() if k not in {"job_already_existed", "job_path"}}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                return refreshed
+        except Exception:
+            pass
+    payload = {
+        "schema_id": "aegis_data_remediation_background_job",
+        "schema_version": "v1",
+        "job_id": job_id,
+        "day_utc": day_utc,
+        "playbook_id": playbook,
+        "status": "QUEUED",
+        "idempotency_key": hashlib.sha256(json.dumps(job_key, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "queued_at_utc": now.isoformat().replace("+00:00", "Z"),
+        **dynamic_status,
+        "broker_execution_allowed": False,
+        "order_routing_allowed": False,
+        "live_trading_allowed": False,
+        "autonomous_execution_allowed": False,
+    }
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {**payload, "job_already_existed": False, "job_path": str(out_path)}
+
+
+def _projection_day_for_report(raw_day: Optional[str], family: str) -> str:
+    if isinstance(raw_day, str) and _is_day_str(raw_day):
+        return raw_day
+    canonical_root = _canonical_truth_root()
+    candidate_roots = [(canonical_root / "reports" / family).resolve()]
+    if family == "aegis_canonical_operator_state_v1":
+        alt_truth = Path("/home/node/constellation_2_runtime/constellation_2/runtime/truth").resolve()
+        if not str(canonical_root).startswith("/tmp/"):
+            candidate_roots.extend(
+                [
+                    (alt_truth / "reports" / "operator_state_snapshot_v1").resolve(),
+                    (alt_truth / "reports" / "portfolio_gate_candidate_report_v1").resolve(),
+                ]
+            )
+    elif family == "operator_state_snapshot_v1":
+        alt_truth = Path("/home/node/constellation_2_runtime/constellation_2/runtime/truth").resolve()
+        if not str(canonical_root).startswith("/tmp/"):
+            candidate_roots.append((alt_truth / "reports" / family).resolve())
+    days = sorted({day for root in candidate_roots for day in _list_day_dirs(root)})
+    if days:
+        return days[-1]
+    return _projection_day(raw_day)
 
 
 def _canonical_report_path(family: str, day_utc: str, filename: str) -> Path:
@@ -347,6 +831,352 @@ def _artifact_projection_payload(
         "truth_root": str(_canonical_truth_root()),
         "artifact_path": str(path),
         "data": payload,
+    }
+
+
+def _operator_cockpit_payload(truth_root: Path, day_utc: str) -> Dict[str, Any]:
+    canonical_path, canonical = latest_json_v1(
+        truth_root,
+        "aegis_canonical_operator_state_v1",
+        day_utc,
+        "canonical_operator_state.v1.json",
+    )
+    brief_path, brief = latest_json_v1(
+        truth_root,
+        "aegis_operator_brief_v1",
+        day_utc,
+        "operator_brief.v1.json",
+    )
+    runtime_truth_path, runtime_truth = latest_json_v1(
+        truth_root,
+        "aegis_runtime_truth_kernel_v1",
+        day_utc,
+        "runtime_truth_kernel.v1.json",
+    )
+    canonical_available = bool(canonical_path and canonical)
+    brief_available = bool(brief_path and brief)
+    runtime_truth_available = bool(runtime_truth_path and runtime_truth)
+    runtime_evaluation_path = (truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json").resolve()
+    runtime_evaluation, runtime_evaluation_error = _safe_read_json(runtime_evaluation_path)
+    runtime_evaluation = runtime_evaluation if isinstance(runtime_evaluation, dict) else {}
+    runtime_evaluation_hash = str(runtime_evaluation.get("deterministic_output_hash") or "")
+    control_packet_freshness = packet_currentness_v1(
+        runtime_root=truth_root,
+        runtime_mode="",
+        day_utc=day_utc,
+        runtime_evaluation_hash=runtime_evaluation_hash,
+        runtime_evaluation_path=str(runtime_evaluation_path),
+    )
+    runtime_authority = {
+        "authority": "RuntimeEvaluation",
+        "runtime_evaluation_hash": runtime_evaluation_hash,
+        "runtime_evaluation_path": str(runtime_evaluation_path),
+        "runtime_evaluation_error": runtime_evaluation_error or "",
+        "trade_advice_allowed": bool(((runtime_evaluation.get("capabilities") if isinstance(runtime_evaluation.get("capabilities"), dict) else {}).get("TRADE_ADVICE_ALLOWED") or {}).get("allowed", False)),
+        "manual_trade_capture_allowed": bool(((runtime_evaluation.get("capabilities") if isinstance(runtime_evaluation.get("capabilities"), dict) else {}).get("MANUAL_TRADE_CAPTURE_ALLOWED") or {}).get("allowed", False)),
+        "control_packet_readiness_usage": "EXPLANATORY_ONLY",
+    }
+    canonical_freshness = canonical.get("freshness") if isinstance(canonical.get("freshness"), dict) else {}
+    canonical_runtime_freshness = canonical_freshness.get("runtime_truth") if isinstance(canonical_freshness.get("runtime_truth"), dict) else {}
+    source_status = {
+        "canonical_state": "available" if canonical_available else "missing",
+        "operator_brief": "available" if brief_available else "missing",
+        "runtime_truth": "available" if (canonical_runtime_freshness.get("found") is True or runtime_truth_available) else "unavailable",
+        "canonical_generated_at": canonical.get("generated_at_utc") if isinstance(canonical, dict) else None,
+        "operator_brief_generated_at": brief.get("generated_at_utc") if isinstance(brief, dict) else None,
+        "runtime_truth_generated_at": canonical_runtime_freshness.get("generated_at") or ((runtime_truth.get("generated_at_utc") or runtime_truth.get("generated_at")) if isinstance(runtime_truth, dict) else None),
+    }
+    if not canonical_available:
+        return {
+            "ok": True,
+            "status": "MISSING",
+            "message": "Today's operator state has not been generated yet.",
+            "day_utc": day_utc,
+            "generated_at_utc": None,
+            "read_only": True,
+            "source_read_model": "canonical_operator_state.v1.json",
+            "source_status": source_status,
+            "source_paths": {
+                "canonical_operator_state": str(canonical_path or ""),
+                "operator_brief": str(brief_path or ""),
+                "runtime_truth": str(runtime_truth_path or ""),
+                "runtime_evaluation": str(runtime_evaluation_path),
+                "control_packet": str(control_packet_freshness.get("path") or ""),
+            },
+            "runtime_evaluation_authority": runtime_authority,
+            "control_packet_freshness": control_packet_freshness,
+            "canonical_operator_state": {},
+            "current_operator_truth": resolve_current_operator_truth_v1(truth_root=truth_root, day_utc=day_utc),
+            "operator_brief": brief if isinstance(brief, dict) else {},
+            "runtime": {"runtime_truth_classification": "UNKNOWN", "highest_readiness_layer": "UNKNOWN"},
+            "actions_required": [
+                {
+                    "action_id": "refresh_canonical_operator_state",
+                    "type": "MISSING_CANONICAL_STATE",
+                    "priority": "HIGH",
+                    "title": "Generate today's operator state",
+                    "reason": "The cockpit reads canonical_operator_state.v1.json. Generate the operator state to populate today's candidates, actions, and workflow.",
+                    "suggested_command": "npm run aegis:canonical-operator-state && npm run aegis:operator-brief",
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                }
+            ],
+            "top_candidates": [],
+            "opportunities": {},
+            "candidate_decisions_corrections": {},
+            "sleeve_warnings": {},
+            "research_priorities": {},
+            "governance_approvals": {},
+            "regime": {},
+            "event_triggers": [],
+            "no_action_now": [],
+            "drilldown_links": [],
+            "safety": {
+                "broker_execution_allowed": False,
+                "broker_submit_transmit_allowed": False,
+                "autonomous_execution_allowed": False,
+                "read_only": True,
+            },
+        }
+
+    candidates = canonical.get("candidates") if isinstance(canonical.get("candidates"), dict) else {}
+    sleeves = canonical.get("sleeves") if isinstance(canonical.get("sleeves"), dict) else {}
+    research = canonical.get("research") if isinstance(canonical.get("research"), dict) else {}
+    governance = canonical.get("governance") if isinstance(canonical.get("governance"), dict) else {}
+    payload_status = "AVAILABLE" if brief_available else "PARTIAL"
+    current_operator_truth = resolve_current_operator_truth_v1(truth_root=truth_root, day_utc=day_utc)
+    current_day_status = current_operator_truth.get("current_day_status") if isinstance(current_operator_truth.get("current_day_status"), dict) else {}
+    historical_fallback = current_operator_truth.get("historical_fallback") if isinstance(current_operator_truth.get("historical_fallback"), dict) else {}
+    missing_inputs = canonical.get("missing_inputs") if isinstance(canonical.get("missing_inputs"), list) else []
+    warnings = canonical.get("warnings") if isinstance(canonical.get("warnings"), list) else []
+    if not brief_available:
+        warnings = [
+            {
+                "warning_id": "operator_brief_missing",
+                "priority": "LOW",
+                "status": "MISSING",
+                "message": "Operator brief is missing; showing canonical state directly.",
+                "suggested_command": "npm run aegis:operator-brief",
+                "source_artifact": "",
+            },
+            *warnings,
+        ]
+    if any(bool(row.get("critical")) for row in missing_inputs if isinstance(row, dict)):
+        payload_status = "PARTIAL"
+    payload = {
+        "ok": True,
+        "status": payload_status,
+        "day_utc": str(canonical.get("day_utc") or day_utc),
+        "generated_at_utc": canonical.get("generated_at_utc"),
+        "read_only": True,
+        "source_read_model": "canonical_operator_state.v1.json",
+        "brief_read_model": "operator_brief.v1.json",
+        "source_status": source_status,
+        "source_paths": {
+            "canonical_operator_state": str(canonical_path or ""),
+            "operator_brief": str(brief_path or ""),
+            "runtime_truth": str(canonical_runtime_freshness.get("path") or runtime_truth_path or ""),
+            "runtime_evaluation": str(runtime_evaluation_path),
+            "control_packet": str(control_packet_freshness.get("path") or ""),
+        },
+        "runtime_evaluation_authority": runtime_authority,
+        "control_packet_freshness": control_packet_freshness,
+        "canonical_operator_state": canonical,
+        "current_operator_truth": current_operator_truth,
+        "current_day_status": current_day_status,
+        "historical_fallback": historical_fallback,
+        "displayed_artifact_day": str(current_operator_truth.get("displayed_artifact_day") or historical_fallback.get("source_day") or day_utc),
+        "operator_brief": brief if isinstance(brief, dict) else {},
+        "runtime": canonical.get("runtime") if isinstance(canonical.get("runtime"), dict) else {},
+        "actions_required": canonical.get("actions_required") if isinstance(canonical.get("actions_required"), list) else [],
+        "top_candidates": canonical.get("top_candidates") if isinstance(canonical.get("top_candidates"), list) else [],
+        "opportunities": canonical.get("opportunities") if isinstance(canonical.get("opportunities"), dict) else {},
+        "candidate_decisions_corrections": candidates,
+        "sleeve_warnings": sleeves,
+        "research_priorities": research,
+        "governance_approvals": governance,
+        "regime": canonical.get("regime") if isinstance(canonical.get("regime"), dict) else {},
+        "event_triggers": canonical.get("event_triggers") if isinstance(canonical.get("event_triggers"), list) else [],
+        "warnings": warnings,
+        "no_action_now": canonical.get("no_action_now") if isinstance(canonical.get("no_action_now"), list) else [],
+        "drilldown_links": canonical.get("drilldown_index") if isinstance(canonical.get("drilldown_index"), list) else [],
+        "missing_inputs": missing_inputs,
+        "conflicts": canonical.get("conflicts") if isinstance(canonical.get("conflicts"), list) else [],
+        "freshness": canonical.get("freshness") if isinstance(canonical.get("freshness"), dict) else {},
+        "safety": {
+            "broker_execution_allowed": False,
+            "broker_submit_transmit_allowed": False,
+            "autonomous_execution_allowed": False,
+            "automatic_approval_allowed": False,
+            "automatic_sleeve_mutation_allowed": False,
+            "read_only": True,
+        },
+    }
+    operator_state_response = load_or_build_operator_state_snapshot_response_v1(
+        truth_root=truth_root,
+        day_utc=str(canonical.get("day_utc") or day_utc),
+    )
+    operator_snapshot = operator_state_response.get("data") if isinstance(operator_state_response.get("data"), dict) else {}
+    if operator_snapshot:
+        payload["operator_state_snapshot"] = operator_snapshot
+        payload["manual_capture_candidate"] = operator_snapshot.get("manual_capture_candidate") if isinstance(operator_snapshot.get("manual_capture_candidate"), dict) else {}
+        payload["suppressed_candidate_watchlist"] = operator_snapshot.get("suppressed_candidate_watchlist") if isinstance(operator_snapshot.get("suppressed_candidate_watchlist"), dict) else {}
+        payload["latest_operator_run_summary"] = operator_snapshot.get("latest_run_summary") if isinstance(operator_snapshot.get("latest_run_summary"), dict) else {}
+        if isinstance(payload.get("source_paths"), dict):
+            payload["source_paths"]["operator_state_snapshot"] = str(operator_snapshot.get("artifact_path") or "")
+    decision_support = build_candidate_decision_support_payload_v1(payload)
+    payload["candidate_decision_support"] = decision_support
+    support_by_id = decision_support.get("by_candidate_id") if isinstance(decision_support.get("by_candidate_id"), dict) else {}
+    enriched_candidates = []
+    for row in payload.get("top_candidates", []):
+        if not isinstance(row, dict):
+            enriched_candidates.append(row)
+            continue
+        candidate_id = str(row.get("candidate_id") or row.get("id") or "").strip()
+        enriched = dict(row)
+        if candidate_id in support_by_id:
+            enriched["decision_support_brief"] = support_by_id[candidate_id]
+        enriched_candidates.append(enriched)
+    payload["top_candidates"] = enriched_candidates
+    payload.update(build_operator_projections_v1(payload))
+    # Dashboard day/mode/count fields are governed by operator_state_snapshot_v1.
+    # The generic cockpit projection builder is legacy/final-EOD oriented and must
+    # not overwrite successful INTRADAY_OPERATIONAL current-day state.
+    if operator_snapshot:
+        for projection_key in (
+            "operator_today_projection",
+            "active_opportunity_projection",
+            "operator_task_projection",
+            "system_diagnostic_projection",
+            "what_changed_projection",
+            "passive_health_projection",
+            "review_ledger_projection",
+        ):
+            projected = operator_snapshot.get(projection_key)
+            if isinstance(projected, dict):
+                payload[projection_key] = projected
+        payload["operator_state_snapshot"] = operator_snapshot
+        payload["current_operator_truth"] = operator_snapshot.get("current_operator_truth") if isinstance(operator_snapshot.get("current_operator_truth"), dict) else current_operator_truth
+        payload["current_day_status"] = operator_snapshot.get("current_day_status") if isinstance(operator_snapshot.get("current_day_status"), dict) else current_day_status
+        payload["historical_fallback"] = operator_snapshot.get("historical_fallback") if isinstance(operator_snapshot.get("historical_fallback"), dict) else historical_fallback
+        payload["displayed_artifact_day"] = str(operator_snapshot.get("displayed_artifact_day") or current_operator_truth.get("displayed_artifact_day") or day_utc)
+        payload["runtime_mode"] = str(operator_snapshot.get("runtime_mode") or current_operator_truth.get("runtime_mode") or "UNKNOWN")
+        for semantic_key in ("market_data_state", "candidate_certification_state", "execution_eligibility_state", "operator_state_semantics"):
+            if semantic_key in operator_snapshot:
+                payload[semantic_key] = operator_snapshot.get(semantic_key)
+        for snapshot_key in (
+            "current_day_candidate_rows",
+            "current_day_candidates",
+            "historical_captures",
+            "latest_captured_trade_projection",
+            "runtime_timeline_projection",
+            "domain_certification",
+        ):
+            if snapshot_key in operator_snapshot:
+                payload[snapshot_key] = operator_snapshot.get(snapshot_key)
+    payload["eod_opportunity_outcome_report"] = build_eod_opportunity_outcome_report_v1(
+        payload,
+        trading_session=str(canonical.get("day_utc") or day_utc),
+        generated_at=str(canonical.get("generated_at_utc") or ""),
+    )
+    snapshot = payload.get("operator_state_snapshot") if isinstance(payload.get("operator_state_snapshot"), dict) else {}
+    if snapshot:
+        snapshot_id = str(snapshot.get("snapshot_id") or "")
+        source_fingerprint = str(snapshot.get("source_fingerprint") or "")
+        eod_projection = {**payload["eod_opportunity_outcome_report"], "snapshot_id": snapshot_id, "source_fingerprint": source_fingerprint}
+        snapshot["eod_outcome_projection"] = eod_projection
+        payload["operator_state_snapshot"] = snapshot
+        payload["eod_opportunity_outcome_report"] = eod_projection
+        payload["snapshot_id"] = snapshot_id
+        payload["source_fingerprint"] = source_fingerprint
+    return payload
+
+
+def _aegis_status(code: str, *, label: str | None = None, semantic: str | None = None, reason_codes: list[str] | None = None) -> Dict[str, Any]:
+    normalized = str(code or "unknown").strip().lower()
+    if semantic is None:
+        semantic = "healthy" if normalized in {"ready", "current"} else ("warning" if normalized in {"waiting", "partial", "disabled"} else "blocked")
+    return {
+        "code": normalized,
+        "label": label or normalized.replace("_", " ").title(),
+        "semantic": semantic,
+        "reason_codes": reason_codes or [],
+    }
+
+
+def _aegis_kernel_status_rail_view(truth_root: Path, requested_day: str | None) -> Dict[str, Any]:
+    day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+    payload = _operator_cockpit_payload(truth_root, day)
+    runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
+    source_status = payload.get("source_status") if isinstance(payload.get("source_status"), dict) else {}
+    safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
+    candidates = payload.get("candidate_decisions_corrections") if isinstance(payload.get("candidate_decisions_corrections"), dict) else {}
+    top_candidates = payload.get("top_candidates") if isinstance(payload.get("top_candidates"), list) else []
+    canonical_available = source_status.get("canonical_state") == "available"
+    runtime_available = source_status.get("runtime_truth") == "available"
+    brief_available = source_status.get("operator_brief") == "available"
+    safety_ok = (
+        safety.get("broker_execution_allowed") is False
+        and safety.get("broker_submit_transmit_allowed") is False
+        and safety.get("autonomous_execution_allowed") is False
+    )
+    runtime_class = str(runtime.get("runtime_truth_classification") or "UNKNOWN")
+    current_day_rows = payload.get("current_day_candidate_rows") if isinstance(payload.get("current_day_candidate_rows"), list) else []
+    today_projection = payload.get("operator_today_projection") if isinstance(payload.get("operator_today_projection"), dict) else {}
+    current_candidate_count = int(today_projection.get("current_intraday_candidate_count") or today_projection.get("current_day_candidate_count") or len(current_day_rows) or 0)
+    no_candidate_rows = current_candidate_count <= 0 and not top_candidates and not any(candidates.get(key) for key in ("awaiting_decision", "approved_or_traded", "deferred", "awaiting_outcome"))
+
+    control = _aegis_status("ready", label="Ready", semantic="healthy", reason_codes=[])
+    if not runtime_available or not canonical_available or not safety_ok:
+        control = _aegis_status("blocked", label="Blocked", semantic="blocked", reason_codes=["RUNTIME_OR_CANONICAL_MISSING" if not runtime_available or not canonical_available else "SAFETY_INCONSISTENCY"])
+
+    state = _aegis_status("current", label="Current", semantic="healthy", reason_codes=[])
+    if not canonical_available:
+        state = _aegis_status("missing", label="Missing", semantic="blocked", reason_codes=["CANONICAL_OPERATOR_STATE_MISSING"])
+    elif not brief_available:
+        state = _aegis_status("partial", label="Current", semantic="warning", reason_codes=["OPERATOR_BRIEF_MISSING"])
+
+    critical_blockers = runtime.get("critical_blockers")
+    if not isinstance(critical_blockers, list):
+        critical_blockers = []
+    candidate_blocked = runtime_class.upper() == "BLOCKED" or any(
+        str(item).upper().startswith("RUNTIME_TRUTH") for item in critical_blockers if isinstance(item, str)
+    )
+    if not runtime_available:
+        advisory = _aegis_status("blocked", label="Blocked", semantic="blocked", reason_codes=["RUNTIME_TRUTH_MISSING"])
+    elif no_candidate_rows:
+        advisory = _aegis_status("none", label="None", semantic="healthy", reason_codes=["NO_ADVISORY_CANDIDATES"])
+    elif candidate_blocked:
+        advisory = _aegis_status("blocked", label="Blocked", semantic="blocked", reason_codes=[runtime_class])
+    elif runtime.get("trade_advice_allowed") is True:
+        advisory = _aegis_status("ready", label="Ready", semantic="healthy", reason_codes=[])
+    else:
+        advisory = _aegis_status(
+            "partial",
+            label="Partial",
+            semantic="warning",
+            reason_codes=["CANDIDATE_EXISTS_EVIDENCE_PROJECTION_INCOMPLETE"],
+        )
+
+    submission = _aegis_status("disabled", label="Disabled By Design", semantic="healthy", reason_codes=["BROKER_SUBMIT_TRANSMIT_DISABLED_BY_DESIGN"])
+    lifecycle = _aegis_status("ready", label="Candidates Present" if not no_candidate_rows else "No Candidates Yet", semantic="healthy", reason_codes=[] if not no_candidate_rows else ["NO_CANDIDATES_YET"])
+
+    labels = [
+        ("state", "State", state, "/aegis-journal"),
+        ("advisory", "Advisory", advisory, "/aegis-opportunities"),
+        ("submission", "Submission", submission, "/aegis-journal"),
+        ("lifecycle", "Lifecycle", lifecycle, "/aegis-journal"),
+    ]
+    return {
+        "ok": True,
+        "query_contract_version": "aegis_status_rail.v1",
+        "generated_utc": _utc_now_iso(),
+        "day_utc": day,
+        "source": "aegis_canonical_operator_state",
+        "kernels": [
+            {"kernel_id": kernel_id, "label": label, "status": status, "href": href}
+            for kernel_id, label, status, href in labels
+        ],
     }
 
 
@@ -435,6 +1265,29 @@ def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
+def _merge_latest_domain_command_results_v1(payload: Dict[str, Any], day_utc: str) -> Dict[str, Any]:
+    try:
+        report = build_domain_certification_report_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day_utc)
+    except Exception:
+        return payload
+    repair_actions = report.get("domain_repair_actions") if isinstance(report.get("domain_repair_actions"), list) else []
+    if not repair_actions:
+        return payload
+    merged = dict(payload)
+    timeline = dict(merged.get("runtime_timeline_projection") or {}) if isinstance(merged.get("runtime_timeline_projection"), dict) else {}
+    if timeline:
+        timeline["domain_repair_actions"] = repair_actions
+        certification = dict(timeline.get("domain_certification") or {}) if isinstance(timeline.get("domain_certification"), dict) else {}
+        certification["domain_repair_actions"] = repair_actions
+        timeline["domain_certification"] = certification
+        merged["runtime_timeline_projection"] = timeline
+    certification_payload = dict(merged.get("domain_certification") or {}) if isinstance(merged.get("domain_certification"), dict) else {}
+    if certification_payload:
+        certification_payload["domain_repair_actions"] = repair_actions
+        merged["domain_certification"] = certification_payload
+    return merged
+
+
 def _operator_projection_payload(day_utc: Optional[str] = None) -> Dict[str, Any]:
     day = _projection_day(day_utc)
     path = _canonical_report_path("aegis_operator_projection_v1", day, "operator_projection.v1.json")
@@ -448,6 +1301,7 @@ def _operator_projection_payload(day_utc: Optional[str] = None) -> Dict[str, Any
             "operator_next_action": "Run ops/tools/run_aegis_operator_projection_v1.py for the current day.",
             "authority_note": "Missing projection does not alter final readiness; aegis_day_run_ledger_v1 remains authoritative.",
         }
+    payload = _merge_latest_domain_command_results_v1(payload, day)
     return {"ok": True, "artifact_path": str(path), **payload}
 
 
@@ -2056,6 +2910,18 @@ class OpsHandler(SimpleHTTPRequestHandler):
     STATIC_DIR = (Path(__file__).resolve().parents[1] / "static").resolve()
     SHELL_ROUTES = {
         "/",
+        "/aegis-opportunities",
+        "/aegis-candidates",
+        "/aegis-theses",
+        "/aegis-runtime-timeline",
+        "/aegis-repair-center",
+        "/aegis-edge-lab",
+        "/aegis-performance",
+        "/aegis-journal",
+        "/aegis-today",
+        "/aegis-review",
+        "/aegis-research",
+        "/aegis-history",
         "/capital",
         "/capital/accounts",
         "/capital/allocation",
@@ -2065,16 +2931,30 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/capital/validation",
         "/portfolio",
         "/performance",
+        "/outcomes",
         "/sleeves",
         "/advisory",
         "/aegis-lite",
+        "/aegis-operator-cockpit",
         "/aegis-events",
         "/aegis-ai-feedback",
         "/research-lab",
+        "/research-lab/start",
+        "/research-lab/hypotheses",
+        "/research-lab/plans",
+        "/research-lab/evidence",
+        "/research-lab/paper-trials",
+        "/research-lab/sleeve-reviews",
+        "/research-lab/blocked-work",
+        "/research-lab/backlog",
         "/operator-inbox",
         "/tax",
+        "/policy",
         "/operations",
         "/aegis-runtime",
+        "/aegis-runtime-truth",
+        "/aegis-adaptive-intelligence",
+        "/aegis-intelligence-governance",
         "/configuration",
         "/reliability",
         "/reliability/readiness",
@@ -2454,12 +3334,49 @@ class OpsHandler(SimpleHTTPRequestHandler):
     def _route_status_payload(self) -> Dict[str, Any]:
         routes = {
             "/aegis-runtime": "/aegis-runtime" in self.SHELL_ROUTES,
+            "/aegis-opportunities": "/aegis-opportunities" in self.SHELL_ROUTES,
+            "/aegis-candidates": "/aegis-candidates" in self.SHELL_ROUTES,
+            "/aegis-theses": "/aegis-theses" in self.SHELL_ROUTES,
+            "/aegis-edge-lab": "/aegis-edge-lab" in self.SHELL_ROUTES,
+            "/aegis-performance": "/aegis-performance" in self.SHELL_ROUTES,
+            "/aegis-journal": "/aegis-journal" in self.SHELL_ROUTES,
+            "/aegis-today": "/aegis-today" in self.SHELL_ROUTES,
+            "/aegis-review": "/aegis-review" in self.SHELL_ROUTES,
+            "/aegis-research": "/aegis-research" in self.SHELL_ROUTES,
+            "/aegis-history": "/aegis-history" in self.SHELL_ROUTES,
+            "/aegis-runtime-truth": "/aegis-runtime-truth" in self.SHELL_ROUTES,
+            "/aegis-operator-cockpit": "/aegis-operator-cockpit" in self.SHELL_ROUTES,
+            "/aegis-adaptive-intelligence": "/aegis-adaptive-intelligence" in self.SHELL_ROUTES,
+            "/aegis-intelligence-governance": "/aegis-intelligence-governance" in self.SHELL_ROUTES,
             "/api/runtime-status": True,
             "/api/decision-ledger": True,
             "/api/portfolio-state": True,
             "/api/portfolio-scoring": True,
             "/api/latest-packet": True,
             "/api/ui-service-authority": True,
+            "/api/research-lab/health": True,
+            "/api/research-lab/operator-home": True,
+            "/api/research-lab/console": True,
+            "/api/aegis/thesis-graph": True,
+            "/api/aegis/commands/registry": True,
+            "/api/aegis/commands/execute": True,
+            "/aegis-repair-center": "/aegis-repair-center" in self.SHELL_ROUTES,
+            "/api/research-lab/start-research/options": True,
+            "/api/research-lab/start-research": True,
+            "/api/research-lab/hypothesis-queue": True,
+            "/api/research-lab/projection-health": True,
+            "/api/research-lab/research-plans": True,
+            "/api/research-lab/paper-trials": True,
+            "/api/research-lab/sleeve-review-center": True,
+            "/api/research-lab/evidence": True,
+            "/api/research-lab/blocked-evidence": True,
+            "/api/research-lab/blocked-work": True,
+            "/api/research-lab/research-backlog": True,
+            "/api/research-lab/sleeves": True,
+            "/api/research-lab/evidence-inventory": True,
+            "/api/research-lab/paper-trial-inventory": True,
+            "/api/research-lab/sleeve-comparison": True,
+            "/api/research-lab/research-backlog-priority": True,
             "/healthz": True,
             "/healthz/aegis-lite-ui": True,
             "/readyz": True,
@@ -2503,6 +3420,8 @@ class OpsHandler(SimpleHTTPRequestHandler):
         normalized = u.path.rstrip("/") or "/"
         if normalized.startswith("/reliability/work-orders/") and normalized != "/reliability/work-orders":
             rel = "index.html"
+        elif normalized.startswith("/research-lab/"):
+            rel = "index.html"
         elif normalized in self.SHELL_ROUTES:
             rel = "index.html"
         else:
@@ -2523,6 +3442,465 @@ class OpsHandler(SimpleHTTPRequestHandler):
         qs = parse_qs(u.query)
         raw_day = (qs.get("day") or [None])[0]
         requested_day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else None
+
+        if path == "/api/aegis/commands/registry":
+            self._send_json(HTTPStatus.OK, aegis_command_registry_v1())
+            return True
+
+        if path == "/api/aegis/commands/validate":
+            self._send_json(HTTPStatus.OK, validate_aegis_command_registry_v1())
+            return True
+
+        if path == "/api/research-lab/health":
+            self._send_json(HTTPStatus.OK, research_lab_health_v1())
+            return True
+
+        if path == "/api/research-lab/console":
+            self._send_json(HTTPStatus.OK, research_lab_console_v1())
+            return True
+
+        if path == "/api/research-lab/operator-home":
+            self._send_json(HTTPStatus.OK, research_lab_operator_home_v1())
+            return True
+
+        if path == "/api/research-lab/start-research/options":
+            self._send_json(HTTPStatus.OK, research_lab_start_research_options_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-queue":
+            rebuild = str((qs.get("rebuild") or [""])[0]).lower() == "true"
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_queue_v1(status=(qs.get("status") or [None])[0], rebuild=rebuild))
+            return True
+
+        if path == "/api/research-lab/projection-health":
+            self._send_json(HTTPStatus.OK, research_lab_projection_health_v1())
+            return True
+
+        if path == "/api/research-lab/research-plans":
+            self._send_json(HTTPStatus.OK, research_lab_research_plans_console_v1())
+            return True
+
+        if path == "/api/research-lab/paper-trials":
+            self._send_json(HTTPStatus.OK, research_lab_paper_trials_console_v1())
+            return True
+
+        if path == "/api/research-lab/sleeve-review-center":
+            self._send_json(HTTPStatus.OK, research_lab_sleeve_review_center_console_v1())
+            return True
+
+        if path == "/api/research-lab/evidence":
+            self._send_json(HTTPStatus.OK, research_lab_evidence_console_v1())
+            return True
+
+        if path == "/api/research-lab/blocked-work":
+            self._send_json(HTTPStatus.OK, research_lab_blocked_work_console_v1())
+            return True
+
+        if path == "/api/research-lab/blocked-evidence":
+            self._send_json(HTTPStatus.OK, research_lab_blocked_evidence_console_v1())
+            return True
+
+        if path == "/api/research-lab/research-backlog":
+            self._send_json(HTTPStatus.OK, research_lab_research_backlog_console_v1())
+            return True
+
+        if path == "/api/research-lab/sleeves":
+            self._send_json(HTTPStatus.OK, research_lab_sleeves_v1())
+            return True
+
+        if path == "/api/research-lab/evidence-inventory":
+            self._send_json(HTTPStatus.OK, research_lab_evidence_inventory_v1())
+            return True
+
+        if path == "/api/research-lab/paper-trial-inventory":
+            self._send_json(HTTPStatus.OK, research_lab_paper_trial_inventory_v1())
+            return True
+
+        if path == "/api/research-lab/sleeve-comparison":
+            self._send_json(HTTPStatus.OK, research_lab_sleeve_comparison_v1())
+            return True
+
+        if path == "/api/research-lab/research-backlog-priority":
+            self._send_json(HTTPStatus.OK, research_lab_backlog_priority_v1())
+            return True
+
+        if path == "/api/research-lab/challenger-tracks":
+            self._send_json(HTTPStatus.OK, research_lab_challenger_tracks_v1())
+            return True
+
+        if path == "/api/research-lab/challenger-variants":
+            self._send_json(HTTPStatus.OK, research_lab_challenger_variants_v1())
+            return True
+
+        if path == "/api/research-lab/challenger-evidence-batches":
+            self._send_json(HTTPStatus.OK, research_lab_challenger_evidence_batches_v1())
+            return True
+
+        if path == "/api/research-lab/challenger-evidence-completeness":
+            batch_id = (qs.get("challenger_evidence_batch_id") or [None])[0]
+            self._send_json(HTTPStatus.OK, research_lab_challenger_evidence_completeness_v1(challenger_evidence_batch_id=batch_id))
+            return True
+
+        if path == "/api/research-lab/challenger-blockers":
+            batch_id = (qs.get("challenger_evidence_batch_id") or [None])[0]
+            self._send_json(HTTPStatus.OK, research_lab_challenger_blockers_v1(challenger_evidence_batch_id=batch_id))
+            return True
+
+        if path == "/api/research-lab/challenger-comparison-reports":
+            self._send_json(HTTPStatus.OK, research_lab_challenger_comparison_reports_v1())
+            return True
+
+        if path == "/api/research-lab/human-review-dossiers":
+            self._send_json(HTTPStatus.OK, research_lab_human_review_dossiers_v1())
+            return True
+
+        if path == "/api/research-lab/human-review-decisions":
+            self._send_json(HTTPStatus.OK, research_lab_human_review_decisions_v1())
+            return True
+
+        if path == "/api/research-lab/human-review-decisions/latest":
+            dossier_id = (qs.get("human_review_dossier_id") or [None])[0]
+            self._send_json(HTTPStatus.OK, research_lab_human_review_decision_latest_v1(human_review_dossier_id=dossier_id))
+            return True
+
+        if path == "/api/research-lab/human-review-decision-read-model":
+            self._send_json(HTTPStatus.OK, research_lab_human_review_decision_read_model_v1())
+            return True
+
+        if path == "/api/research-lab/integrity-reports":
+            self._send_json(HTTPStatus.OK, research_lab_integrity_reports_v1())
+            return True
+
+        if path == "/api/research-lab/integrity-reports/latest":
+            self._send_json(HTTPStatus.OK, research_lab_integrity_report_latest_v1())
+            return True
+
+        if path == "/api/research-lab/integrity/latest-summary":
+            self._send_json(HTTPStatus.OK, research_lab_integrity_latest_summary_v1())
+            return True
+
+        if path == "/api/research-lab/status" or path == "/api/research-lab/status/latest":
+            self._send_json(HTTPStatus.OK, research_lab_status_latest_v1())
+            return True
+
+        if path == "/api/research-lab/status-reports":
+            self._send_json(HTTPStatus.OK, research_lab_status_reports_v1())
+            return True
+
+        if path == "/api/research-lab/paper-trial-proposals":
+            self._send_json(HTTPStatus.OK, research_lab_paper_trial_proposals_v1())
+            return True
+
+        if path == "/api/research-lab/paper-trial-proposals/latest":
+            self._send_json(HTTPStatus.OK, research_lab_paper_trial_proposal_latest_v1())
+            return True
+
+        if path == "/api/research-lab/observation-candidates":
+            self._send_json(
+                HTTPStatus.OK,
+                research_lab_observation_candidates_v1(
+                    observation_type=(qs.get("observation_type") or [None])[0],
+                    observation_family=(qs.get("observation_family") or [None])[0],
+                    severity=(qs.get("severity") or [None])[0],
+                    research_status=(qs.get("research_status") or [None])[0],
+                ),
+            )
+            return True
+
+        if path == "/api/research-lab/observation-candidates/latest":
+            self._send_json(HTTPStatus.OK, research_lab_observation_candidate_latest_v1())
+            return True
+
+        if path == "/api/research-lab/observation-candidate-batches":
+            self._send_json(HTTPStatus.OK, research_lab_observation_candidate_batches_v1())
+            return True
+
+        if path == "/api/research-lab/observation-candidate-batches/latest":
+            self._send_json(HTTPStatus.OK, research_lab_observation_candidate_batch_latest_v1())
+            return True
+
+        if path == "/api/research-lab/observation-clusters":
+            self._send_json(
+                HTTPStatus.OK,
+                research_lab_observation_clusters_v1(
+                    cluster_family=(qs.get("cluster_family") or [None])[0],
+                    cluster_status=(qs.get("cluster_status") or [None])[0],
+                    research_status=(qs.get("research_status") or [None])[0],
+                ),
+            )
+            return True
+
+        if path == "/api/research-lab/observation-clusters/latest":
+            self._send_json(HTTPStatus.OK, research_lab_observation_cluster_latest_v1())
+            return True
+
+        if path == "/api/research-lab/observation-cluster-batches":
+            self._send_json(HTTPStatus.OK, research_lab_observation_cluster_batches_v1())
+            return True
+
+        if path == "/api/research-lab/observation-cluster-batches/latest":
+            self._send_json(HTTPStatus.OK, research_lab_observation_cluster_batch_latest_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposals":
+            self._send_json(
+                HTTPStatus.OK,
+                research_lab_hypothesis_proposals_v1(
+                    proposal_status=(qs.get("proposal_status") or [None])[0],
+                    proposal_family=(qs.get("proposal_family") or [None])[0],
+                ),
+            )
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposals/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_latest_v1())
+            return True
+
+        if path == "/api/research-lab/research-intake/queue":
+            self._send_json(HTTPStatus.OK, research_lab_research_intake_queue_v1(status=(qs.get("status") or [None])[0]))
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-batches":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_batches_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-batches/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_batch_latest_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-reviews":
+            self._send_json(
+                HTTPStatus.OK,
+                research_lab_hypothesis_proposal_reviews_v1(
+                    review_decision=(qs.get("review_decision") or [None])[0],
+                    review_status=(qs.get("review_status") or [None])[0],
+                ),
+            )
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-reviews/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_review_latest_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-review-batches":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_review_batches_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-proposal-review-batches/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_review_batch_latest_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-intake-decisions":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_decisions_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-intake-decisions/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_decision_latest_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-intake-batches":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_batches_v1())
+            return True
+
+        if path == "/api/research-lab/hypothesis-intake-batches/latest":
+            self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_batch_latest_v1())
+            return True
+
+        if path == "/api/research-lab/research-hypotheses":
+            self._send_json(HTTPStatus.OK, research_lab_research_hypotheses_v1())
+            return True
+
+        if path == "/api/research-lab/research-hypotheses/latest":
+            self._send_json(HTTPStatus.OK, research_lab_research_hypothesis_latest_v1())
+            return True
+
+        if path.startswith("/api/research-lab/observation-cluster-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_observation_cluster_batch_v1(observation_cluster_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/observation-clusters/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] == "hypothesis-proposals":
+                self._send_json(HTTPStatus.OK, research_lab_observation_cluster_hypothesis_proposals_v1(observation_cluster_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/observation-clusters/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_observation_cluster_v1(observation_cluster_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-proposal-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_batch_v1(hypothesis_proposal_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-proposal-review-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_review_batch_v1(hypothesis_proposal_review_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-intake-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_batch_v1(hypothesis_intake_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-proposals/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] == "reviews":
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_reviews_for_proposal_v1(hypothesis_proposal_id=parts[3]))
+                return True
+            if len(parts) == 5 and parts[4] == "dossier":
+                self._send_json(HTTPStatus.OK, research_lab_console_dossier_v1(hypothesis_proposal_id=parts[3]))
+                return True
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_v1(hypothesis_proposal_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-proposal-reviews/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_proposal_review_v1(hypothesis_proposal_review_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/hypothesis-intake-decisions/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_hypothesis_intake_decision_v1(hypothesis_intake_decision_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/research-hypotheses/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_research_hypothesis_v1(research_hypothesis_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/observation-candidate-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_observation_candidate_batch_v1(observation_candidate_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/observation-candidates/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_observation_candidate_v1(observation_candidate_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/paper-trial-proposals/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_paper_trial_proposal_v1(paper_trial_proposal_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/status-reports/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_status_report_v1(research_os_status_report_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/integrity-reports/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_integrity_report_v1(integrity_report_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/human-review-decisions/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] == "paper-trial-proposals":
+                self._send_json(HTTPStatus.OK, research_lab_human_review_decision_paper_trial_proposals_v1(human_review_decision_id=parts[3]))
+                return True
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_human_review_decision_v1(human_review_decision_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/human-review-dossiers/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] == "decisions":
+                self._send_json(HTTPStatus.OK, research_lab_human_review_dossier_decisions_v1(human_review_dossier_id=parts[3]))
+                return True
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_human_review_dossier_v1(human_review_dossier_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/challenger-comparison-reports/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_challenger_comparison_report_v1(challenger_comparison_report_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/challenger-evidence-batches/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_challenger_evidence_batch_v1(challenger_evidence_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/challenger-evidence-lineage/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_challenger_evidence_lineage_v1(challenger_evidence_batch_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/challenger-variants/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_challenger_variant_v1(challenger_variant_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/challenger-tracks/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 4:
+                self._send_json(HTTPStatus.OK, research_lab_challenger_track_v1(challenger_track_id=parts[3]))
+                return True
+
+        if path == "/api/research-lab/stability/expectancy-drift/latest":
+            self._send_json(HTTPStatus.OK, research_lab_expectancy_drift_latest_v1())
+            return True
+
+        if path == "/api/research-lab/stability/regime-fragility/latest":
+            self._send_json(HTTPStatus.OK, research_lab_regime_fragility_latest_v1())
+            return True
+
+        if path == "/api/research-lab/stability/sleeve-stability/latest":
+            self._send_json(HTTPStatus.OK, research_lab_sleeve_stability_latest_v1())
+            return True
+
+        if path.startswith("/api/research-lab/sleeves/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            # /api/research-lab/sleeves/{sleeve_id}
+            # /api/research-lab/sleeves/{sleeve_id}/evidence-chain
+            # /api/research-lab/sleeves/{sleeve_id}/edge-lab-projection
+            if len(parts) >= 4:
+                sleeve_id = parts[3]
+                if len(parts) == 4:
+                    self._send_json(HTTPStatus.OK, research_lab_sleeve_v1(sleeve_id=sleeve_id))
+                    return True
+                if len(parts) == 5 and parts[4] == "evidence-chain":
+                    self._send_json(HTTPStatus.OK, research_lab_evidence_chain_v1(sleeve_id=sleeve_id))
+                    return True
+                if len(parts) == 5 and parts[4] == "edge-lab-projection":
+                    self._send_json(HTTPStatus.OK, research_lab_edge_lab_projection_v1(sleeve_id=sleeve_id))
+                    return True
+                if len(parts) == 5 and parts[4] == "stability":
+                    self._send_json(HTTPStatus.OK, research_lab_sleeve_stability_v1(sleeve_id=sleeve_id))
+                    return True
+
+        if path.startswith("/api/research-lab/evidence/") and path.endswith("/summary"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5:
+                self._send_json(HTTPStatus.OK, research_lab_evidence_summary_v1(evidence_package_id=parts[3]))
+                return True
+
+        if path.startswith("/api/research-lab/paper-trials/") and path.endswith("/summary"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5:
+                self._send_json(HTTPStatus.OK, research_lab_paper_trial_summary_v1(paper_trial_id=parts[3]))
+                return True
 
         if path.startswith("/api/reliability/"):
             if self._route_reliability_get(path, qs):
@@ -2591,6 +3969,11 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/shell/status-rail":
             summary_only = (qs.get("summary") or [""])[0] in {"1", "true", "TRUE", "yes", "YES"}
+            surface = (qs.get("surface") or [""])[0]
+            if surface == "aegis":
+                requested_status_day = (qs.get("day") or [requested_day])[0]
+                self._send_json(HTTPStatus.OK, _aegis_kernel_status_rail_view(GLOBAL_TRUTH_ROOT, requested_status_day))
+                return True
             self._send_json(
                 HTTPStatus.OK,
                 build_kernel_status_rail_summary_view() if summary_only else build_kernel_status_rail_view(),
@@ -2620,8 +4003,44 @@ class OpsHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, build_readiness_kernel_v1(requested_day))
             return True
 
+
+        if path == "/api/aegis/data-remediation/latest":
+            day = _projection_day(requested_day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **latest_remediation_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)})
+            return True
+
+        if path.startswith("/api/aegis/data-remediation/"):
+            day = _projection_day(requested_day)
+            remediation_attempt_id = unquote(path.rsplit("/", 1)[-1])
+            self._send_json(HTTPStatus.OK, {"ok": True, **get_remediation_attempt_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, remediation_attempt_id=remediation_attempt_id)})
+            return True
+
+        if path == "/api/aegis/data-blockers":
+            day = _projection_day(requested_day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **classify_data_blockers_v1(truth_root=GLOBAL_TRUTH_ROOT, repo_root=REPO_ROOT, day_utc=day)})
+            return True
+
+        if path == "/api/aegis/universe/canonical-authority/latest":
+            day = _projection_day(requested_day)
+            canonical_root = _canonical_truth_root()
+            authority = latest_canonical_universe_authority_v1(truth_root=canonical_root, day_utc=day)
+            self._send_json(HTTPStatus.OK, {"ok": True, "data": authority, "errors": [] if authority else [{"code": "CANONICAL_UNIVERSE_AUTHORITY_MISSING"}], "truth_root": str(canonical_root)})
+            return True
+
+        if path == "/api/aegis/universe/health/latest":
+            day = _projection_day(requested_day)
+            canonical_root = _canonical_truth_root()
+            self._send_json(HTTPStatus.OK, {"ok": True, "data": canonical_universe_health_v1(truth_root=canonical_root, day_utc=day), "errors": [], "truth_root": str(canonical_root)})
+            return True
+
         if path == "/api/aegis/operator-projection":
             self._send_json(HTTPStatus.OK, _operator_projection_payload(requested_day))
+            return True
+
+        if path == "/api/aegis/repair-center":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or requested_day or _projection_day_for_report(requested_day, "operator_state_snapshot_v1"))
+            self._send_json(HTTPStatus.OK, {"ok": True, "data": build_repair_center_projection_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)})
             return True
 
         if path == "/api/system/actions":
@@ -2646,6 +4065,430 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/aegis/event-monitoring":
             self._send_json(HTTPStatus.OK, build_aegis_event_monitoring_view(requested_day, GLOBAL_TRUTH_ROOT))
+            return True
+
+        if path == "/api/aegis/runtime-truth":
+            day = _projection_day(requested_day)
+            kernel_payload = build_runtime_truth_kernel_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    **kernel_payload,
+                    "runtime_state_history": read_runtime_state_history_summary_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day),
+                    "intelligence_summaries": intelligence_summaries_v1(GLOBAL_TRUTH_ROOT, day),
+                },
+            )
+            return True
+
+
+        if path in {"/api/aegis/operator/current-truth", "/api/aegis/operator/current-truth/latest"}:
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            self._send_json(HTTPStatus.OK, current_operator_truth_api_envelope_v1(current_truth))
+            return True
+
+        if path == "/api/aegis/operator/state-snapshot/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "operator_state_snapshot_v1"))
+            response = load_or_build_operator_state_snapshot_response_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            if isinstance(response.get("data"), dict):
+                response = {**response, "data": _merge_latest_domain_command_results_v1(response["data"], day)}
+            self._send_json(HTTPStatus.OK, response)
+            return True
+
+        if path in {"/api/aegis/thesis-graph", "/api/aegis/market-theses"}:
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or requested_day or _projection_day_for_report(requested_day, "aegis_thesis_graph_projection_v1"))
+            self._send_json(HTTPStatus.OK, load_or_build_thesis_graph_response_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day))
+            return True
+
+        if path == "/api/aegis/operator/paper-trade-construction/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "paper_trade_construction_v1"))
+            construction = latest_paper_trade_construction_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(paper_trade_construction_view_v1(construction), [], next_action=paper_trade_construction_view_v1(construction).get("next_required_action", "Review paper trade construction.")))
+            return True
+
+        if path.startswith("/api/aegis/operator/paper-trade-construction/"):
+            construction_id = unquote(path.rsplit("/", 1)[-1])
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "paper_trade_construction_v1"))
+            construction = latest_paper_trade_construction_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            status = HTTPStatus.OK if not construction_id or str(construction.get("construction_id") or "") == construction_id else HTTPStatus.OK
+            payload = paper_trade_construction_view_v1(construction) if str(construction.get("construction_id") or "") == construction_id else {**paper_trade_construction_view_v1(construction), "requested_construction_id": construction_id, "lookup_status": "DEGRADED_ID_NOT_CURRENT"}
+            self._send_json(status, operator_state_api_envelope_v1(payload, [], next_action=payload.get("next_required_action", "Review paper trade construction.")))
+            return True
+
+        if path == "/api/aegis/trade-cases/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "trade_lifecycle_case_v1"))
+            case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(case, [], next_action=case.get("state_reason", "Review trade lifecycle case.")))
+            return True
+
+        if path.startswith("/api/aegis/trade-cases/"):
+            case_id = unquote(path.rsplit("/", 1)[-1])
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "trade_lifecycle_case_v1"))
+            case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            payload = case if str(case.get("trade_lifecycle_case_id") or "") == case_id else {**case, "requested_trade_lifecycle_case_id": case_id, "lookup_status": "DEGRADED_ID_NOT_CURRENT"}
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(payload, [], next_action=payload.get("state_reason", "Review trade lifecycle case.")))
+            return True
+
+        if path == "/api/aegis/trade-case-projection/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "trade_lifecycle_case_v1"))
+            case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            projection = trade_case_projection_v1(case)
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(projection, [], next_action=projection.get("next_required_action", "Review trade case projection.")))
+            return True
+
+        if path == "/api/aegis/trade-readiness/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "readiness_domain_evaluation_v1"))
+            case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            evaluations = case.get("readiness_domain_evaluations") if isinstance(case.get("readiness_domain_evaluations"), list) else latest_readiness_domain_evaluations_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            payload = {"schema_id": "trade_readiness_domain_set", "schema_version": "v1", "trade_lifecycle_case_id": str(case.get("trade_lifecycle_case_id") or ""), "selected_exposure_intent_id": str(case.get("selected_exposure_intent_id") or ""), "source_day": day, "domain_statuses": domain_status_map_v1(evaluations), "blockers_by_domain": blockers_by_domain_v1(evaluations), "readiness_domain_evaluations": evaluations, "broker_execution_allowed": False, "live_trading_allowed": False, "order_routing_allowed": False, "capital_allocation_allowed": False}
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(payload, [], next_action="Review readiness domain evaluations."))
+            return True
+
+        if path.startswith("/api/aegis/trade-readiness/"):
+            case_id = unquote(path.rsplit("/", 1)[-1])
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "readiness_domain_evaluation_v1"))
+            case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            evaluations = case.get("readiness_domain_evaluations") if isinstance(case.get("readiness_domain_evaluations"), list) else latest_readiness_domain_evaluations_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            payload = {"schema_id": "trade_readiness_domain_set", "schema_version": "v1", "requested_trade_lifecycle_case_id": case_id, "lookup_status": "CURRENT" if str(case.get("trade_lifecycle_case_id") or "") == case_id else "DEGRADED_ID_NOT_CURRENT", "trade_lifecycle_case_id": str(case.get("trade_lifecycle_case_id") or ""), "selected_exposure_intent_id": str(case.get("selected_exposure_intent_id") or ""), "source_day": day, "domain_statuses": domain_status_map_v1(evaluations), "blockers_by_domain": blockers_by_domain_v1(evaluations), "readiness_domain_evaluations": evaluations, "broker_execution_allowed": False, "live_trading_allowed": False, "order_routing_allowed": False, "capital_allocation_allowed": False}
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(payload, [], next_action="Review readiness domain evaluations."))
+            return True
+
+        if path == "/api/aegis/trade-ticket/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "trade_ticket_projection_v1"))
+            projection = latest_trade_ticket_projection_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            if not projection:
+                case = latest_trade_lifecycle_case_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+                projection = trade_ticket_projection_v1(case)
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(projection, [], next_action=projection.get("next_action", "Review trade ticket projection.")))
+            return True
+
+        if path == "/api/aegis/operator/manual-capture/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "operator_state_snapshot_v1"))
+            response = load_or_build_operator_state_snapshot_response_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            snapshot = response.get("data") if isinstance(response.get("data"), dict) else {}
+            manual = snapshot.get("trade_ticket_projection_v1") if isinstance(snapshot.get("trade_ticket_projection_v1"), dict) else {}
+            if not manual:
+                case = snapshot.get("trade_lifecycle_case_v1") if isinstance(snapshot.get("trade_lifecycle_case_v1"), dict) else {}
+                manual = trade_ticket_projection_v1(case) if case else {}
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(manual, response.get("errors") if isinstance(response.get("errors"), list) else [], next_action=response.get("next_action", "Review trade lifecycle case.")))
+            return True
+
+        if path == "/api/aegis/operator/suppressed-watchlist/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "operator_state_snapshot_v1"))
+            response = load_or_build_operator_state_snapshot_response_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            snapshot = response.get("data") if isinstance(response.get("data"), dict) else {}
+            watchlist = snapshot.get("suppressed_candidate_watchlist") if isinstance(snapshot.get("suppressed_candidate_watchlist"), dict) else {}
+            self._send_json(HTTPStatus.OK, operator_state_api_envelope_v1(watchlist, response.get("errors") if isinstance(response.get("errors"), list) else [], next_action=response.get("next_action", "Review suppressed watchlist.")))
+            return True
+
+        if path in {"/api/aegis/operator/manual-capture-records", "/api/aegis/operator/manual-capture-records/latest"}:
+            qs = parse_qs(u.query)
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "manual_capture_record_v1"))
+            selected_id = str((qs.get("selected_exposure_intent_id") or [""])[0] or "")
+            payload = (
+                latest_manual_capture_record_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, selected_exposure_intent_id=selected_id)
+                if path.endswith("/latest")
+                else list_manual_capture_records_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, selected_exposure_intent_id=selected_id)
+            )
+            self._send_json(HTTPStatus.OK, {
+                **payload,
+                "review_only": True,
+                "broker_execution_allowed": False,
+                "order_routing_allowed": False,
+                "live_trading_allowed": False,
+                "allocation_allowed": False,
+                "paper_submit_created": False,
+                "autonomous_execution_allowed": False,
+            })
+            return True
+
+        if path == "/api/aegis/operator-cockpit":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            self._send_json(HTTPStatus.OK, _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day))
+            return True
+
+        if path == "/api/aegis/operator/today":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("operator_today_projection", {})})
+            return True
+
+        if path == "/api/aegis/operator/tasks":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("operator_task_projection", {})})
+            return True
+
+        if path == "/api/aegis/operator/diagnostics":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("system_diagnostic_projection", {})})
+            return True
+
+        if path == "/api/aegis/operator/what-changed":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("what_changed_projection", {})})
+            return True
+
+        if path in {"/api/aegis/operator/health", "/api/aegis/operator/passive-health"}:
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("passive_health_projection", {})})
+            return True
+
+        if path == "/api/aegis/opportunities":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            response = load_or_build_operator_state_snapshot_response_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+            snapshot = response.get("data") if isinstance(response.get("data"), dict) else {}
+            active = snapshot.get("active_opportunity_projection") if isinstance(snapshot.get("active_opportunity_projection"), dict) else {}
+            self._send_json(HTTPStatus.OK, {"ok": True, "current_truth_status": snapshot.get("current_truth_status"), **active})
+            return True
+
+        if path == "/api/aegis/review-ledger":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {"ok": True, **cockpit.get("review_ledger_projection", {})})
+            return True
+
+        if path == "/api/aegis/eod-outcomes/latest":
+            current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+            day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1"))
+            cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+            latest = cockpit.get("eod_opportunity_outcome_report", {})
+            if not latest:
+                latest = read_latest_eod_opportunity_outcome_report_v1(truth_root=GLOBAL_TRUTH_ROOT) or {}
+            self._send_json(HTTPStatus.OK, {"ok": True, **(latest or {})})
+            return True
+
+        if path.startswith("/api/aegis/eod-outcomes/by-session/"):
+            trading_session = unquote(path.rsplit("/", 1)[-1])
+            report = read_eod_opportunity_outcome_report_v1(truth_root=GLOBAL_TRUTH_ROOT, trading_session=trading_session)
+            if report is None:
+                cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, trading_session)
+                report = cockpit.get("eod_opportunity_outcome_report", {})
+            self._send_json(HTTPStatus.OK, {"ok": True, **(report or {})})
+            return True
+
+        if path.startswith("/api/aegis/eod-outcomes/sleeves/") and path.endswith("/history"):
+            parts = path.strip("/").split("/")
+            sleeve_id = unquote(parts[-2]) if len(parts) >= 2 else ""
+            self._send_json(HTTPStatus.OK, {"ok": True, **eod_sleeve_history_v1(truth_root=GLOBAL_TRUTH_ROOT, sleeve_id=sleeve_id)})
+            return True
+
+        if path.startswith("/api/aegis/eod-outcomes/"):
+            report_id = unquote(path.rsplit("/", 1)[-1])
+            report = read_eod_opportunity_outcome_report_by_id_v1(truth_root=GLOBAL_TRUTH_ROOT, eod_outcome_report_id=report_id)
+            if report is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "EOD_OUTCOME_REPORT_NOT_FOUND", "eod_outcome_report_id": report_id})
+                return True
+            self._send_json(HTTPStatus.OK, {"ok": True, **report})
+            return True
+
+        if path == "/api/aegis/operator/command-registry":
+            self._send_json(HTTPStatus.OK, {"ok": True, **operator_command_registry_v1()})
+            return True
+
+        if path.startswith("/api/aegis/candidates/") and path.endswith("/decision-support"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 5 and parts[0] == "api" and parts[1] == "aegis" and parts[2] == "candidates" and parts[4] == "decision-support":
+                candidate_id = unquote(parts[3])
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+                candidate = find_candidate_for_decision_support_v1(cockpit, candidate_id)
+                if not candidate:
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND,
+                        {
+                            "ok": False,
+                            "error": "CANDIDATE_NOT_FOUND",
+                            "candidate_id": candidate_id,
+                            "read_only": True,
+                            "broker_execution_allowed": False,
+                            "autonomous_execution_allowed": False,
+                            "order_routing_allowed": False,
+                        },
+                    )
+                    return True
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "read_only": True,
+                        "brief": build_candidate_decision_support_brief_v1(candidate, cockpit),
+                    },
+                )
+                return True
+
+        if path.startswith("/api/aegis/candidates/") and path.endswith("/decision"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 5 and parts[0] == "api" and parts[1] == "aegis" and parts[2] == "candidates" and parts[4] == "decision":
+                candidate_id = unquote(parts[3])
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+                for row in cockpit.get("active_opportunity_projection", {}).get("candidates", []):
+                    if isinstance(row, dict) and str(row.get("candidate_id") or row.get("id") or "") == candidate_id:
+                        self._send_json(HTTPStatus.OK, {"ok": True, "read_only": True, **row.get("candidate_decision_projection", {})})
+                        return True
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "CANDIDATE_NOT_FOUND", "candidate_id": candidate_id, "read_only": True})
+                return True
+
+        if path == "/api/aegis/candidate-review-ledger":
+            raw_filter = (qs.get("filter") or ["all"])[0]
+            day = _projection_day_for_report(requested_day, "aegis_candidate_review_ledger_v1")
+            ledger_path, ledger = latest_json_v1(
+                GLOBAL_TRUTH_ROOT,
+                "aegis_candidate_review_ledger_v1",
+                day,
+                "candidate_review_ledger.v1.json",
+            )
+            if not ledger:
+                ledger = build_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, filter_name=str(raw_filter or "all"))
+            else:
+                ledger = filter_candidate_review_ledger_v1(ledger, str(raw_filter or "all"))
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "status": "AVAILABLE" if ledger else "MISSING",
+                    "ledger_path": str(ledger_path or ""),
+                    **ledger,
+                    "read_only": True,
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                },
+            )
+            return True
+
+        if path == "/api/aegis/journal-timeline":
+            day = _projection_day_for_report(requested_day, "aegis_journal_timeline_v1")
+            timeline_path, timeline = latest_json_v1(
+                GLOBAL_TRUTH_ROOT,
+                "aegis_journal_timeline_v1",
+                day,
+                "journal_timeline.v1.json",
+            )
+            timeline_payload = timeline if isinstance(timeline, dict) else {}
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": bool(timeline_payload),
+                    "status": "AVAILABLE" if timeline_payload else "MISSING",
+                    "day_utc": str(timeline_payload.get("day_utc") or day),
+                    "timeline_path": str(timeline_path or ""),
+                    "timeline_summary": timeline_payload.get("timeline_summary") if isinstance(timeline_payload.get("timeline_summary"), dict) else {
+                        "total_events": 0,
+                        "latest_event_at": None,
+                        "candidate_events": 0,
+                        "edge_events": 0,
+                        "sleeve_events": 0,
+                        "performance_events": 0,
+                        "runtime_events": 0,
+                        "governance_events": 0,
+                        "system_events": 0,
+                    },
+                    "recent_events": timeline_payload.get("recent_events") if isinstance(timeline_payload.get("recent_events"), list) else [],
+                    "filters": timeline_payload.get("filters") if isinstance(timeline_payload.get("filters"), list) else ["All", "Candidates", "Edges", "Sleeves", "Performance", "Runtime", "Governance", "System"],
+                    "entity_index": timeline_payload.get("entity_index") if isinstance(timeline_payload.get("entity_index"), dict) else {"candidates": [], "hypotheses": [], "sleeves": [], "regimes": []},
+                    "audit_drilldowns": timeline_payload.get("audit_drilldowns") if isinstance(timeline_payload.get("audit_drilldowns"), list) else [],
+                    "diagnostics": timeline_payload.get("diagnostics") if isinstance(timeline_payload.get("diagnostics"), list) else [],
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "read_only": True,
+                },
+            )
+            return True
+
+        if path == "/api/aegis/adaptive-intelligence":
+            day = _projection_day(requested_day)
+            adaptive_payloads = {}
+            for key, spec in {
+                "regime_detection": ("regime_detection_v1", "regime_detection.v1.json"),
+                "capital_allocation_intelligence": ("capital_allocation_intelligence_v1", "capital_allocation_intelligence.v1.json"),
+                "failure_analysis": ("failure_analysis_v1", "failure_analysis.v1.json"),
+                "research_memory_graph": ("research_memory_graph_v1", "research_memory_graph.v1.json"),
+                "cross_sleeve_interaction": ("cross_sleeve_interaction_v1", "cross_sleeve_interaction.v1.json"),
+                "research_queue_optimizer": ("research_queue_optimizer_v1", "research_queue_optimizer.v1.json"),
+                "event_interpretation": ("event_interpretation_v1", "event_interpretation.v1.json"),
+                "adaptive_governance": ("adaptive_governance_v1", "adaptive_governance.v1.json"),
+                "regime_context": ("regime_context_v1", "regime_context.v1.json"),
+                "sleeve_performance_analytics": ("sleeve_performance_analytics_v1", "sleeve_performance_analytics.v1.json"),
+                "cross_sleeve_analysis": ("cross_sleeve_analysis_v1", "cross_sleeve_analysis.v1.json"),
+            }.items():
+                _payload_path, adaptive_payloads[key] = latest_json_v1(GLOBAL_TRUTH_ROOT, spec[0], day, spec[1])
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "day_utc": day,
+                    "summaries": intelligence_summaries_v1(GLOBAL_TRUTH_ROOT, day),
+                    "adaptive_payloads": adaptive_payloads,
+                    "execution_allowed": False,
+                    "broker_submit_transmit_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "read_only": True,
+                },
+            )
+            return True
+
+        if path == "/api/aegis/intelligence-governance":
+            day = _projection_day(requested_day)
+            kernel_path, kernel_payload = latest_json_v1(
+                GLOBAL_TRUTH_ROOT,
+                "aegis_intelligence_governance_kernel_v1",
+                day,
+                "intelligence_governance_kernel.v1.json",
+            )
+            recommendations_path, recommendations_payload = latest_json_v1(
+                GLOBAL_TRUTH_ROOT,
+                "aegis_intelligence_governance_kernel_v1",
+                day,
+                "intelligence_recommendations.v1.json",
+            )
+            ledger_path, ledger_payload = latest_json_v1(
+                GLOBAL_TRUTH_ROOT,
+                "aegis_intelligence_governance_kernel_v1",
+                day,
+                "intelligence_approval_ledger.v1.json",
+            )
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "day_utc": day,
+                    "kernel_path": str(kernel_path or ""),
+                    "recommendations_path": str(recommendations_path or ""),
+                    "approval_ledger_snapshot_path": str(ledger_path or ""),
+                    "kernel": kernel_payload,
+                    "recommendations": recommendations_payload.get("recommendations") or [],
+                    "approval_ledger": ledger_payload,
+                    "read_only": True,
+                    "runtime_truth_mutation_allowed": False,
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                },
+            )
             return True
 
         if path == "/api/command/overview":
@@ -3115,6 +4958,538 @@ class OpsHandler(SimpleHTTPRequestHandler):
     def _route_action_post(self) -> bool:
         u = urlparse(self.path)
         path = u.path
+
+        if path == "/api/aegis/commands/execute":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("operational_day") or body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "operator_state_snapshot_v1")
+
+                def _repair_job_runner(job_request: Dict[str, Any]) -> Dict[str, Any]:
+                    domain_id = str(job_request.get("domain_id") or "")
+                    if domain_id == "US_EQUITIES_EOD":
+                        orchestration = run_domain_repair_orchestration_v1(
+                            truth_root=GLOBAL_TRUTH_ROOT,
+                            repo_root=REPO_ROOT,
+                            day_utc=day,
+                            domain_id=domain_id,
+                            execute=True,
+                        )
+                        result = next((row for row in orchestration.get("results", []) if isinstance(row, dict) and row.get("domain_id") == domain_id), {})
+                        failure_detail = str((result or {}).get("failure_reason") or "")
+                        for command_result in (result or {}).get("command_results", []) if isinstance((result or {}).get("command_results"), list) else []:
+                            stdout_tail = str(command_result.get("stdout_tail") or "")
+                            if stdout_tail:
+                                try:
+                                    parsed = json.loads(stdout_tail.strip())
+                                    failure_detail = str(parsed.get("failure_reason") or parsed.get("message") or failure_detail)
+                                except Exception:
+                                    failure_detail = stdout_tail[-500:] or failure_detail
+                                break
+                        return {
+                            "job_id": str((result or {}).get("event_id") or f"domain-repair:{day}:{domain_id}"),
+                            "status": str((result or {}).get("status") or "COMPLETED"),
+                            "failure_reason": str((result or {}).get("failure_reason") or ""),
+                            "failure_detail": failure_detail,
+                            "queued_at_utc": str((orchestration.get("lifecycle") or {}).get("generated_at_utc") or ""),
+                            "next_retry_utc": "",
+                            "orchestration": orchestration,
+                        }
+                    return _enqueue_data_remediation_job_v1(
+                        truth_root=GLOBAL_TRUTH_ROOT,
+                        day_utc=day,
+                        playbook_id="refresh_runtime_truth",
+                        request_payload={**body, "domain_id": domain_id, "source": "aegis_command_contract"},
+                    )
+
+                payload = execute_aegis_command_v1(
+                    body,
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    repo_root=REPO_ROOT,
+                    day_utc=day,
+                    actor=str(body.get("requested_by") or "operator-ui"),
+                    repair_job_runner=_repair_job_runner,
+                )
+                status = HTTPStatus.ACCEPTED if payload.get("ok") else HTTPStatus.BAD_REQUEST
+                self._send_json(status, payload)
+            except KeyError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "command_id": str(self._read_json_body().get("command_id") if False else ""), "result_status": "UNKNOWN_COMMAND", "user_message": str(exc), "error_message": str(exc), "broker_execution_allowed": False, "autonomous_execution_allowed": False, "trade_advice_allowed": False})
+            except Exception as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "result_status": "COMMAND_FAILED", "user_message": "Aegis command failed.", "error_message": str(exc), "broker_execution_allowed": False, "autonomous_execution_allowed": False, "trade_advice_allowed": False})
+            return True
+
+        if path == "/api/research-lab/start-research":
+            try:
+                payload = research_lab_start_research_v1(self._read_json_body())
+                self._send_json(HTTPStatus.CREATED, payload)
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(exc), "broker_execution_allowed": False, "live_trading_allowed": False, "automatic_promotion_allowed": False})
+            except Exception as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"ok": False, "message": str(exc), "broker_execution_allowed": False, "live_trading_allowed": False, "automatic_promotion_allowed": False})
+            return True
+
+        if path.startswith("/api/research-lab/hypothesis-proposals/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] == "review":
+                try:
+                    self._send_json(HTTPStatus.CREATED, research_lab_console_review_hypothesis_v1(hypothesis_proposal_id=parts[3], payload=self._read_json_body()))
+                except Exception as exc:
+                    self._send_json(HTTPStatus.CONFLICT, research_lab_console_action_failure_response_v1(action="review", hypothesis_proposal_id=parts[3], error=exc))
+                return True
+            if len(parts) == 5 and parts[4] == "assess-readiness":
+                try:
+                    self._send_json(HTTPStatus.CREATED, research_lab_console_assess_hypothesis_v1(hypothesis_proposal_id=parts[3]))
+                except Exception as exc:
+                    self._send_json(HTTPStatus.CONFLICT, research_lab_console_action_failure_response_v1(action="assess-readiness", hypothesis_proposal_id=parts[3], error=exc))
+                return True
+            if len(parts) == 5 and parts[4] == "convert-to-research-plan":
+                try:
+                    self._send_json(HTTPStatus.CREATED, research_lab_console_convert_hypothesis_v1(hypothesis_proposal_id=parts[3], payload=self._read_json_body()))
+                except Exception as exc:
+                    self._send_json(HTTPStatus.CONFLICT, research_lab_console_action_failure_response_v1(action="convert-to-research-plan", hypothesis_proposal_id=parts[3], error=exc))
+                return True
+
+        if path.startswith("/api/research-lab/research-plans/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] in {"run-event-study", "run-backtest"}:
+                self._send_json(HTTPStatus.ACCEPTED, research_lab_explicit_action_placeholder_v1(action=parts[4], entity_id=parts[3], payload=self._read_json_body()))
+                return True
+
+        if path.startswith("/api/research-lab/paper-trials/"):
+            parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[4] in {"record-observation", "measure-due-outcomes", "review"}:
+                self._send_json(HTTPStatus.ACCEPTED, research_lab_explicit_action_placeholder_v1(action=parts[4], entity_id=parts[3], payload=self._read_json_body()))
+                return True
+
+        if path == "/api/aegis/data-remediation/run":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day(requested_day)
+                playbook_id = str(body.get("playbook_id") or "")
+                if playbook_id and playbook_id not in {"refresh_required_symbol_data", "refresh_runtime_truth", "rebuild_operator_projections", "mark_provider_data_needed"}:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "PLAYBOOK_NOT_APPROVED", "broker_execution_allowed": False, "autonomous_execution_allowed": False})
+                    return True
+                payload = _enqueue_data_remediation_job_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    day_utc=day,
+                    playbook_id=playbook_id or "refresh_required_symbol_data",
+                    request_payload=body,
+                )
+                self._send_json(HTTPStatus.ACCEPTED, {"ok": True, "background_job_enqueued": True, **payload, "broker_execution_allowed": False, "order_routing_allowed": False, "live_trading_allowed": False, "autonomous_execution_allowed": False})
+                return True
+            except Exception as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "DATA_REMEDIATION_FAILED", "detail": str(exc), "broker_execution_allowed": False, "autonomous_execution_allowed": False})
+                return True
+
+        if path == "/api/aegis/operator/commands":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                cockpit = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+                result = execute_operator_command_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    repo_root=REPO_ROOT,
+                    day_utc=day,
+                    cockpit_payload=cockpit,
+                    request_payload=body,
+                )
+                if result.get("ok") is True:
+                    ledger_payload = build_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, filter_name="all")
+                    ledger_paths = write_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=ledger_payload)
+                    canonical = build_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, repo_root=REPO_ROOT, day_utc=day)
+                    canonical_paths = write_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=canonical)
+                    brief = build_operator_brief_v1(canonical=canonical, canonical_path=Path(canonical_paths["json"]))
+                    brief_paths = write_operator_brief_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=brief)
+                    refreshed = _operator_cockpit_payload(GLOBAL_TRUTH_ROOT, day)
+                    result = {
+                        **result,
+                        "operator_task_projection": refreshed.get("operator_task_projection", {}),
+                        "active_opportunity_projection": refreshed.get("active_opportunity_projection", {}),
+                        "review_ledger_projection": refreshed.get("review_ledger_projection", {}),
+                        "canonical_operator_state": canonical_paths,
+                        "candidate_review_ledger": ledger_paths,
+                        "operator_brief": brief_paths,
+                    }
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                self._send_json(status, {
+                    **result,
+                    "review_only": True,
+                    "broker_execution_allowed": False,
+                    "order_routing_allowed": False,
+                    "live_trading_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                    "automatic_promotion_allowed": False,
+                })
+                return True
+            except Exception as exc:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "ok": False,
+                        "message": "Operator command failed.",
+                        "error": str(exc),
+                        "review_only": True,
+                        "broker_execution_allowed": False,
+                        "order_routing_allowed": False,
+                        "live_trading_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "automatic_approval_allowed": False,
+                        "automatic_promotion_allowed": False,
+                    },
+                )
+                return True
+        if path == "/api/aegis/operator/manual-capture-records":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                current_truth = resolve_current_operator_truth_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=_operator_truth_day(requested_day))
+                day = str(current_truth.get("source_day") or _projection_day_for_report(requested_day, "operator_state_snapshot_v1"))
+                record = append_manual_capture_record_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, request_payload=body)
+            except ValueError as exc:
+                error_payload = _json_error_payload(str(exc))
+                self._send_json(HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    **error_payload,
+                    "message": error_payload.get("message") or str(exc),
+                    "review_only": True,
+                    "broker_execution_allowed": False,
+                    "order_routing_allowed": False,
+                    "live_trading_allowed": False,
+                    "allocation_allowed": False,
+                    "paper_submit_created": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                })
+                return True
+            except Exception as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "ok": False,
+                    "message": "Manual capture record append failed.",
+                    "error": str(exc),
+                    "review_only": True,
+                    "broker_execution_allowed": False,
+                    "order_routing_allowed": False,
+                    "live_trading_allowed": False,
+                    "allocation_allowed": False,
+                    "paper_submit_created": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                })
+                return True
+            self._send_json(HTTPStatus.OK, {
+                "ok": True,
+                "record": record,
+                "record_id": record.get("record_id"),
+                "manual_capture_record_id": record.get("manual_capture_record_id") or record.get("record_id"),
+                "event_ids": record.get("event_ids") if isinstance(record.get("event_ids"), list) else [],
+                "current_ticket_id": record.get("ticket_id"),
+                "current_ticket_hash": (record.get("trade_ticket_lineage") or {}).get("lineage_hash") if isinstance(record.get("trade_ticket_lineage"), dict) else "",
+                "operator_statement": "Manual capture record appended. Aegis did not place, route, submit, or transmit an order.",
+                "manual_ib_capture_recorded": True,
+                "human_review_required": False,
+                "broker_execution_allowed": False,
+                "order_routing_allowed": False,
+                "live_trading_allowed": False,
+                "allocation_allowed": False,
+                "paper_submit_created": False,
+                "autonomous_execution_allowed": False,
+                "automatic_approval_allowed": False,
+                "automatic_promotion_allowed": False,
+            })
+            return True
+
+
+        if path in {"/api/aegis/position/risk-plan", "/api/aegis/position/stop-event", "/api/aegis/position/correction"}:
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                if path.endswith("/risk-plan"):
+                    event = append_position_risk_plan_v1(
+                        truth_root=GLOBAL_TRUTH_ROOT,
+                        day_utc=day,
+                        candidate_id=str(body.get("candidate_id") or ""),
+                        sleeve_id=str(body.get("sleeve_id") or ""),
+                        symbol=str(body.get("symbol") or ""),
+                        direction=str(body.get("direction") or ""),
+                        quantity=body.get("quantity"),
+                        entry_price=body.get("entry_price"),
+                        entry_timestamp_utc=str(body.get("entry_timestamp_utc") or ""),
+                        stop_type=str(body.get("stop_type") or ""),
+                        stop_price=body.get("stop_price"),
+                        target_price=body.get("target_price"),
+                        time_stop_at=str(body.get("time_stop_at") or ""),
+                        stop_reason=str(body.get("stop_reason") or ""),
+                        operator=str(body.get("operator") or ""),
+                        reason=str(body.get("reason") or ""),
+                    )
+                elif path.endswith("/stop-event"):
+                    event = append_stop_event_v1(
+                        truth_root=GLOBAL_TRUTH_ROOT,
+                        day_utc=day,
+                        candidate_id=str(body.get("candidate_id") or ""),
+                        stop_triggered=body.get("stop_triggered"),
+                        stop_price=body.get("stop_price"),
+                        exit_price=body.get("exit_price"),
+                        exit_timestamp_utc=str(body.get("exit_timestamp_utc") or ""),
+                        exit_reason=str(body.get("exit_reason") or ""),
+                        operator=str(body.get("operator") or ""),
+                        reason=str(body.get("reason") or ""),
+                    )
+                    update_candidate_outcomes_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, candidate_id=str(body.get("candidate_id") or ""), outcome_status=str(body.get("outcome_status") or "OUTCOME_PENDING"))
+                else:
+                    event = append_position_event_correction_v1(
+                        truth_root=GLOBAL_TRUTH_ROOT,
+                        day_utc=day,
+                        candidate_id=str(body.get("candidate_id") or ""),
+                        field=str(body.get("field") or ""),
+                        new_value=body.get("new_value"),
+                        operator=str(body.get("operator") or ""),
+                        reason=str(body.get("reason") or ""),
+                    )
+                    update_candidate_outcomes_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, candidate_id=str(body.get("candidate_id") or ""), outcome_status=str(body.get("outcome_status") or "OUTCOME_PENDING"))
+                position_payload = build_position_management_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+                position_paths = write_position_management_reports_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=position_payload)
+                canonical = build_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, repo_root=REPO_ROOT, day_utc=day)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=canonical)
+                brief = build_operator_brief_v1(canonical=canonical, canonical_path=Path(canonical_paths["json"]))
+                brief_paths = write_operator_brief_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=brief)
+                journal = build_journal_timeline_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day)
+                journal_paths = write_journal_timeline_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=journal)
+                candidate_id = str(event.get("candidate_id") or "")
+                updated_state = next((row for row in position_payload.get("positions", []) if isinstance(row, dict) and str(row.get("candidate_id") or "") == candidate_id), {})
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(exc), "broker_execution_allowed": False, "autonomous_execution_allowed": False, "order_routing_allowed": False, "automatic_stop_execution_allowed": False})
+                return True
+            except Exception as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": "Position management event append failed.", "error": str(exc), "broker_execution_allowed": False, "autonomous_execution_allowed": False, "order_routing_allowed": False, "automatic_stop_execution_allowed": False})
+                return True
+            self._send_json(HTTPStatus.OK, {
+                "ok": True,
+                "event": event,
+                "position_state": updated_state,
+                "position_management": position_paths,
+                "canonical_operator_state": canonical_paths,
+                "operator_brief": brief_paths,
+                "journal_timeline": journal_paths,
+                "operator_statement": "Aegis tracked this position event. Aegis did not execute a broker order or stop.",
+                "manual_ib_capture_recorded": True,
+                "human_review_required": False,
+                "broker_execution_allowed": False,
+                "order_routing_allowed": False,
+                "live_trading_allowed": False,
+                "autonomous_execution_allowed": False,
+                "automatic_stop_execution_allowed": False,
+                "automatic_order_placement_allowed": False,
+                "automatic_sleeve_mutation_allowed": False,
+            })
+            return True
+
+        if path == "/api/aegis/candidate-review":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                event = append_candidate_review_action_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    day_utc=day,
+                    candidate_id=str(body.get("candidate_id") or ""),
+                    action=str(body.get("action") or ""),
+                    operator=str(body.get("operator") or "operator-ui"),
+                    operator_note=str(body.get("operator_note") or ""),
+                    source="UI",
+                )
+                ledger_payload = build_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, filter_name="all")
+                ledger_paths = write_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=ledger_payload)
+                canonical = build_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, repo_root=REPO_ROOT, day_utc=day)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=canonical)
+                brief = build_operator_brief_v1(canonical=canonical, canonical_path=Path(canonical_paths["json"]))
+                brief_paths = write_operator_brief_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=brief)
+            except ValueError as exc:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "message": str(exc),
+                        "review_only": True,
+                        "broker_execution_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "automatic_approval_allowed": False,
+                    },
+                )
+                return True
+            except Exception as exc:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "ok": False,
+                        "message": "Candidate review action failed.",
+                        "error": str(exc),
+                        "review_only": True,
+                        "broker_execution_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "automatic_approval_allowed": False,
+                    },
+                )
+                return True
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "event": event,
+                    "canonical_operator_state": canonical_paths,
+                    "candidate_review_ledger": ledger_paths,
+                    "operator_brief": brief_paths,
+                    "review_only": True,
+                    "human_review_required": True,
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                },
+            )
+            return True
+        if path == "/api/aegis/manual-external-capture":
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "aegis_canonical_operator_state_v1")
+                event = append_manual_external_capture_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    day_utc=day,
+                    candidate_id=str(body.get("candidate_id") or ""),
+                    manually_captured=body.get("manually_captured"),
+                    quantity=body.get("quantity"),
+                    capture_timestamp=str(body.get("capture_timestamp") or ""),
+                    external_execution_venue=str(body.get("external_execution_venue") or ""),
+                    operator_notes=str(body.get("operator_notes") or ""),
+                    confidence_override=str(body.get("confidence_override") or ""),
+                    paper_trade_only=body.get("paper_trade_only", True),
+                    review_decision=str(body.get("review_decision") or "MANUAL_CAPTURE_RECORDED"),
+                    operator=str(body.get("operator") or "operator-ui"),
+                )
+                review_action = {
+                    "WATCHLIST": "watchlist",
+                    "NEEDS_MORE_EVIDENCE": "needs-more-evidence",
+                    "DISMISS": "dismiss",
+                }.get(str(body.get("review_decision") or "").strip().upper().replace("-", "_"), "add-note")
+                review_event = append_candidate_review_action_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    day_utc=day,
+                    candidate_id=str(body.get("candidate_id") or ""),
+                    action=review_action,
+                    operator=str(body.get("operator") or "operator-ui"),
+                    operator_note=f"Manual external capture record: {event['capture_event_id']}. Aegis did not execute this trade. {str(body.get('operator_notes') or '').strip()}".strip(),
+                    source="UI_MANUAL_CAPTURE",
+                )
+                ledger_payload = build_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, filter_name="all")
+                ledger_paths = write_candidate_review_ledger_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=ledger_payload)
+                canonical = build_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, repo_root=REPO_ROOT, day_utc=day)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=canonical)
+                brief = build_operator_brief_v1(canonical=canonical, canonical_path=Path(canonical_paths["json"]))
+                brief_paths = write_operator_brief_v1(truth_root=GLOBAL_TRUTH_ROOT, day_utc=day, payload=brief)
+            except ValueError as exc:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "message": str(exc),
+                        "operator_statement": "Aegis did not execute this trade.",
+                        "review_only": True,
+                        "broker_execution_allowed": False,
+                        "order_routing_allowed": False,
+                        "live_trading_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "automatic_approval_allowed": False,
+                        "automatic_promotion_allowed": False,
+                    },
+                )
+                return True
+            except Exception as exc:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "ok": False,
+                        "message": "Manual external capture recording failed.",
+                        "error": str(exc),
+                        "operator_statement": "Aegis did not execute this trade.",
+                        "review_only": True,
+                        "broker_execution_allowed": False,
+                        "order_routing_allowed": False,
+                        "live_trading_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "automatic_approval_allowed": False,
+                        "automatic_promotion_allowed": False,
+                    },
+                )
+                return True
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "event": event,
+                    "review_event": review_event,
+                    "canonical_operator_state": canonical_paths,
+                    "candidate_review_ledger": ledger_paths,
+                    "operator_brief": brief_paths,
+                    "operator_statement": "Aegis did not execute this trade.",
+                    "review_only": True,
+                    "human_review_required": True,
+                    "broker_execution_allowed": False,
+                    "order_routing_allowed": False,
+                    "live_trading_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "automatic_approval_allowed": False,
+                    "automatic_promotion_allowed": False,
+                },
+            )
+            return True
+        if path.startswith("/api/aegis/edge-lab/hypothesis/"):
+            endpoint = path.rsplit("/", 1)[-1]
+            try:
+                body = self._read_json_body()
+                qs = parse_qs(u.query)
+                requested_day = str(body.get("day_utc") or body.get("day") or (qs.get("day") or [""])[0] or "")
+                day = _projection_day_for_report(requested_day, "aegis_research_pipeline_v1")
+                payload = execute_edge_lab_workflow_action_v1(
+                    truth_root=GLOBAL_TRUTH_ROOT,
+                    day_utc=day,
+                    endpoint=endpoint,
+                    request_payload=body,
+                )
+            except EdgeLabWorkflowApiError as exc:
+                self._send_json(
+                    exc.status_code,
+                    {
+                        "ok": False,
+                        "message": str(exc),
+                        "details": exc.details,
+                        **_edge_lab_safety_fields(),
+                    },
+                )
+                return True
+            except Exception as exc:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "ok": False,
+                        "message": "Edge Lab workflow action failed.",
+                        "error": str(exc),
+                        **_edge_lab_safety_fields(),
+                    },
+                )
+                return True
+            self._send_json(HTTPStatus.OK, payload)
+            return True
         if path.startswith("/api/configuration/"):
             return self._route_configuration_post()
         if path.startswith("/api/reliability/"):
@@ -3201,9 +5576,26 @@ class OpsHandler(SimpleHTTPRequestHandler):
             self._send_performance_cockpit_html(requested_day)
             sys.stderr.write(f"TIMING: performance cockpit duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
-        if self._route_api():
-            sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
-            return
+        try:
+            if self._route_api():
+                sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+                return
+        except Exception as exc:
+            if path.startswith("/api/research-lab/"):
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": False,
+                        "read_only": True,
+                        "error": "research_lab_route_unavailable",
+                        "error_type": type(exc).__name__,
+                        "error_detail": str(exc),
+                        "path": path,
+                    },
+                )
+                sys.stderr.write(f"TIMING: api endpoint={path} status=research_lab_safe_error duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+                return
+            raise
         return super().do_GET()
 
     def do_OPTIONS(self) -> None:

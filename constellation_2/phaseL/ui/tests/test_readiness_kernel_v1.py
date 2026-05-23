@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
 
 from constellation_2.phaseL.ui_api.readiness_kernel_v1 import build_readiness_kernel_v1
 
@@ -31,6 +32,51 @@ def _write_packet(root: Path, mode: str = "PRODUCTION", commit: str = COMMIT) ->
             ]
         ),
         encoding="utf-8",
+    )
+
+
+def _write_runtime_evaluation(root: Path, *, day: str = DAY, hash_value: str = "b" * 64, trade_allowed: bool = False, manual_allowed: bool = False) -> Path:
+    return _write_json(
+        root,
+        f"reports/aegis_runtime_truth_kernel_v1/{day}/runtime_evaluation.v1.json",
+        {
+            "schema_id": "aegis_runtime_evaluation",
+            "schema_version": "v1",
+            "day_utc": day,
+            "generated_at_utc": "2026-04-29T13:00:00Z",
+            "deterministic_output_hash": hash_value,
+            "runtime_truth_classification": "REAL_RUNTIME",
+            "highest_readiness_layer": "BLOCKED" if not trade_allowed else "ADVISORY_READY",
+            "capabilities": {
+                "TRADE_ADVICE_ALLOWED": {"allowed": trade_allowed, "reason": "TEST_BLOCKED" if not trade_allowed else "TEST_ALLOWED"},
+                "MANUAL_TRADE_CAPTURE_ALLOWED": {"allowed": manual_allowed, "reason": "TEST_ALLOWED" if manual_allowed else "TEST_BLOCKED"},
+            },
+        },
+    )
+
+
+def _write_control_packet_json(root: Path, *, day: str = DAY, hash_value: str = "b" * 64, readiness: str = "READY") -> Path:
+    return _write_json(
+        root,
+        f"reports/aegis_chatgpt_control_packet_v1/{day}/aegis_chatgpt_control_packet.v1.json",
+        {
+            "schema_id": "aegis_chatgpt_control_packet",
+            "schema_version": "v1",
+            "artifact_id": "aegis_chatgpt_control_packet_v1",
+            "day_utc": day,
+            "generated_at": "2026-04-29T13:00:00Z",
+            "packet_generated_at_utc": "2026-04-29T13:00:00Z",
+            "packet_day_utc": day,
+            "packet_freshness_status": "CURRENT",
+            "packet_version": "aegis_chatgpt_control_packet.v1",
+            "runtime_truth_classification": "REAL_RUNTIME",
+            "runtime_evaluation_hash": hash_value,
+            "runtime_evaluation_path": str((root / f"reports/aegis_runtime_truth_kernel_v1/{day}/runtime_evaluation.v1.json").resolve()),
+            "readiness_state": {"classification": readiness},
+            "trade_advice_allowed": True,
+            "manual_trade_capture_allowed": True,
+            "canonical_json_hash": "c" * 64,
+        },
     )
 
 
@@ -72,7 +118,7 @@ def _seed_control_plane(root: Path, mode: str = "PRODUCTION") -> None:
     _write_packet(root, mode=mode)
 
 
-def test_ui_readiness_uses_control_plane_as_primary_authority(tmp_path: Path, monkeypatch) -> None:
+def test_ui_readiness_uses_runtime_evaluation_as_primary_authority(tmp_path: Path, monkeypatch) -> None:
     import ops.tools.aegis_submit_enforcement_v1 as enforcement
 
     monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
@@ -88,11 +134,11 @@ def test_ui_readiness_uses_control_plane_as_primary_authority(tmp_path: Path, mo
 
     payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=sleeve_root)
 
-    assert payload["primary_ui_authority"] == "aegis_control_plane_v1"
-    assert payload["primary_authority_path"].endswith("control_plane.v1.json")
-    assert payload["final_readiness_authority"] == "aegis_control_plane_v1"
+    assert payload["primary_ui_authority"] == "RuntimeEvaluation"
+    assert payload["primary_authority_path"].endswith("runtime_evaluation.v1.json")
+    assert payload["final_readiness_authority"] == "RuntimeEvaluation"
     assert payload["current_phase"] == "SESSION_AUTHORITY"
-    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
+    assert payload["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
     assert payload["blocker_owner"] == "session_authority"
     assert payload["recovery_commands"]
     assert payload["evidence_paths"] == [str(truth_root / f"target_day_admission_v1/{DAY}.json")]
@@ -114,7 +160,7 @@ def test_missing_production_version_is_submit_blocker(tmp_path: Path, monkeypatc
     assert payload["runtime_mode"] == "PRODUCTION"
     assert payload["production_version_status"] == "MISSING"
     assert payload["submit_status"] == "BLOCKED"
-    assert payload["submit_canonical_blocker"] == "PRODUCTION_VERSION_MISSING"
+    assert payload["submit_canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
 
 
 def test_candidate_mode_ui_submit_disabled(tmp_path: Path, monkeypatch) -> None:
@@ -130,7 +176,7 @@ def test_candidate_mode_ui_submit_disabled(tmp_path: Path, monkeypatch) -> None:
     assert payload["runtime_mode"] == "CANDIDATE"
     assert payload["production_version_status"] == "NOT_REQUIRED_FOR_CANDIDATE"
     assert payload["submit_status"] == "BLOCKED"
-    assert payload["submit_canonical_blocker"] == "CANDIDATE_RUNTIME_SUBMIT_DISABLED"
+    assert payload["submit_canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
 
 
 def test_requirement_graph_and_kernel_cannot_override_control_plane(tmp_path: Path, monkeypatch) -> None:
@@ -146,8 +192,8 @@ def test_requirement_graph_and_kernel_cannot_override_control_plane(tmp_path: Pa
     payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
 
     assert payload["overall_status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
-    assert payload["truth_resolution_source_path"].endswith("control_plane.v1.json")
+    assert payload["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
+    assert payload["truth_resolution_source_path"] == ""
 
 
 def test_legacy_ready_surfaces_cannot_override_control_plane_submit_block(tmp_path: Path, monkeypatch) -> None:
@@ -193,7 +239,7 @@ def test_legacy_ready_surfaces_cannot_override_control_plane_submit_block(tmp_pa
     payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=sleeve_root)
 
     assert payload["overall_status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
+    assert payload["canonical_blocker"] == "RUNTIME_EVALUATION_MISSING"
     assert payload["submit_status"] == "BLOCKED"
     assert payload["submit_canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
 
@@ -215,3 +261,108 @@ def test_server_and_ui_are_wired_to_control_plane_readiness() -> None:
     assert "Phase-Controlled Readiness" in pages
     assert "aegis_control_plane_v1" in pages
     assert "safeList(operations.readiness_ladder)" not in pages
+
+
+def test_stale_control_packet_current_runtime_evaluation_uses_runtime_authority(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    _seed_control_plane(truth_root)
+    _write_runtime_evaluation(truth_root, hash_value="b" * 64, trade_allowed=False, manual_allowed=False)
+    _write_control_packet_json(truth_root, day="2026-04-28", hash_value="b" * 64, readiness="READY")
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
+
+    assert payload["primary_ui_authority"] == "RuntimeEvaluation"
+    assert payload["runtime_evaluation_hash"] == "b" * 64
+    assert payload["overall_status"] == "BLOCKED"
+    assert payload["packet"]["packet_freshness_status"] in {"MISSING", "STALE"}
+
+
+def test_hash_mismatch_packet_is_explanatory_and_marked_mismatch(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    _seed_control_plane(truth_root)
+    _write_runtime_evaluation(truth_root, hash_value="b" * 64, trade_allowed=False, manual_allowed=False)
+    _write_control_packet_json(truth_root, hash_value="d" * 64, readiness="READY")
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
+
+    assert payload["packet"]["packet_freshness_status"] == "HASH_MISMATCH"
+    assert payload["packet"]["readiness_usage"] == "EXPLANATORY_ONLY"
+    assert payload["overall_status"] == "BLOCKED"
+
+
+def test_missing_packet_still_projects_from_runtime_evaluation(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    _seed_control_plane(truth_root)
+    packet_path = truth_root / "exports/aegis_state/latest/chatgpt_aegis_packet.md"
+    packet_path.unlink()
+    _write_runtime_evaluation(truth_root, hash_value="b" * 64, trade_allowed=False, manual_allowed=False)
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
+
+    assert payload["packet"]["packet_freshness_status"] == "MISSING"
+    assert payload["runtime_evaluation_hash"] == "b" * 64
+    assert payload["overall_status"] == "BLOCKED"
+
+
+def test_packet_ready_cannot_override_blocked_runtime_evaluation(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    _seed_control_plane(truth_root)
+    _write_runtime_evaluation(truth_root, hash_value="b" * 64, trade_allowed=False, manual_allowed=False)
+    _write_control_packet_json(truth_root, hash_value="b" * 64, readiness="READY")
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
+
+    assert payload["packet"]["packet_freshness_status"] == "CURRENT"
+    assert payload["overall_status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MANUAL_TRADE_CAPTURE_ALLOWED,TRADE_ADVICE_ALLOWED"
+    assert payload["trade_advice_allowed"] is False
+
+
+def test_runtime_manual_capture_allowed_survives_stale_packet_warning(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    _seed_control_plane(truth_root)
+    _write_runtime_evaluation(truth_root, hash_value="b" * 64, trade_allowed=False, manual_allowed=True)
+    _write_control_packet_json(truth_root, hash_value="d" * 64, readiness="READY")
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=tmp_path / "sleeve")
+
+    assert payload["manual_trade_capture_allowed"] is True
+    assert payload["trade_advice_allowed"] is False
+    assert payload["operator_mode"] == "manual_capture_only"
+    assert payload["platform_capture_capability"] == "READY"
+    assert payload["capture_ticket_count"] == 0
+    assert payload["capture_ticket_status"] == "NONE_AVAILABLE"
+    assert payload["manual_capture_summary"] == [
+        "Manual capture capability: READY",
+        "IB capture tickets: 0",
+        "Capture ticket status: NONE_AVAILABLE",
+        "No action required",
+        "Submit-boundary VALIDATED",
+        "Broker submit DISABLED",
+        "IB handshake NOT REQUIRED FOR MANUAL CAPTURE",
+    ]
+    assert payload["broker_submit_enabled"] is False
+    assert payload["paper_broker_simulation_enabled"] is False
+    assert payload["autonomous_execution_allowed"] is False
+    assert payload["packet"]["packet_freshness_status"] == "HASH_MISMATCH"
+    assert payload["overall_status"] == "BLOCKED"

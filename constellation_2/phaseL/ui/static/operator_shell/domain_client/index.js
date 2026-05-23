@@ -72,6 +72,194 @@ export function fetchAegisEventMonitoring(params = {}) {
   return query("/api/aegis/event-monitoring", params);
 }
 
+export function fetchAegisRuntimeTruth(params = {}) {
+  return query("/api/aegis/runtime-truth", params);
+}
+
+export function fetchAegisRepairCenter(params = {}) {
+  return query("/api/aegis/repair-center", params);
+}
+
+export function fetchAegisOperatorCockpit(params = {}) {
+  return query("/api/aegis/operator-cockpit", params);
+}
+
+export function fetchAegisOperatorStateSnapshotLatest(params = {}) {
+  return query("/api/aegis/operator/state-snapshot/latest", params);
+}
+
+export function fetchAegisManualCaptureLatest(params = {}) {
+  return query("/api/aegis/operator/manual-capture/latest", params);
+}
+
+export function fetchAegisSuppressedWatchlistLatest(params = {}) {
+  return query("/api/aegis/operator/suppressed-watchlist/latest", params);
+}
+
+export function fetchAegisManualCaptureRecords(params = {}) {
+  return query("/api/aegis/operator/manual-capture-records", params);
+}
+
+export function fetchAegisManualCaptureRecordLatest(params = {}) {
+  return query("/api/aegis/operator/manual-capture-records/latest", params);
+}
+
+export function postAegisManualCaptureRecord(payload = {}) {
+  return postJson("/api/aegis/operator/manual-capture-records", payload);
+}
+
+export function fetchAegisJournalTimeline(params = {}) {
+  return query("/api/aegis/journal-timeline", params);
+}
+
+export function fetchAegisThesisGraph(params = {}) {
+  return query("/api/aegis/thesis-graph", params);
+}
+
+export function fetchResearchLabEdgeProjection(sleeveId = "slv_etf_drop_reversion_v1", params = {}) {
+  const encoded = encodeURIComponent(String(sleeveId || ""));
+  return query(`/api/research-lab/sleeves/${encoded}/edge-lab-projection`, params);
+}
+
+export function fetchResearchLabChallengerComparisonReports(params = {}) {
+  return query("/api/research-lab/challenger-comparison-reports", params);
+}
+
+export function fetchResearchLabHumanReviewDossiers(params = {}) {
+  return query("/api/research-lab/human-review-dossiers", params);
+}
+
+export function fetchResearchLabExpectancyDrift(params = {}) {
+  return query("/api/research-lab/stability/expectancy-drift/latest", params);
+}
+
+export function fetchResearchLabRegimeFragility(params = {}) {
+  return query("/api/research-lab/stability/regime-fragility/latest", params);
+}
+
+export function fetchResearchLabSleeveStability(params = {}) {
+  return query("/api/research-lab/stability/sleeve-stability/latest", params);
+}
+
+export function fetchResearchLabPaperTrialInventory(params = {}) {
+  return query("/api/research-lab/paper-trial-inventory", params);
+}
+
+export function fetchResearchLabStatus(params = {}) {
+  return query("/api/research-lab/status/latest", params);
+}
+
+export function fetchResearchLabPaperTrialProposal(params = {}) {
+  return query("/api/research-lab/paper-trial-proposals/latest", params);
+}
+
+export function fetchResearchLabObservationCandidates(params = {}) {
+  return query("/api/research-lab/observation-candidate-batches/latest", params);
+}
+
+export function fetchResearchLabObservationClusters(params = {}) {
+  return query("/api/research-lab/observation-cluster-batches/latest", params);
+}
+
+export function fetchResearchLabHypothesisProposals(params = {}) {
+  return query("/api/research-lab/hypothesis-proposal-batches/latest", params);
+}
+
+export function fetchResearchIntakeQueue(params = {}) {
+  return query("/api/research-lab/research-intake/queue", params);
+}
+
+export function fetchResearchLabHypothesisProposalReviews(params = {}) {
+  return query("/api/research-lab/hypothesis-proposal-review-batches/latest", params);
+}
+
+export function fetchResearchLabHypothesisIntake(params = {}) {
+  return query("/api/research-lab/hypothesis-intake-batches/latest", params);
+}
+
+export function triageAegisHypothesis(payload = {}) {
+  return postJson("/api/aegis/edge-lab/hypothesis/triage", payload);
+}
+
+export function buildAegisHypothesisPlan(payload = {}) {
+  return postJson("/api/aegis/edge-lab/hypothesis/build-plan", payload);
+}
+
+export function runAegisHypothesisTest(payload = {}) {
+  return postJson("/api/aegis/edge-lab/hypothesis/run-test", payload);
+}
+
+export function reviewAegisHypothesis(payload = {}) {
+  return postJson("/api/aegis/edge-lab/hypothesis/review", payload);
+}
+
+export function fetchAegisOperatorToday(params = {}) {
+  return query("/api/aegis/operator/today", params);
+}
+
+export function fetchAegisOperatorTasks(params = {}) {
+  return query("/api/aegis/operator/tasks", params);
+}
+
+export function fetchAegisOperatorDiagnostics(params = {}) {
+  return query("/api/aegis/operator/diagnostics", params);
+}
+
+export function fetchAegisOperatorWhatChanged(params = {}) {
+  return query("/api/aegis/operator/what-changed", params);
+}
+
+export function fetchAegisOperatorHealth(params = {}) {
+  return query("/api/aegis/operator/health", params);
+}
+
+export function fetchAegisOpportunitiesProjection(params = {}) {
+  return query("/api/aegis/opportunities", params);
+}
+
+export function fetchAegisCandidateDecision(candidateId, params = {}) {
+  const encoded = encodeURIComponent(String(candidateId || ""));
+  return query(`/api/aegis/candidates/${encoded}/decision`, params);
+}
+
+export function fetchAegisReviewLedger(params = {}) {
+  return query("/api/aegis/review-ledger", params);
+}
+
+export function fetchAegisEodOutcomeLatest(params = {}) {
+  return query("/api/aegis/eod-outcomes/latest", params);
+}
+
+export function fetchAegisEodOutcomeBySession(tradingSession, params = {}) {
+  const encoded = encodeURIComponent(String(tradingSession || ""));
+  return query(`/api/aegis/eod-outcomes/by-session/${encoded}`, params);
+}
+
+export function fetchAegisEodSleeveHistory(sleeveId, params = {}) {
+  const encoded = encodeURIComponent(String(sleeveId || ""));
+  return query(`/api/aegis/eod-outcomes/sleeves/${encoded}/history`, params);
+}
+
+export function executeAegisOperatorCommand(payload = {}) {
+  return postJson("/api/aegis/operator/commands", payload);
+}
+
+export function fetchAegisCommandRegistry(params = {}) {
+  return query("/api/aegis/commands/registry", params);
+}
+
+export function executeAegisCommand(payload = {}) {
+  return postJson("/api/aegis/commands/execute", payload);
+}
+
+export function fetchAegisAdaptiveIntelligence(params = {}) {
+  return query("/api/aegis/adaptive-intelligence", params);
+}
+
+export function fetchAegisIntelligenceGovernance(params = {}) {
+  return query("/api/aegis/intelligence-governance", params);
+}
+
 export function fetchRuntimeStatus() {
   return query("/api/runtime-status");
 }
@@ -341,4 +529,76 @@ export function verifyReliabilityIssue(issueId, payload = {}) {
 
 export function fetchReliabilityNextActions() {
   return query("/api/reliability/next-actions");
+}
+
+export function fetchResearchConsole(params = {}) {
+  return query("/api/research-lab/console", params);
+}
+
+export function fetchResearchOperatorHome(params = {}) {
+  return query("/api/research-lab/operator-home", params);
+}
+
+export function fetchStartResearchOptions(params = {}) {
+  return query("/api/research-lab/start-research/options", params);
+}
+
+export function startResearchIdea(payload = {}) {
+  return postJson("/api/research-lab/start-research", payload);
+}
+
+export function fetchHypothesisQueue(params = {}) {
+  return query("/api/research-lab/hypothesis-queue", params);
+}
+
+export function fetchResearchIntakeDossier(hypothesisProposalId, params = {}) {
+  const encoded = encodeURIComponent(String(hypothesisProposalId || ""));
+  return query(`/api/research-lab/hypothesis-proposals/${encoded}/dossier`, params);
+}
+
+export function reviewHypothesisProposal(hypothesisProposalId, payload = {}) {
+  const encoded = encodeURIComponent(String(hypothesisProposalId || ""));
+  return postJson(`/api/research-lab/hypothesis-proposals/${encoded}/review`, payload);
+}
+
+export function assessHypothesisReadiness(hypothesisProposalId, payload = {}) {
+  const encoded = encodeURIComponent(String(hypothesisProposalId || ""));
+  return postJson(`/api/research-lab/hypothesis-proposals/${encoded}/assess-readiness`, payload);
+}
+
+export function convertHypothesisProposalToResearchPlan(hypothesisProposalId, payload = {}) {
+  const encoded = encodeURIComponent(String(hypothesisProposalId || ""));
+  return postJson(`/api/research-lab/hypothesis-proposals/${encoded}/convert-to-research-plan`, payload);
+}
+
+export function fetchResearchPlans(params = {}) {
+  return query("/api/research-lab/research-plans", params);
+}
+
+export function fetchResearchEvidence(params = {}) {
+  return query("/api/research-lab/evidence", params);
+}
+
+export function fetchResearchPaperTrials(params = {}) {
+  return query("/api/research-lab/paper-trials", params);
+}
+
+export function fetchSleeveReviewCenter(params = {}) {
+  return query("/api/research-lab/sleeve-review-center", params);
+}
+
+export function fetchBlockedEvidence(params = {}) {
+  return query("/api/research-lab/blocked-evidence", params);
+}
+
+export function fetchBlockedWork(params = {}) {
+  return query("/api/research-lab/blocked-work", params);
+}
+
+export function runAegisDataRemediation(payload = {}) {
+  return postJson("/api/aegis/data-remediation/run", payload);
+}
+
+export function fetchResearchBacklog(params = {}) {
+  return query("/api/research-lab/research-backlog", params);
 }

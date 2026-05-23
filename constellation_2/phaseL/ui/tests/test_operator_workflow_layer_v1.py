@@ -117,7 +117,7 @@ def test_advisory_dashboard_uses_governed_schema_navigation_and_command_overview
     assert "|| isActiveParent" not in shell_main
     assert "data-sidebar-collapse" in shell_main
     assert "formatDisplayLabel" in shell_main
-    assert 'summary.environment || "UNKNOWN")' in shell_main
+    assert 'summary.environment || summary.runtime_mode || runtimeStatus.runtime_mode || "UNKNOWN")' in shell_main
     assert 'summary.kernel_version || summary.summary_id || "governed")' in shell_main
     assert "runExceptionAction" in shell_main
     assert "data-exception-card" in command_overview

@@ -258,7 +258,7 @@ def test_command_and_portfolio_now_read_same_canonical_financial_authority() -> 
     command_section = pages.split("async function renderCommandPage", 1)[1].split("async function renderPortfolioPage", 1)[0]
     assert "async function renderPortfolioPage" in pages
     portfolio_section = pages.split("async function renderPortfolioPage", 1)[1].split("async function renderAdvisoryPage", 1)[0]
-    assert "fetchFinancialState()" in command_section
+    assert "fetchFinancialState()" not in command_section
     assert "fetchFinancialState()" in portfolio_section
     assert "fetchPositions()" not in portfolio_section
     assert "fetchOrders()" not in portfolio_section

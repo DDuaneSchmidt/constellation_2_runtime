@@ -64,9 +64,10 @@ def test_product_summary_shell_remains_backend_artifact_driven() -> None:
     ).read_text(encoding="utf-8")
 
     command_section = pages.split("async function renderCommandPage", 1)[1].split("async function renderPortfolioPage", 1)[0]
-    assert "policy_evolution_state_v1" in command_section
-    assert "What Matters Now" in command_section
+    policy_section = pages.split("async function renderPolicyPage", 1)[1].split("async function renderAdvisoryPage", 1)[0]
+    assert "fetchCommandOverview()" in command_section
     assert "fetchOperatorHome()" not in command_section
     assert "fetchAdvisory()" not in command_section
     assert "fetchFinancialState()" not in command_section
+    assert "fetchPolicyEvolution()" in policy_section
     assert '"backend gap"' not in main_js

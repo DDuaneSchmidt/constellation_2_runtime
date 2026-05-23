@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
+
 import pytest
 
 from constellation_2.common.product_summary_kernel_v1 import materialize_product_summary_v1
@@ -73,7 +75,7 @@ def test_value_view_renders_governed_value_artifacts_only(
 
 def test_value_route_and_pages_are_artifact_backed() -> None:
     root = Path(__file__).resolve().parents[4]
-    pages = (root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "pages" / "index.js").read_text(encoding="utf-8")
+    pages = pages_source_v1(root)
     domain_client = (
         root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "domain_client" / "index.js"
     ).read_text(encoding="utf-8")

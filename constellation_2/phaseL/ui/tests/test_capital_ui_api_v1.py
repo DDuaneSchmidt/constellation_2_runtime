@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from constellation_2.phaseL.ui.tests.operator_shell_test_sources import pages_source_v1
+
 from constellation_2.common.capital.constants_v1 import (
     EXPECTED_BUCKET_TOTALS_V1,
     EXPECTED_CONTROL_TOTALS_V1,
@@ -88,9 +90,7 @@ def test_capital_routes_and_clients_are_shell_wired() -> None:
     domain_client = (
         root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "domain_client" / "index.js"
     ).read_text(encoding="utf-8")
-    pages = (
-        root / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "pages" / "index.js"
-    ).read_text(encoding="utf-8")
+    pages = pages_source_v1(root)
     server = (
         root / "constellation_2" / "phaseL" / "ui" / "server" / "run_ops_dashboard_v1.py"
     ).read_text(encoding="utf-8")
