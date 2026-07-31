@@ -47,6 +47,8 @@ Restore only into an empty recovery parent; never extract over an active reposit
 - Generated artifacts: reports, screenshots, proof captures, local datasets, and research execution stores.
 - Ignored files: credentials, environments, caches, build outputs, runtime state, generated artifacts, and archived local data.
 
+The final tracked/ignored consistency audit found 32 historical quarantine records under `constellation_2/runtime/`. They were removed from Git tracking only; all 1,871 files in that local runtime directory remained on disk, and the pre-change archive preserves their original state. No runtime data was deleted or mutated.
+
 See `docs/source-boundaries.md` and `.gitignore` for the governing boundary.
 
 ## Mandatory AEGIS truth checks
