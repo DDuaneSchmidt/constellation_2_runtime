@@ -230,6 +230,106 @@ def test_production_scan_dataset_mode_uses_dataset_plus_sleeve_required_symbols(
     assert payload["autonomous_execution_allowed"] is False
 
 
+
+
+def test_symbol_map_uses_canonical_dynamic_sleeve_universe_for_market_data_demand(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AEGIS_RUNTIME_UNIVERSE_MODE", "sleeve_required_only")
+    repo = _repo(tmp_path)
+    truth_root = tmp_path / "truth"
+    dynamic_symbols = [f"ZZ{i:03d}" for i in range(120)]
+    _write_json(
+        repo / "governance/02_REGISTRIES/ENGINE_UNIVERSE_POLICY_V1.json",
+        {
+            "policies": [
+                {
+                    "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "universe_mode": "LIQUIDITY_RANKED_SYMBOLS",
+                    "symbol_source_class": "DYNAMIC_SAME_DAY",
+                    "target_symbol_count": 100,
+                    "curated_symbols": [],
+                }
+            ]
+        },
+    )
+    ranked_path = truth_root / "reports" / "ranked_symbol_universe_v1" / DAY / "ranked_symbol_universe.v1.json"
+    _write_json(ranked_path, {"status": "PASS", "day_utc": DAY, "symbols": dynamic_symbols})
+
+    universe = build_runtime_symbol_universe_v1(repo_root=repo, truth_root=truth_root, day_utc=DAY)
+
+    assert universe["canonical_sleeve_symbol_resolution_used"] is True
+    assert universe["sleeve_required_symbol_source"] == "canonical_sleeve_universe_resolver_v1"
+    assert universe["requested_symbols_source"] == "canonical_sleeve_required_symbols"
+    assert set(dynamic_symbols[:100]) <= set(universe["requested_symbols"])
+    assert "ZZ100" not in set(universe["requested_symbols"])
+    assert {"SPY", "QQQ", "IWM", "DIA", "VIX"} <= set(universe["requested_symbols"])
+    trend = next(row for row in universe["per_sleeve_symbol_resolution"] if row["sleeve_id"] == "C2_TREND_EQ_PRIMARY_V1")
+    assert trend["resolution_status"] == "CANONICAL_RESOLVED"
+    assert trend["source"] == "ranked_symbol_universe_v1"
+    assert trend["symbol_count"] == 100
+
+
+def test_runtime_universe_includes_real_raw_signal_symbols(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AEGIS_RUNTIME_UNIVERSE_MODE", "sleeve_required_only")
+    repo = _repo(tmp_path)
+    truth_root = tmp_path / "truth"
+    sleeve_path = truth_root / "reports" / "sleeve_evaluation_kernel_v1" / DAY / "C2_TREND_EQ_PRIMARY_V1" / "sleeve_evaluation.v1.json"
+    _write_json(
+        sleeve_path,
+        {
+            "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+            "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+            "status": "BLOCKED",
+            "current_status": "BLOCKED",
+            "output_count": 2,
+            "artifact_path": str(sleeve_path),
+            "signal_state": {"state": "ACTIVE"},
+            "exposure_intent_batch": {
+                "output_intents": [
+                    {"intent_id": "trend_crwd", "intent_path": str(truth_root / "signals/crwd.json"), "schema_id": "exposure_intent", "symbol": "CRWD"},
+                    {"intent_id": "trend_hon", "intent_path": str(truth_root / "signals/hon.json"), "schema_id": "exposure_intent", "symbol": "HON"},
+                ]
+            },
+        },
+    )
+    _write_json(truth_root / "reports" / "sleeve_evaluation_kernel_v1" / DAY / "sleeve_evaluation_rollup.v1.json", {"day_utc": DAY, "outcomes": [json.loads(sleeve_path.read_text(encoding="utf-8"))]})
+
+    universe = build_runtime_symbol_universe_v1(repo_root=repo, truth_root=truth_root, day_utc=DAY)
+
+    assert {"CRWD", "HON"} <= set(universe["requested_symbols"])
+    assert universe["raw_signal_symbol_count"] == 2
+    assert universe["requested_symbols_source"].endswith("real_raw_signal_registry")
+
+
+
+def test_data_registry_unions_market_inputs_report_and_runtime_symbols(tmp_path: Path) -> None:
+    root = tmp_path / "truth"
+    _write_json(
+        root / "reports" / "aegis_market_data_v1" / DAY / "market_data.v1.json",
+        {
+            "day_utc": DAY,
+            "market_session_date": DAY,
+            "requested_symbols": ["AAPL", "CRWD"],
+            "symbols": {
+                "AAPL": {"last_price": "100", "market_session_date": DAY, "data_timestamp_utc": f"{DAY}T16:00:00Z", "source": "fixture", "freshness_status": "CURRENT"},
+                "CRWD": {"last_price": "200", "market_session_date": DAY, "data_timestamp_utc": f"{DAY}T16:00:00Z", "source": "fixture", "freshness_status": "CURRENT"},
+            },
+            "provider_results": [{"provider": "fixture", "request_status": "SUCCESS"}],
+        },
+    )
+    _write_json(
+        root / "reports" / "market_data_inputs_v1" / DAY / "market_data_inputs.v1.json",
+        {
+            "day_utc": DAY,
+            "input_records": [
+                {"data_item_id": "market.price.AAPL", "symbol": "AAPL", "value": 100, "field_type": "last_price", "day_utc": DAY, "source_timestamp_utc": f"{DAY}T16:00:00Z", "source_vendor": "fixture", "validation_status": "VALID"},
+            ],
+        },
+    )
+
+    payload = build_data_registry_v1(truth_root=root, day_utc=DAY, symbols=["HON"])
+
+    assert {"AAPL", "CRWD", "HON"} <= set(payload["requested_symbols"])
+
 def test_data_registry_surfaces_runtime_universe_metadata(tmp_path: Path) -> None:
     root = tmp_path / "truth"
     _market_data(root)
@@ -498,8 +598,9 @@ def test_all_enabled_sleeves_get_contracts_and_optional_breadth_warns_only(tmp_p
     assert by_id["C2_TREND_EQ_PRIMARY_V1"]["readiness"] == "READY_WITH_WARNINGS"
     assert "market.breadth.down_pct" in by_id["C2_TREND_EQ_PRIMARY_V1"]["warning_inputs"]
     assert "market.breadth.down_pct" not in by_id["C2_TREND_EQ_PRIMARY_V1"]["blocking_inputs"]
-    assert by_id["C2_VOL_INCOME_DEFINED_RISK_V1"]["readiness"] == "BLOCKED"
-    assert by_id["C2_VOL_INCOME_DEFINED_RISK_V1"]["blocking_inputs"] == ["market.volatility.VIX"]
+    assert by_id["C2_VOL_INCOME_DEFINED_RISK_V1"]["readiness"] == "READY_WITH_WARNINGS"
+    assert by_id["C2_VOL_INCOME_DEFINED_RISK_V1"]["blocking_inputs"] == []
+    assert "market.volatility.VIX" in by_id["C2_VOL_INCOME_DEFINED_RISK_V1"]["warning_inputs"]
 
 
 def test_missing_contract_blocks_only_that_sleeve(tmp_path: Path) -> None:

@@ -1,0 +1,6 @@
+id: FAIL_0006
+what_we_expected: Observation accumulation would quickly produce meaningful outcome evidence.
+what_failed: Observations and open paper positions accumulated faster than closed outcomes.
+why_failed: Outcome maturation requires time and resolved samples, not just position creation.
+what_to_try_next: Review closed outcomes before strengthening claims.
+status: OPEN

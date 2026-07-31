@@ -1,0 +1,6 @@
+id: FAIL_0010
+what_we_expected: Capital allocation review would become useful once research artifacts existed.
+what_failed: Governance still found no hypotheses ready for capital review.
+why_failed: Evidence remained underpowered or blocked despite richer artifacts.
+what_to_try_next: Use attention allocation for evidence repair before capital review.
+status: OPEN

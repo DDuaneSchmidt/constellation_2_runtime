@@ -1,0 +1,6 @@
+id: FAIL_0009
+what_we_expected: Active sleeves would produce broadly distributed candidate flow.
+what_failed: Candidate production concentrated in a subset of sleeves while others were dormant or blocked.
+why_failed: Some sleeves produced no signals or lacked required data.
+what_to_try_next: Review sleeve blockers before adding new sleeve architecture.
+status: OPEN

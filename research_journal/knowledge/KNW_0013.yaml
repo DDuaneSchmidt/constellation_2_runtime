@@ -1,0 +1,10 @@
+id: KNW_0013
+statement: The journal improves understanding when it compresses evidence gaps into reusable claims.
+evidence:
+  - OBS_0020
+  - OBS_0005 evidence review
+  - Journal Review 001
+limitations:
+  - Pilot usefulness still needs researcher feedback over time
+why_it_matters: The journal pilot should be judged by learning clarity, not trading performance.
+status: SUPPORTED

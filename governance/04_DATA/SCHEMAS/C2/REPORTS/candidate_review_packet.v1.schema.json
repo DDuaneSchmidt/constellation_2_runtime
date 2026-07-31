@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/candidate_review_packet.v1.schema.json",
+  "title": "candidate_review_packet.v1",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "artifact_id", "day_utc", "generated_at_utc", "operating_mode", "candidate_count", "review_candidates", "safety"],
+  "properties": {
+    "schema_id": {"const": "candidate_review_packet"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "candidate_review_packet"},
+    "day_utc": {"type": "string"},
+    "generated_at_utc": {"type": "string"},
+    "operating_mode": {"type": "string"},
+    "candidate_count": {"type": "integer"},
+    "review_candidates": {"type": "array", "items": {"type": "object"}},
+    "safety": {"type": "object"}
+  },
+  "additionalProperties": true
+}

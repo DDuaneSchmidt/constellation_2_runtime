@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--truth_root", "--truth-root", dest="truth_root", default=str(DEFAULT_TRUTH_ROOT))
     parser.add_argument("--day", "--day-utc", dest="day_utc", default=datetime.now(UTC).strftime("%Y-%m-%d"))
     args = parser.parse_args(argv)
-    universe = build_runtime_symbol_universe_v1(repo_root=REPO_ROOT)
+    universe = build_runtime_symbol_universe_v1(repo_root=REPO_ROOT, truth_root=Path(args.truth_root), day_utc=str(args.day_utc))
     payload = build_data_registry_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), symbols=universe["requested_symbols"], universe_metadata=universe)
     paths = write_data_registry_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), payload=payload)
     print(

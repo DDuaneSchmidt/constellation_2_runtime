@@ -1,0 +1,18 @@
+{
+  "imp_004_percentile_rank_cagr": 1.0,
+  "imp_004_percentile_rank_max_drawdown": 0.0,
+  "imp_004_percentile_rank_sharpe": 1.0,
+  "median_random_cagr": 0.01143525418465896,
+  "median_random_max_drawdown": -0.6244096517064279,
+  "median_random_sharpe": 0.1517677644948004,
+  "method": "random daily invested masks with exactly the same rounded invested-day count as IMP_004; 10 bps round-trip costs applied on random exposure transitions",
+  "p05_random_cagr": -0.01560025678248414,
+  "p05_random_max_drawdown": -0.7556904925874656,
+  "p05_random_sharpe": -0.011440111047712179,
+  "p95_random_cagr": 0.03879383008248409,
+  "p95_random_max_drawdown": -0.44573371309357035,
+  "p95_random_sharpe": 0.31207152834981544,
+  "random_seed": 20260603,
+  "random_simulation_count": 1000,
+  "time_in_market_target": 0.7419840433539063
+}

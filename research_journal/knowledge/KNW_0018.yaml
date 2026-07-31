@@ -1,0 +1,13 @@
+id: KNW_0018
+statement: Technical Strategy Factory evidence must distinguish standalone indicator claims from mechanism- or context-linked technical structure.
+evidence:
+  - OBS_0003 evidence review
+  - Alpha Factory POC review found evidence insufficient and discovery claims invalid while lineage was complete
+  - Evidence Test v2 had 62 blocked evidence items and 0 supported evidence items, but improved false-positive controls and test specificity
+  - Technical conditional pattern pilot found real-data technical patterns but no technical conditional advantage
+  - Repaired-feature fixture retest found valid deterministic fixture candidates, while out-of-fixture non-naive rebenchmark did not generalize
+limitations:
+  - Reviewed artifacts are concentrated on 2026-06-03
+  - Some controlled fixture evidence improved, but broad and out-of-fixture claims remained weak
+why_it_matters: Researchers should not collapse all technical analysis into one judgment; standalone indicator claims are weak, while context-linked structures need separate validation.
+status: SUPPORTED

@@ -24,6 +24,8 @@ from ops.aegis.research_lab.research_console_v1 import (
 )
 from research_lab.storage.manifest_io import append_jsonl
 from ops.aegis.research_lab.research_pipeline_v1 import _operator_blocker_v1
+from ops.aegis.research_lab.research_doctor_v1 import build_research_doctor_v1
+from ops.aegis.research_lab.research_run_ledger_v1 import read_research_run_ledger_v1
 
 REPO = Path(__file__).resolve().parents[4]
 PAGES = REPO / "constellation_2" / "phaseL" / "ui" / "static" / "operator_shell" / "pages" / "index.js"
@@ -138,7 +140,7 @@ def test_research_blocker_classification_is_operator_actionable() -> None:
 
 def test_research_left_nav_is_single_operator_pipeline() -> None:
     source = NAVIGATION.read_text(encoding="utf-8")
-    for label in ["Dashboard", "Hypotheses", "Captured Trades", "Evidence", "System Health"]:
+    for label in ["Dashboard", "Hypotheses", "Closed Trades", "Evidence", "Performance"]:
         assert label in source
     primary = source.split("export function flattenNavigation", 1)[0]
     for subsystem_label in ["Hypothesis Queue", "Research Plans", "Paper Trials", "Sleeve Reviews", "Blocked Work", "Research Backlog"]:
@@ -241,7 +243,7 @@ def test_evidence_page_payload_is_readable_and_safe() -> None:
 def test_research_console_safety_labels_and_no_forbidden_routes() -> None:
     console = research_console_v1()
     labels = set(console["safety_labels"])
-    assert {"READ-ONLY GOVERNANCE", "NO BROKER EXECUTION", "NO LIVE TRADING", "MANUAL REVIEW REQUIRED"}.issubset(labels)
+    assert {"READ-ONLY GOVERNANCE", "NO BROKER EXECUTION", "NO LIVE TRADING", "RESEARCH ONLY"}.issubset(labels)
     server = SERVER.read_text(encoding="utf-8")
     forbidden_near_research = ["place_trade", "submit_order", "mutate_sleeve", "allocate_capital", "promote automatically"]
     assert not any(term in server.lower() for term in forbidden_near_research)
@@ -482,8 +484,8 @@ def test_research_inventory_operator_action_labels_are_display_only() -> None:
 
     assert "ready_for_human_review" in helper_block
     assert "Review and decide" in helper_block
-    assert "Review inconclusive result" in helper_block
-    assert "Review result" in helper_block
+    assert "Collect forward-return observations" in helper_block
+    assert "View progress" in helper_block
     assert "Provide earnings/event calendar" in helper_block
     assert "View data format" in helper_block
     assert "Upload required dataset" in helper_block
@@ -537,3 +539,44 @@ def test_research_pipeline_action_ui_has_feedback_and_lane_board() -> None:
     assert 'name="universe_snapshot_id"' in source
     assert "Conversion needs a ready dataset, universe, and date range." in source
     assert "const canAccept = ready && !accepted" in source
+
+
+def test_research_doctor_queues_ready_hypothesis_and_reports_blockers(monkeypatch) -> None:
+    with TemporaryDirectory() as tmp:
+        store = Path(tmp)
+        created = _seed_ready_research_store(store)
+        (store / "registries" / "research_run_ledger.v1.jsonl").unlink(missing_ok=True)
+        monkeypatch.setenv("AEGIS_RESEARCH_AUTONOMOUS_ENABLED", "true")
+
+        report = build_research_doctor_v1(truth_root=store, day_utc="2026-05-29", store_root=store)
+        ledger = read_research_run_ledger_v1(store_root=store)
+
+        assert report["scheduler_enabled"] is True
+        assert report["queued_run_count"] >= 1
+        assert any(run["hypothesis_id"] == created["hypothesis_proposal_id"] and run["trigger_source"] == "SYSTEM_MONITOR" for run in ledger)
+        row = next(item for item in report["hypotheses"] if item["hypothesis_id"] == created["hypothesis_proposal_id"])
+        assert row["blocker_reason"] == "Eligible; queued for next run"
+        assert report["safety"]["broker_execution_allowed"] is False
+        assert report["safety"]["trade_advice_allowed"] is False
+
+
+def test_research_doctor_disabled_scheduler_reports_explicit_blocker(monkeypatch) -> None:
+    with TemporaryDirectory() as tmp:
+        store = Path(tmp)
+        created = _seed_ready_research_store(store)
+        (store / "registries" / "research_run_ledger.v1.jsonl").unlink(missing_ok=True)
+        monkeypatch.setenv("AEGIS_RESEARCH_AUTONOMOUS_ENABLED", "false")
+
+        report = build_research_doctor_v1(truth_root=store, day_utc="2026-05-29", store_root=store)
+        row = next(item for item in report["hypotheses"] if item["hypothesis_id"] == created["hypothesis_proposal_id"])
+
+        assert report["scheduler_enabled"] is False
+        assert report["queued_run_count"] == 0
+        assert row["blocker_reason"] == "Research runner disabled"
+        assert "AEGIS_RESEARCH_AUTONOMOUS_ENABLED=true" in row["next_action"]
+
+
+def test_research_lab_ui_has_no_generic_action_unavailable_label() -> None:
+    source = pages_source_v1(REPO)
+    assert "Action unavailable" not in source
+    assert "Waiting for a declared research command contract" in source

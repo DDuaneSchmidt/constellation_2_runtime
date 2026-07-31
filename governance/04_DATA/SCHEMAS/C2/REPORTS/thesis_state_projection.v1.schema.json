@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "rows": {
+      "items": {
+        "required": [
+          "trade_id",
+          "current_thesis_state",
+          "confidence",
+          "evidence_summary",
+          "supporting_evidence_ids",
+          "contradicting_evidence_ids",
+          "policy_version",
+          "input_hashes",
+          "projection_hash"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "thesis_state_projection"
+    },
+    "schema_version": {
+      "const": "v1"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "rows",
+    "content_hash"
+  ],
+  "title": "Thesis State Projection v1",
+  "type": "object"
+}

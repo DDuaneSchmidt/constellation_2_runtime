@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_claim_batch_processor.v1.schema.json",
+  "title": "Atlas V2 Claim Batch Processor V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ClaimBatch"},
+    {"$ref": "#/$defs/ClaimBatchRun"},
+    {"$ref": "#/$defs/ClaimBatchMetrics"},
+    {"$ref": "#/$defs/MechanismRegistry"}
+  ],
+  "$defs": {
+    "SourceType": {"enum": ["TRANSCRIPT_INTAKE", "MANUAL_CLAIM_ENTRY", "HISTORICAL_RESEARCH_ARTIFACTS", "EXTERNAL_STRATEGY_CLAIMS"]},
+    "BatchTier": {"enum": ["UP_TO_1000", "UP_TO_5000", "UP_TO_10000"]},
+    "MechanismFamily": {"enum": ["OPENING_RANGE", "BREAKOUT", "MEAN_REVERSION", "TREND_CONTINUATION", "LIQUIDITY_SWEEP", "VOLATILITY_EXPANSION", "PULLBACK", "MOMENTUM", "VWAP_OR_AVERAGE_RECLAIM", "ATR_FILTER", "SESSION_TIMING", "UNKNOWN"]},
+    "Transition": {
+      "type": "object",
+      "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"],
+      "properties": {
+        "transitioned_at": {"type": "string", "format": "date-time"},
+        "from_status": {"type": "string"},
+        "to_status": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1},
+        "triggering_object": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": ["object_type", "created_at", "transition_history"],
+      "properties": {
+        "object_type": {"type": "string"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}
+      }
+    },
+    "ClaimBatch": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["batch_id", "pipeline_version", "claim_count", "batch_size_tier", "allowed_source_types", "source_types_present", "claim_ids", "authority_boundary_acknowledged", "status"],
+          "properties": {
+            "object_type": {"const": "ClaimBatch"},
+            "batch_id": {"type": "string", "minLength": 1},
+            "pipeline_version": {"const": "atlas_v2_claim_batch_processor_v1"},
+            "claim_count": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "batch_size_tier": {"$ref": "#/$defs/BatchTier"},
+            "allowed_source_types": {"type": "array", "minItems": 4, "items": {"$ref": "#/$defs/SourceType"}},
+            "source_types_present": {"type": "array", "items": {"$ref": "#/$defs/SourceType"}},
+            "claim_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "authority_boundary_acknowledged": {"const": true},
+            "status": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "ClaimBatchRun": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["run_id", "batch_id", "pipeline_version", "pipeline_steps", "input_claim_count", "processed_claim_count", "emitted_record_counts", "mechanism_record_ids", "dedupe_record_ids", "contrarian_record_ids", "handoff_record_ids", "authority_boundary_acknowledged", "status"],
+          "properties": {
+            "object_type": {"const": "ClaimBatchRun"},
+            "run_id": {"type": "string", "minLength": 1},
+            "batch_id": {"type": "string", "minLength": 1},
+            "pipeline_version": {"const": "atlas_v2_claim_batch_processor_v1"},
+            "pipeline_steps": {"type": "array", "prefixItems": [{"const": "CLAIMS"}, {"const": "DEDUPE"}, {"const": "MECHANISM_CLASSIFICATION"}, {"const": "CONTRARIAN_THEORY"}, {"const": "MECHANISM_REGISTRY"}, {"const": "CHEAP_EXPERIMENT_ELIGIBILITY"}], "minItems": 6, "maxItems": 6},
+            "input_claim_count": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "processed_claim_count": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "emitted_record_counts": {"type": "object"},
+            "mechanism_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "dedupe_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "contrarian_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "handoff_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "authority_boundary_acknowledged": {"const": true},
+            "status": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "ClaimBatchMetrics": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["metrics_id", "batch_id", "total_claims", "unique_claims", "unique_mechanisms", "duplicate_ratio", "mechanism_distribution", "cheap_experiment_candidates", "claims_ingested", "claims_deduped", "mechanisms_discovered", "mechanisms_reused", "contrarian_coverage", "cheap_experiment_coverage", "authority_boundary_acknowledged"],
+          "properties": {
+            "object_type": {"const": "ClaimBatchMetrics"},
+            "metrics_id": {"type": "string", "minLength": 1},
+            "batch_id": {"type": "string", "minLength": 1},
+            "total_claims": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "unique_claims": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "unique_mechanisms": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "duplicate_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "mechanism_distribution": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+            "cheap_experiment_candidates": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "claims_ingested": {"type": "integer", "minimum": 0},
+            "claims_deduped": {"type": "integer", "minimum": 0},
+            "mechanisms_discovered": {"type": "integer", "minimum": 0},
+            "mechanisms_reused": {"type": "integer", "minimum": 0},
+            "contrarian_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+            "cheap_experiment_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+            "authority_boundary_acknowledged": {"const": true}
+          }
+        }
+      ]
+    },
+    "MechanismRegistry": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["mechanism_id", "mechanism_family", "claim_count", "source_count", "contrarian_count", "cheap_experiment_count", "last_updated"],
+          "properties": {
+            "object_type": {"const": "MechanismRegistry"},
+            "mechanism_id": {"type": "string", "minLength": 1},
+            "mechanism_family": {"$ref": "#/$defs/MechanismFamily"},
+            "claim_count": {"type": "integer", "minimum": 0},
+            "source_count": {"type": "integer", "minimum": 0},
+            "contrarian_count": {"type": "integer", "minimum": 0},
+            "cheap_experiment_count": {"type": "integer", "minimum": 0},
+            "last_updated": {"type": "string", "format": "date-time"}
+          }
+        }
+      ]
+    }
+  }
+}

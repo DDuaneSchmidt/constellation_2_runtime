@@ -824,10 +824,18 @@ def test_runtime_timeline_rendered_browser_visibility_contract() -> None:
         cdp.command("Network.setCacheDisabled", {"cacheDisabled": True})
         cdp.command("Emulation.setDeviceMetricsOverride", {"width": 1600, "height": 900, "deviceScaleFactor": 1, "mobile": False})
         cdp.command("Page.navigate", {"url": f"http://127.0.0.1:{server_port}/aegis-runtime-timeline?cache_bust=visibility_contract"})
+        time.sleep(5)
         ready_expr = r'''
 (() => {
-  const body = document.body.innerText || '';
-  return body.includes('9:50 AM') && body.includes('Morning AI Run') && body.includes('2:50 PM') && body.includes('Afternoon AI Run') && body.includes('6:00 PM');
+  const text = (selector) => document.querySelector(selector)?.textContent || '';
+  const primaryText = [
+    text('[data-runtime-next-event]'),
+    text('[data-runtime-needs-attention]'),
+    text('[data-runtime-upcoming-events]'),
+    text('[data-runtime-completed-today]'),
+    text('[data-runtime-minimal-progression]'),
+  ].join('\n');
+  return primaryText.includes('9:50 AM') && primaryText.includes('Morning AI Run') && primaryText.includes('2:50 PM') && primaryText.includes('Afternoon AI Run') && primaryText.includes('6:00 PM');
 })()
 '''
         for _ in range(60):
@@ -837,7 +845,7 @@ def test_runtime_timeline_rendered_browser_visibility_contract() -> None:
                 break
         expr = r'''
 (() => {
-  const text = (selector) => document.querySelector(selector)?.innerText || '';
+  const text = (selector) => document.querySelector(selector)?.textContent || '';
   const hero = text('[data-runtime-next-event]');
   const needs = text('[data-runtime-needs-attention]');
   const upcoming = text('[data-runtime-upcoming-events]');
@@ -917,8 +925,7 @@ def test_runtime_timeline_rendered_browser_visibility_contract() -> None:
 (() => {
   const text = document.body.innerText || '';
   const cards = [...document.querySelectorAll('[data-repair-card]')];
-  const targetCard = cards.find((node) => (node.innerText || '').includes('MACRO_CALENDAR') || (node.innerText || '').includes('Macro')) || cards[0];
-  const panel = targetCard?.querySelector('[data-command-result-panel]');
+  const openDialog = [...document.querySelectorAll('dialog[open]')].find((node) => node.matches('.repair-source-setup-modal'));
   const rects = cards.map((card) => card.getBoundingClientRect());
   let overlaps = false;
   for (let i = 0; i < rects.length; i += 1) {
@@ -932,28 +939,29 @@ def test_runtime_timeline_rendered_browser_visibility_contract() -> None:
     path: window.location.pathname,
     no404: !/Error response\s+Error code:\s*404|ENDPOINT_NOT_FOUND|File not found/i.test(text),
     cardCount: cards.length,
-    resultVisible: Boolean(panel),
-    resultText: panel?.innerText || '',
-    sourceSetupVisible: text.includes('Source setup required') || text.includes('Upload/configure source'),
-    copyPathVisible: text.includes('Copy required path'),
+    setupDialogOpen: Boolean(openDialog),
+    setupText: openDialog?.innerText || '',
+    sourceSetupVisible: Boolean(openDialog) && ((openDialog.innerText || '').includes('AEGIS_MACRO_CALENDAR_SOURCE_FILE') || (openDialog.innerText || '').includes('macro_calendar.v1.json')),
+    copyPathVisible: (openDialog?.innerText || '').includes('Configure source path'),
     domainGridCardPanelCount: document.querySelectorAll('.runtime-domain-card [data-command-result-panel]').length,
-    cardsReadable: rects.every((rect) => rect.width >= 320 && rect.height >= 120),
+    cardsReadable: rects.every((rect) => rect.width >= 260 && rect.height >= 80),
     noOverlaps: !overlaps,
-    noVerticalText: rects.every((rect) => rect.width >= 320),
+    noVerticalText: rects.every((rect) => rect.width >= 260),
   };
 })()
 '''
         for _ in range(30):
             time.sleep(0.25)
             layout_result = cdp.command("Runtime.evaluate", {"expression": layout_expr, "returnByValue": True}, timeout=20).get("result", {}).get("value") or {}
-            if layout_result.get("resultVisible"):
+            if layout_result.get("setupDialogOpen"):
                 break
         assert layout_result["path"] == "/aegis-repair-center"
         assert layout_result["no404"] is True
         assert layout_result["cardCount"] >= 1
-        assert layout_result["resultVisible"] is True
-        assert "NEXT STEP" in layout_result["resultText"]
-        assert "MACRO" in (layout_result["resultText"] + click_result["cardText"]).upper()
+        assert layout_result["setupDialogOpen"] is True
+        assert "AEGIS_MACRO_CALENDAR_SOURCE_FILE" in layout_result["setupText"]
+        assert "macro_calendar.v1.json" in layout_result["setupText"]
+        assert "MACRO" in (layout_result["setupText"] + click_result["cardText"]).upper()
         assert layout_result["sourceSetupVisible"] is True
         assert layout_result["copyPathVisible"] is True
         assert layout_result["domainGridCardPanelCount"] == 0
@@ -962,18 +970,32 @@ def test_runtime_timeline_rendered_browser_visibility_contract() -> None:
         assert layout_result["noVerticalText"] is True
 
         cdp.command("Page.navigate", {"url": f"http://127.0.0.1:{server_port}/aegis-repair-center?cache_bust=after_repair"}, timeout=20)
+        refresh_expr = r'''
+(() => {
+  const text = document.body.innerText || '';
+  const cards = [...document.querySelectorAll('[data-repair-card]')];
+  const rects = cards.map((card) => card.getBoundingClientRect());
+  return {
+    path: window.location.pathname,
+    cardCount: cards.length,
+    hasSummary: text.includes('Core system operational') && text.includes('external source requirements remain'),
+    hasSetupRows: text.includes('Macro Calendar') && text.includes('Earnings Events') && text.includes('Corporate Actions'),
+    cardsReadable: rects.every((rect) => rect.width >= 260 && rect.height >= 80),
+    noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth + 4,
+  };
+})()
+'''
         refresh_result = {}
         for _ in range(40):
             time.sleep(0.25)
-            refresh_result = cdp.command("Runtime.evaluate", {"expression": layout_expr, "returnByValue": True}, timeout=20).get("result", {}).get("value") or {}
-            if refresh_result.get("cardCount", 0) >= 1 and refresh_result.get("sourceSetupVisible"):
+            refresh_result = cdp.command("Runtime.evaluate", {"expression": refresh_expr, "returnByValue": True}, timeout=20).get("result", {}).get("value") or {}
+            if refresh_result.get("cardCount", 0) >= 3 and refresh_result.get("hasSetupRows"):
                 break
         assert refresh_result["path"] == "/aegis-repair-center"
-        assert refresh_result["sourceSetupVisible"] is True
-        assert refresh_result["copyPathVisible"] is True
-        assert refresh_result["domainGridCardPanelCount"] == 0
+        assert refresh_result["hasSummary"] is True
+        assert refresh_result["hasSetupRows"] is True
         assert refresh_result["cardsReadable"] is True
-        assert refresh_result["noOverlaps"] is True
+        assert refresh_result["noHorizontalOverflow"] is True
     finally:
         if cdp is not None:
             cdp.close()

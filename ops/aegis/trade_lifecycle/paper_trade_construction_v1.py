@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
+from ops.aegis.paper_session_ledger_v1 import resolve_scheduled_paper_session_v1
 from ops.aegis.operator_state.current_operator_truth_resolver_v1 import resolve_current_operator_truth_v1
 from ops.aegis.runtime_truth_kernel_v1 import read_canonical_runtime_evaluation_v1, runtime_evaluation_path_v1
 from ops.aegis.trade_ticket_lineage_v1 import canonical_construction_contract_v1
@@ -173,6 +174,256 @@ def _latest_market_row(root: Path, symbol: str, day: str) -> tuple[dict[str, Any
             latest = row
     return latest, path
 
+
+
+def _candidate_packet_path(root: Path, day: str) -> Path:
+    return root / "reports" / "aegis_candidate_review_packet_v1" / day / "candidate_review_packet.v1.json"
+
+
+def _paper_review_queue_path(root: Path, day: str) -> Path:
+    return root / "reports" / "aegis_paper_review_queue_v1" / day / "paper_review_queue.v1.json"
+
+
+def _candidate_contracts_path(root: Path, day: str) -> Path:
+    return root / "reports" / "aegis_candidate_contracts_v1" / day / "candidate_contracts.v1.json"
+
+
+def _market_data_inputs_path(root: Path, day: str) -> Path:
+    return root / "reports" / "market_data_inputs_v1" / day / "market_data_inputs.v1.json"
+
+
+def _artifact_timestamp(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("generated_at_utc") or payload.get("run_timestamp_utc") or payload.get("generated_at") or "").strip()
+
+
+def _valid_candidate_count(payload: Mapping[str, Any]) -> int:
+    rows = payload.get("candidate_contracts") if isinstance(payload.get("candidate_contracts"), list) else []
+    return len([row for row in rows if isinstance(row, Mapping) and str(row.get("contract_validation_status") or "").upper() == "VALID"])
+
+
+def _candidate_rows_from_packet(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    for key in ("review_candidates", "paper_candidates", "candidate_trades", "candidates"):
+        rows = payload.get(key)
+        if isinstance(rows, list) and rows:
+            return [dict(row) for row in rows if isinstance(row, Mapping) and row.get("paper_trade_eligible") is not False]
+    return []
+
+
+def _candidate_rows_from_queue(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping) or row.get("paper_trade_eligible") is False:
+            continue
+        status = str(row.get("status") or row.get("review_status") or "").upper()
+        if status in {"ROLLED_OPEN", "OPEN_POSITION", "PAPER_POSITION_OPEN", "CLOSED", "REJECTED", "EXPIRED"}:
+            continue
+        out.append(dict(row))
+    return out
+
+
+def _market_input_records(payload: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    records = payload.get("input_records") if isinstance(payload.get("input_records"), list) else []
+    out: dict[str, dict[str, Any]] = {}
+    for row in records:
+        if not isinstance(row, Mapping):
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if symbol:
+            out[symbol] = dict(row)
+    return out
+
+
+def _candidate_exposure_intent(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    paths = candidate.get("evidence_paths") if isinstance(candidate.get("evidence_paths"), list) else []
+    for item in paths:
+        text = str(item or "").strip()
+        if not text or "exposure_intent" not in text:
+            continue
+        payload = _read_json(Path(text).expanduser())
+        if payload:
+            return payload
+    return {}
+
+
+def _record_market_value(row: Mapping[str, Any]) -> Decimal | None:
+    for key in ("value", "close", "last", "price", "entry_reference_price"):
+        value = _dec(row.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _paper_candidate_construction_v1(root: Path, day: str) -> dict[str, Any]:
+    contracts_path = _candidate_contracts_path(root, day)
+    packet_path = _candidate_packet_path(root, day)
+    queue_path = _paper_review_queue_path(root, day)
+    market_path = _market_data_inputs_path(root, day)
+    contracts = _read_json(contracts_path)
+    packet = _read_json(packet_path)
+    queue = _read_json(queue_path)
+    market_inputs = _read_json(market_path)
+    official_session = resolve_scheduled_paper_session_v1(truth_root=root, day_utc=day)
+    paper_session_id = str(official_session.get("paper_session_id") or packet.get("paper_session_id") or queue.get("paper_session_id") or "").strip()
+    run_timestamp = str(packet.get("run_timestamp_utc") or packet.get("generated_at_utc") or "").strip()
+    session_derivation = "scheduled_run_time" if official_session.get("paper_session_id") else str(packet.get("paper_session_id_derivation_source") or queue.get("paper_session_id_derivation_source") or "").strip()
+    packet_timestamp = _artifact_timestamp(packet)
+    contracts_timestamp = _artifact_timestamp(contracts)
+    authoritative_valid_candidate_count = _valid_candidate_count(contracts)
+    packet_stale = bool(packet_timestamp and contracts_timestamp and packet_timestamp < contracts_timestamp and authoritative_valid_candidate_count > 0)
+    stale_authority_rejections: list[dict[str, Any]] = []
+    if packet_stale:
+        stale_authority_rejections.append({
+            "artifact_id": "aegis_candidate_review_packet_v1",
+            "path": str(packet_path),
+            "status": "REJECTED_STALE_AUTHORITY",
+            "reason_code": "STALE_REVIEW_PACKET_NEWER_CANDIDATE_CONTRACTS",
+            "artifact_generated_at_utc": packet_timestamp,
+            "authoritative_artifact_id": "aegis_candidate_contracts_v1",
+            "authoritative_path": str(contracts_path),
+            "authoritative_generated_at_utc": contracts_timestamp,
+            "authoritative_valid_candidate_count": authoritative_valid_candidate_count,
+        })
+    candidates = [] if packet_stale else _candidate_rows_from_packet(packet)
+    candidate_source = "aegis_candidate_review_packet_v1"
+    if not candidates:
+        candidates = _candidate_rows_from_queue(queue)
+        candidate_source = "aegis_paper_review_queue_v1" if candidates else candidate_source
+        if not run_timestamp:
+            run_timestamp = str(queue.get("run_timestamp_utc") or queue.get("generated_at_utc") or "").strip()
+    market_by_symbol = _market_input_records(market_inputs)
+    constructed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+    for idx, candidate in enumerate(candidates, start=1):
+        symbol = str(candidate.get("symbol") or candidate.get("ticker") or "").strip().upper()
+        candidate_id = str(candidate.get("candidate_id") or candidate.get("trade_candidate_id") or candidate.get("id") or f"candidate:{idx}")
+        candidate_session_id = str(paper_session_id or candidate.get("paper_session_id") or "").strip()
+        record = market_by_symbol.get(symbol, {}) if symbol else {}
+        record_day = str(record.get("day_utc") or record.get("market_session") or record.get("timestamp_utc") or "")[:10]
+        validation_status = str(record.get("validation_status") or record.get("status") or "").upper()
+        market_value = _record_market_value(record)
+        absent = not bool(record)
+        stale = bool(record_day and record_day != day)
+        blocked = validation_status in {"BLOCKED", "INVALID", "STALE", "FAIL", "FAILED"}
+        missing_field = ""
+        reason = "CURRENT"
+        if not symbol:
+            missing_field = "symbol"
+            reason = "ABSENT"
+        elif absent:
+            missing_field = "market_data.current_price"
+            reason = "ABSENT"
+        elif stale:
+            missing_field = "market_data.day_utc"
+            reason = "STALE"
+        elif blocked:
+            missing_field = "market_data.validation_status"
+            reason = validation_status or "BLOCKED"
+        elif market_value is None:
+            missing_field = "market_data.value"
+            reason = "ABSENT"
+        diagnostic = {
+            "candidate_id": candidate_id,
+            "symbol": symbol,
+            "missing_field": missing_field,
+            "expected_source_artifact": "market_data_inputs_v1",
+            "artifact_path_checked": str(market_path),
+            "artifact_exists": market_path.exists(),
+            "source_record_status": validation_status,
+            "source_record_day_utc": record_day,
+            "status": "PASS" if not missing_field else reason,
+        }
+        diagnostics.append(diagnostic)
+        if missing_field:
+            skipped.append({
+                "paper_session_id": candidate_session_id,
+                "candidate_id": candidate_id,
+                "symbol": symbol,
+                "skip_reason_code": "MISSING_CURRENT_MARKET_DATA" if missing_field.startswith("market_data") else "MISSING_SYMBOL",
+                "missing_field": missing_field,
+                "expected_source_artifact": "market_data_inputs_v1",
+                "artifact_path_checked": str(market_path),
+                "status": reason,
+            })
+            continue
+        entry = _dec(candidate.get("entry_reference_price")) or market_value
+        direction = str(candidate.get("direction") or candidate.get("proposed_direction") or "LONG").upper()
+        intent = _candidate_exposure_intent(candidate)
+        constraints = intent.get("constraints") if isinstance(intent.get("constraints"), Mapping) else {}
+        engine_id = str(candidate.get("sleeve_id") or intent.get("engine") or candidate.get("engine_id") or "").strip()
+        risk_policy, _risk_policy_path = _risk_policy(engine_id) if engine_id else ({}, Path(""))
+        stop_price = _dec(candidate.get("stop_price") or candidate.get("invalidation_level") or intent.get("stop_price") or intent.get("invalidation_level"))
+        stop_source = "candidate_review_packet" if stop_price is not None else ""
+        stop_bps = _dec(constraints.get("stop_loss_bps") or intent.get("stop_loss_bps"))
+        if stop_price is None and stop_bps is None and risk_policy:
+            stop_bps = _dec(risk_policy.get("stop_loss_bps_default"))
+            stop_source = f"C2_RISK_POLICY_REGISTRY_V1:{engine_id}.stop_loss_bps_default" if stop_bps is not None else stop_source
+        elif stop_price is None and stop_bps is not None:
+            stop_source = "exposure_intent.constraints.stop_loss_bps"
+        if stop_price is None and entry is not None and entry > 0 and stop_bps is not None and stop_bps > 0:
+            multiplier = Decimal("1") + (stop_bps / Decimal("10000")) if direction == "SHORT" else Decimal("1") - (stop_bps / Decimal("10000"))
+            if multiplier > 0:
+                stop_price = (entry * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        quantity = 1
+        risk_per_share = abs(entry - stop_price) if entry is not None and stop_price is not None else None
+        max_loss = risk_per_share * Decimal(quantity) if risk_per_share is not None else None
+        risk_percent = (risk_per_share / entry).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP) if risk_per_share is not None and entry is not None and entry > 0 else None
+        missing_fields = []
+        if entry is None:
+            missing_fields.append("entry_price")
+        if stop_price is None:
+            missing_fields.append("stop_price")
+        constructed.append({
+            "paper_trade_id": f"paper-candidate:{day}:{candidate_id}",
+            "paper_session_id": candidate_session_id,
+            "candidate_id": candidate_id,
+            "raw_signal_id": str(candidate.get("raw_signal_id") or ""),
+            "sleeve_id": str(candidate.get("sleeve_id") or ""),
+            "hypothesis_id": str(candidate.get("hypothesis_id") or ""),
+            "thesis_id": str(candidate.get("thesis_id") or ""),
+            "symbol": symbol,
+            "direction": direction,
+            "entry_reference_price": _money(entry),
+            "entry_reference_source": str(candidate.get("entry_reference_price_source") or "market_data_inputs_v1"),
+            "source_market_value": _money(market_value),
+            "source_market_data_path": str(market_path),
+            "source_market_data_timestamp": str(record.get("source_timestamp_utc") or record.get("retrieval_timestamp_utc") or record.get("retrieved_at_utc") or ""),
+            "source_market_data_vendor": str(record.get("source_vendor") or record.get("producer_id") or "market_data_inputs_v1"),
+            "suggested_quantity": quantity,
+            "suggested_notional": _money((entry or Decimal("0")) * Decimal(quantity)),
+            "stop_price": _money(stop_price),
+            "stop_policy_source": stop_source,
+            "stop_loss_bps": _decimal_text(stop_bps),
+            "risk_per_share": _money(risk_per_share),
+            "max_loss_estimate": _money(max_loss),
+            "estimated_notional_risk_pct": _decimal_text(risk_percent),
+            "construction_status": "CONSTRUCTED" if not missing_fields else "INCOMPLETE_CONSTRUCTION",
+            "construction_timestamp_utc": run_timestamp,
+            "missing_fields": missing_fields,
+            "scope": "paper_only",
+            "broker_execution_allowed": False,
+            "live_trading_allowed": False,
+            "order_routing_allowed": False,
+            "autonomous_execution_allowed": False,
+        })
+    return {
+        "candidate_source": candidate_source,
+        "candidate_packet_path": packet_path,
+        "candidate_contracts_path": contracts_path,
+        "paper_review_queue_path": queue_path,
+        "market_data_inputs_path": market_path,
+        "stale_authority_rejections": stale_authority_rejections,
+        "paper_session_id": paper_session_id,
+        "run_timestamp_utc": run_timestamp,
+        "paper_session_id_derivation_source": session_derivation,
+        "scheduled_run_time": str(official_session.get("scheduled_run_time") or ""),
+        "session_timezone": str(official_session.get("session_timezone") or "America/New_York"),
+        "candidate_count": len(candidates),
+        "constructed_paper_trades": constructed,
+        "skipped_candidates": skipped,
+        "market_data_diagnostics": diagnostics,
+    }
 
 def _policy(root: Path) -> tuple[dict[str, Any], Path]:
     local = root / "config" / "paper_trade_construction_policy.v1.json"
@@ -552,12 +803,17 @@ def build_paper_trade_construction_v1(
         _blocker(blockers, "SUBMIT_BOUNDARY_BLOCKED")
     runtime_evaluation, runtime_evaluation_path = _runtime_evaluation(root, day)
     runtime_evaluation_hash = str(runtime_evaluation.get("deterministic_output_hash") or "")
+    candidate_construction = _paper_candidate_construction_v1(root, day)
 
     source_artifacts = [
         _source_ref(Path(str(current_truth.get("portfolio_gate_report_path") or "")) if current_truth.get("portfolio_gate_report_path") else None, "portfolio_gate_candidate_report", _nested(current_truth, "portfolio_gate_report")),
         _source_ref(intent_path, "selected_exposure_intent", intent),
         _source_ref(conversion_path, "exposure_intent_conversion", conversion_artifact),
         _source_ref(market_path, "market_data_snapshot_v1", market_row),
+        _source_ref(candidate_construction.get("candidate_contracts_path"), "aegis_candidate_contracts_v1", _read_json(candidate_construction.get("candidate_contracts_path"))),
+        _source_ref(candidate_construction.get("candidate_packet_path"), "aegis_candidate_review_packet_v1", _read_json(candidate_construction.get("candidate_packet_path"))),
+        _source_ref(candidate_construction.get("paper_review_queue_path"), "aegis_paper_review_queue_v1", _read_json(candidate_construction.get("paper_review_queue_path"))),
+        _source_ref(candidate_construction.get("market_data_inputs_path"), "market_data_inputs_v1", _read_json(candidate_construction.get("market_data_inputs_path"))),
         _source_ref(cap_path, "capital_authority_allocation_v1", capital),
         _source_ref(allocation_decision_path, "allocation_decision_v1", allocation_decision),
         _source_ref(envelope_path, "capital_risk_envelope_v2", envelope),
@@ -619,6 +875,55 @@ def build_paper_trade_construction_v1(
         "paper_submit_created": False,
         "selected_candidate_mutation_allowed": False,
     }
+    candidate_count = int(candidate_construction.get("candidate_count") or 0)
+    constructed_paper_trades = candidate_construction.get("constructed_paper_trades") if isinstance(candidate_construction.get("constructed_paper_trades"), list) else []
+    skipped_candidates = candidate_construction.get("skipped_candidates") if isinstance(candidate_construction.get("skipped_candidates"), list) else []
+    market_data_diagnostics = candidate_construction.get("market_data_diagnostics") if isinstance(candidate_construction.get("market_data_diagnostics"), list) else []
+    if candidate_count > 0:
+        first_trade = constructed_paper_trades[0] if constructed_paper_trades and isinstance(constructed_paper_trades[0], Mapping) else {}
+        first_diag = market_data_diagnostics[0] if market_data_diagnostics and isinstance(market_data_diagnostics[0], Mapping) else {}
+        first_symbol = str(first_trade.get("symbol") or first_diag.get("symbol") or symbol).upper()
+        payload_core.update({
+            "paper_session_id": str(candidate_construction.get("paper_session_id") or first_trade.get("paper_session_id") or ""),
+            "source_paper_session_id": str(candidate_construction.get("paper_session_id") or first_trade.get("paper_session_id") or ""),
+            "run_timestamp_utc": str(candidate_construction.get("run_timestamp_utc") or ""),
+            "paper_session_id_derivation_source": str(candidate_construction.get("paper_session_id_derivation_source") or ""),
+            "scheduled_run_time": str(candidate_construction.get("scheduled_run_time") or ""),
+            "session_timezone": str(candidate_construction.get("session_timezone") or "America/New_York"),
+            "selected_exposure_intent_id": str(first_trade.get("candidate_id") or selected_id),
+            "symbol": first_symbol,
+            "direction": str(first_trade.get("direction") or direction or "LONG").upper(),
+            "symbol_authority_source": str(candidate_construction.get("candidate_source") or "aegis_candidate_review_packet_v1"),
+            "market_data_snapshot_id": _sha256_file(candidate_construction.get("market_data_inputs_path")),
+            "market_data_latest_session": day if constructed_paper_trades else str(first_diag.get("source_record_day_utc") or ""),
+            "entry_reference_price": str(first_trade.get("entry_reference_price") or ""),
+            "entry_reference_source": str(first_trade.get("entry_reference_source") or ""),
+            "suggested_quantity": first_trade.get("suggested_quantity"),
+            "suggested_notional": str(first_trade.get("suggested_notional") or ""),
+            "manual_capture_ready": bool(constructed_paper_trades),
+            "paper_submit_created": bool(constructed_paper_trades),
+            "constructed_paper_trade_count": len(constructed_paper_trades),
+            "skipped_candidate_count": len(skipped_candidates),
+            "constructed_paper_trades": constructed_paper_trades,
+            "skipped_candidates": skipped_candidates,
+            "market_data_diagnostics": market_data_diagnostics,
+            "candidate_construction_summary": {
+                "paper_session_id": str(candidate_construction.get("paper_session_id") or first_trade.get("paper_session_id") or ""),
+                "candidate_count": candidate_count,
+                "constructed_count": len(constructed_paper_trades),
+                "skipped_count": len(skipped_candidates),
+                "candidate_source": str(candidate_construction.get("candidate_source") or ""),
+                "candidate_contracts_path": str(candidate_construction.get("candidate_contracts_path") or ""),
+                "candidate_packet_path": str(candidate_construction.get("candidate_packet_path") or ""),
+                "paper_review_queue_path": str(candidate_construction.get("paper_review_queue_path") or ""),
+                "market_data_inputs_path": str(candidate_construction.get("market_data_inputs_path") or ""),
+                "stale_authority_rejections": candidate_construction.get("stale_authority_rejections") if isinstance(candidate_construction.get("stale_authority_rejections"), list) else [],
+            },
+        })
+        if constructed_paper_trades:
+            blockers = []
+        else:
+            blockers = ["MISSING_CURRENT_MARKET_DATA"]
     effective_blockers = [code for code in blockers if code != "SELECTED_EXPOSURE_IS_NOT_TRADE"]
     construction_blockers = [code for code in effective_blockers if code not in SUBMIT_BOUNDARY_BLOCKERS]
     status = _status(construction_blockers)

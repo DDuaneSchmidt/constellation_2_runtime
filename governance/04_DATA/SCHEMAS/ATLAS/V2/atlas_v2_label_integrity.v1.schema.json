@@ -1,0 +1,144 @@
+{
+  "$id": "atlas_v2_label_integrity.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "actual_distinct_values": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "actual_entropy": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "actual_label_source_fields": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "authority_boundary_acknowledged": {
+      "const": true
+    },
+    "circularity_score": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
+    "correlation_expected_actual": {
+      "maximum": 1,
+      "minimum": -1,
+      "type": "number"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "dataset_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "expected_distinct_values": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "expected_entropy": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "expected_label_source_fields": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "label_independence_status": {
+      "enum": [
+        "INDEPENDENT",
+        "PARTIALLY_SHARED",
+        "HIGHLY_SHARED",
+        "CIRCULAR"
+      ]
+    },
+    "label_overlap_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
+    "object_type": {
+      "const": "LabelIntegrityReport"
+    },
+    "recommendations": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "record_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "report_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "shared_provenance_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
+    "shared_source_fields": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_ledger_root": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "transition_history": {
+      "items": {
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "object_type",
+    "report_id",
+    "created_at",
+    "dataset_name",
+    "source_ledger_root",
+    "record_count",
+    "expected_label_source_fields",
+    "actual_label_source_fields",
+    "shared_source_fields",
+    "circularity_score",
+    "correlation_expected_actual",
+    "label_independence_status",
+    "warnings",
+    "recommendations",
+    "expected_distinct_values",
+    "actual_distinct_values",
+    "expected_entropy",
+    "actual_entropy",
+    "label_overlap_ratio",
+    "shared_provenance_ratio",
+    "authority_boundary_acknowledged",
+    "transition_history"
+  ],
+  "title": "Atlas V2 Label Integrity Report",
+  "type": "object"
+}

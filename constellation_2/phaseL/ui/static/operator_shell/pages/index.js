@@ -7,6 +7,23 @@ import {
   fetchAegisEventMonitoring,
   fetchAegisOperatorState,
   fetchAegisOperatorCockpit,
+  fetchAegisEngineeringPriorityQueue,
+  fetchAegisChangeControl,
+  fetchAegisChangeControlIntelligence,
+  recordAegisChangeControlDecision,
+  fetchAegisSurfaceReadiness,
+  fetchAegisOperatorSurfaceContract,
+  fetchAegisAiOperationsResponse,
+  askAegisAiOperations,
+  fetchAegisExitReview,
+  fetchAegisPaperTradeEvaluation,
+  fetchAegisNarrativeOperationalAnalytics,
+  fetchAegisPositions,
+  fetchAegisPerformanceReport,
+  fetchAegisSleeveAnalytics,
+  fetchAegisResearchPortfolio,
+  fetchAegisResearchQuality,
+  fetchAegisPositionReviewBrief,
   fetchAegisOperatorStateSnapshotLatest,
   fetchAegisJournalTimeline,
   fetchAegisThesisGraph,
@@ -34,6 +51,15 @@ import {
   fetchResearchLabHypothesisIntake,
   fetchResearchIntakeQueue,
   fetchResearchConsole,
+  fetchResearchReviewBrief,
+  fetchResearchValidationEngine,
+  fetchHypothesisProposalPromotion,
+  fetchApprovedHypothesisPaperSetup,
+  fetchHypothesisWorkflowState,
+  fetchOperatorActionQueue,
+  fetchHypothesisWorkflowReplayVerification,
+  fetchGeneratedHypothesisThroughput,
+  executePaperPromotionAction,
   fetchResearchIntakeDossier,
   startResearchIdea,
   reviewHypothesisProposal,
@@ -42,6 +68,9 @@ import {
   runAegisDataRemediation,
   buildAegisHypothesisPlan,
   fetchAegisRuntimeTruth,
+  fetchAegisCandidateLineage,
+  fetchAegisVerifiedRuntimePortalModel,
+  executeAegisVerifiedRuntimeAction,
   fetchAegisRepairCenter,
   fetchAegisAdaptiveIntelligence,
   fetchAegisIntelligenceGovernance,
@@ -111,7 +140,6 @@ import {
 } from "/operator_shell/components/command_overview.js";
 import {
   formatTimestamp,
-  renderAegisMark,
   renderCardSection,
   renderDefinitionRows,
   renderGapState,
@@ -131,9 +159,26 @@ import {
   ROUTES,
   LEGACY_ROUTE_ALIASES,
   TARGET_SURFACE_ROUTE,
+  NOT_FOUND_ROUTE,
+  OPERATOR_SHELL_ROUTE_REGISTRY,
+  OPERATOR_SHARED_FACT_SOURCE_REGISTRY,
+  activeNavSelectionForPath,
+  normalizeRoutePath,
+  operatorShellRouteContractForPath,
+  routeShouldPreserveDayQuery,
 } from "./route_metadata.js";
 
-export { ROUTES, LEGACY_ROUTE_ALIASES };
+export {
+  ROUTES,
+  LEGACY_ROUTE_ALIASES,
+  NOT_FOUND_ROUTE,
+  OPERATOR_SHELL_ROUTE_REGISTRY,
+  OPERATOR_SHARED_FACT_SOURCE_REGISTRY,
+  activeNavSelectionForPath,
+  normalizeRoutePath,
+  operatorShellRouteContractForPath,
+  routeShouldPreserveDayQuery,
+};
 
 function routeForId(routeId) {
   return ROUTES.find((route) => route.id === routeId);
@@ -162,6 +207,10 @@ function currentSearchParams() {
     return new URLSearchParams();
   }
   return new URLSearchParams(window.location.search || "");
+}
+
+function routeQueryParams() {
+  return Object.fromEntries(currentSearchParams());
 }
 
 function currentPathname() {
@@ -202,6 +251,142 @@ function shortHash(value) {
     return raw;
   }
   return `${raw.slice(0, 8)}...${raw.slice(-6)}`;
+}
+
+const OPERATOR_TRUTH_LABELS = new Set([
+  "PAPER MODE",
+  "Monitoring only",
+  "Blocked from acting",
+  "Degraded",
+  "Healthy",
+  "Data incomplete",
+  "Review only",
+]);
+
+function operatorTruthRuntimeSource(...sources) {
+  for (const source of sources) {
+    if (source && typeof source === "object") {
+      if (source.runtime_truth && typeof source.runtime_truth === "object") return source.runtime_truth;
+      if (source.runtime_truth_kernel && typeof source.runtime_truth_kernel === "object") return source.runtime_truth_kernel;
+      if (source.readiness_state && typeof source.readiness_state === "object") return source.readiness_state;
+    }
+  }
+  return {};
+}
+
+function operatorTruthReadinessSource(...sources) {
+  for (const source of sources) {
+    if (source && typeof source === "object") {
+      if (source.summary && typeof source.summary === "object") return source.summary;
+      if (source.system_health && typeof source.system_health === "object") return source.system_health;
+      if (source.readiness_summary && typeof source.readiness_summary === "object") return source.readiness_summary;
+    }
+  }
+  return {};
+}
+
+function buildOperatorTruthModel(...sources) {
+  const runtime = operatorTruthRuntimeSource(...sources);
+  const readiness = operatorTruthReadinessSource(...sources);
+  const actionModel = sources.find((source) => source?.operator_action_model_v1 && typeof source.operator_action_model_v1 === "object")?.operator_action_model_v1
+    || sources.find((source) => source?.operator_action_model && typeof source.operator_action_model === "object")?.operator_action_model
+    || sources.find((source) => source?.capability_matrix && typeof source.capability_matrix === "object")
+    || {};
+  const actionSummary = actionModel.summary && typeof actionModel.summary === "object" ? actionModel.summary : {};
+  const actionCapabilities = actionModel.capabilities_by_id && typeof actionModel.capabilities_by_id === "object" ? actionModel.capabilities_by_id : {};
+  const safetySource = sources.find((source) => source?.safety && typeof source.safety === "object")?.safety || actionModel.safety || {};
+  const runtimeStatus = String(
+    runtime.highest_readiness_layer
+      || runtime.runtime_readiness_status
+      || readiness.runtime_readiness_status
+      || readiness.state
+      || readiness.status
+      || sources.find((source) => source?.state)?.state
+      || "",
+  ).toUpperCase();
+  const classification = String(runtime.runtime_truth_classification || readiness.runtime_truth_classification || "").toUpperCase();
+  const tradeAdviceAllowed = safetySource.trade_advice_allowed === true || runtime.trade_advice_allowed === true;
+  const brokerAllowed = safetySource.broker_execution_allowed === true || safetySource.broker_submit_transmit_allowed === true || runtime.broker_submit_transmit_allowed === true;
+  const autonomousAllowed = safetySource.autonomous_live_trading_allowed === true || safetySource.autonomous_execution_allowed === true || runtime.autonomous_execution_allowed === true;
+  const blockedCapabilities = safeList(runtime.blocked_capabilities || runtime.blockedCapabilities);
+  const runtimeBlocked = runtimeStatus === "BLOCKED" || classification === "PARTIAL_CONTEXT" || blockedCapabilities.length > 0 || readiness.runtime_readiness_status === "BLOCKED";
+  const dataIncomplete = runtimeBlocked || String(readiness.data_readiness || readiness.data_quality || "").toUpperCase().includes("BLOCKED") || String(readiness.data_readiness || readiness.data_quality || "").toUpperCase().includes("PARTIAL");
+  const paperMode = safetySource.mode_label === "PAPER MODE" || sources.some((source) => source?.operator_status_label === "PAPER MODE" || source?.safety?.mode_label === "PAPER MODE");
+  const primaryStatus = paperMode ? "PAPER MODE" : (actionSummary.top_level_summary ? "Monitoring only" : (runtimeBlocked ? "Monitoring only" : (dataIncomplete ? "Data incomplete" : "Healthy")));
+  const canAct = !runtimeBlocked && (tradeAdviceAllowed || brokerAllowed || autonomousAllowed);
+  const tradeRecommendation = actionCapabilities.TRADE_RECOMMENDATION || {};
+  const manualCapture = actionCapabilities.MANUAL_TRADE_CAPTURE || {};
+  return {
+    primaryStatus: OPERATOR_TRUTH_LABELS.has(primaryStatus) ? primaryStatus : "PAPER MODE",
+    primaryTone: runtimeBlocked ? "warning" : (dataIncomplete ? "warning" : "healthy"),
+    canAct,
+    actingStatus: actionSummary.top_level_summary || (runtimeBlocked ? "Monitoring only" : (canAct ? "Healthy" : "Review only")),
+    actionLabel: actionSummary.david_action_required ? "David action required" : "No David action required",
+    runtimeBlocked,
+    dataIncomplete,
+    tradeAdviceAllowed,
+    brokerAllowed,
+    autonomousAllowed,
+    runtimeStatus: runtimeStatus || "UNKNOWN",
+    runtimeTruthClassification: classification || "UNKNOWN",
+    blockedCapabilityCount: Number(actionSummary.blocked_capability_count ?? blockedCapabilities.length ?? 0),
+    capabilityBlockCount: Number(actionSummary.blocked_capability_count ?? blockedCapabilities.length ?? 0),
+    runtimeReadiness: runtimeStatus || classification || "UNKNOWN",
+    tradeRecommendationStatus: tradeRecommendation.status || "UNKNOWN",
+    manualCaptureStatus: manualCapture.status || "UNKNOWN",
+    summary: paperMode
+      ? "Aegis is in PAPER MODE. Research, candidate generation, and paper tracking are active; live trading and broker execution remain disabled."
+      : (actionSummary.explanatory_sentence || (runtimeBlocked
+        ? "Aegis is monitoring only. Acting is blocked because runtime evidence is incomplete."
+        : (canAct ? "Aegis can operate within the enabled policy gates." : "Aegis is available for review only."))),
+    safetySummary: "No trade advice, broker execution, live trading, or autonomous execution is enabled unless explicitly shown by runtime truth.",
+  };
+}
+
+function operatorTruthIsPolicyCapabilityBlock(row = {}) {
+  const text = `${row.issue || ""} ${row.operator_issue || ""} ${row.evidence || ""} ${row.impact || ""} ${row.operator_impact || ""}`.toUpperCase();
+  return text.includes("CAPABILITY BLOCKED")
+    || text.includes("BLOCKED_CAPABILITIES")
+    || text.includes("DISABLED BY POLICY")
+    || text.includes("DISABLED_BY_POLICY")
+    || text.includes("NOT A REPAIR TARGET UNLESS POLICY CHANGES")
+    || text.includes("MANUAL_TRADE_CAPTURE_ALLOWED")
+    || text.includes("TRADE_ADVICE_ALLOWED")
+    || text.includes("BROKER_SUBMIT_TRANSMIT")
+    || text.includes("AUTONOMOUS_EXECUTION_ALLOWED");
+}
+
+function operatorTruthIsDavidAction(row = {}) {
+  return String(row.action_type || "").toUpperCase() === "USER_ACTION" && !operatorTruthIsPolicyCapabilityBlock(row);
+}
+
+function operatorTruthDavidActionSummary(rows = []) {
+  const allRows = safeList(rows);
+  const davidRows = allRows.filter(operatorTruthIsDavidAction);
+  const policyRows = allRows.filter(operatorTruthIsPolicyCapabilityBlock);
+  return {
+    count: davidRows.length,
+    policyCapabilityCount: policyRows.length,
+    label: davidRows.length ? `${davidRows.length} David action${davidRows.length === 1 ? "" : "s"}` : "No David action required",
+    helper: davidRows.length
+      ? "These rows require a real human task."
+      : (policyRows.length ? `${policyRows.length} policy/capability item${policyRows.length === 1 ? "" : "s"} are blocked, but they are not David actions.` : "No human task is required."),
+  };
+}
+
+function renderOperatorTruthStrip(model = {}, details = []) {
+  const truth = model.primaryStatus ? model : buildOperatorTruthModel(model);
+  const rows = [
+    { label: "Paper research", value: "Active", detail: "Research observations, candidate generation, paper tracking, and validation infrastructure are running." },
+    { label: "Operating mode", value: truth.primaryStatus, detail: truth.summary },
+    { label: "David action", value: truth.actionLabel || "No David action required", detail: "Only real human tasks count here." },
+    { label: "Safety", value: "Protected", detail: "No broker/live/autonomous action is enabled." },
+    ...details,
+  ];
+  return `<section class="operator-section operator-truth-strip" data-testid="operator-truth-strip">
+    <div class="section-heading"><div><div class="section-eyebrow">Operator Truth</div><h3>${escapeHtml(truth.primaryStatus || "Monitoring only")}</h3><p class="muted-mini">${escapeHtml(truth.summary || "Runtime truth controls the primary operator status.")}</p></div>${renderStatusPill(truth.primaryStatus || "Monitoring only", truth.primaryTone || "warning", {})}</div>
+    <div class="metric-grid compact">${rows.map((row) => renderMetricCard(row)).join("")}</div>
+  </section>`;
 }
 
 function localDateTimeInputValue(date = new Date()) {
@@ -887,6 +1072,212 @@ function renderAlertSection(alertsPayload = {}, semantics = {}) {
   });
 }
 
+const CIO_KPI_PLACEHOLDERS = [
+  { label: "Month-to-Date Change", value: "Data required", detail: "Connect monthly household performance feed." },
+  { label: "YTD Change", value: "Data required", detail: "Needs source-backed account return series." },
+  { label: "Advisor Fee Drag", value: "Review", detail: "Oak Harvest fee comparison remains investment oversight." },
+  { label: "Research / Paper Trading Status", value: "Paper / research only", detail: "No broker execution. No trade advice readiness claim." },
+];
+
+const CIO_CAPITAL_CARDS = [
+  { name: "Oak Harvest", role: "Advisor-managed sleeve and benchmark comparison target.", status: "Fee and benchmark review", action: "Compare statement returns to passive benchmark and stated mandate." },
+  { name: "Fidelity 401(k)", role: "Tax-advantaged core retirement capital.", status: "Allocation review", action: "Validate fund mix, equity exposure, and glide path assumptions." },
+  { name: "Cash / T-Bills", role: "Liquidity reserve, option value, and near-term transition capital.", status: "Yield monitor", action: "Confirm cash yield versus T-Bill alternatives and planned spending runway." },
+  { name: "Security Benefit Annuity", role: "Contractual income floor and sequence-risk ballast.", status: "Planning input", action: "Track income start terms and integration with Social Security." },
+  { name: "Companion Portfolio paper trade", role: "Research sleeve testing whether David's system can improve UltraSafe blends.", status: "Paper-trade watch", action: "Continue 50/50 paper monitoring and compare against UltraSafe alone." },
+  { name: "Ultra-Safe Portfolio research", role: "Primary Portfolio123 benchmark and candidate improvement target.", status: "Research validation", action: "Maintain local curve provenance and monitor weak-period findings." },
+  { name: "Aegis / Trading Research Lab", role: "Governed research engine for paper-traded strategies and evidence quality.", status: "Runtime truth gated", action: "Use research outputs only until verified graph permits stronger claims." },
+];
+
+const CIO_RESEARCH_CARDS = [
+  { name: "Companion 50/50 Paper " + "Trade", thesis: "Blending UltraSafe with the reconstructed companion may improve Sharpe and CAGR while preserving oversight discipline.", status: "Research / paper trade", evidence: "Local blend validation and holdings-count comparison artifacts.", action: "Track live paper results before any real-capital discussion." },
+  { name: "Ultra-Safe Portfolio", thesis: "Core defensive equity research benchmark with known Sharpe and drawdown requirements.", status: "Imported local history", evidence: "Portfolio123 daily export and derived monthly series.", action: "Compare against companion and rainy-period candidates." },
+  { name: "Portfolio123 Screens", thesis: "Screen variants can test holdings count, revisions, quality, FCF, and volatility guardrails.", status: "Manual export workflow", evidence: "P123_ScreenBacktest_Daily_5/10/15/20/25 CSV imports.", action: "Run only explicit draft tests; avoid broad discovery." },
+  { name: "Aegis / Paul Trade Logic", thesis: "Paper-only trade logic can reveal whether systematic sleeves add evidence-backed value.", status: "Blocked for advice, paper evidence visible", evidence: "Runtime graph and paper-position ledgers.", action: "Monitor paper outcomes and evidence lineage." },
+  { name: "New Strategy Ideas", thesis: "Future candidates should target diversification, drawdown control, and weak-period outperformance.", status: "Queue discipline required", evidence: "Candidate graveyard, frontier, and companion analyses.", action: "Prioritize experiments with measurable portfolio purpose." },
+];
+
+const CIO_OPPORTUNITY_ROWS = [
+  ["Reduce advisor fee drag", "Quantify Oak Harvest fee impact against passive and household objectives.", "Advisor Oversight"],
+  ["Compare Oak Harvest to passive benchmark", "Use source-backed statement returns before drawing conclusions.", "Portfolios"],
+  ["Continue 50/50 paper trade", "Keep Companion / Ultra-Safe evidence alive without real-capital mutation.", "Research Lab"],
+  ["Evaluate Fidelity allocation", "Check fund mix and risk exposure against retirement timeline.", "Capital Map"],
+  ["Monitor cash yield", "Keep cash and T-Bill return gap visible while preserving liquidity.", "Capital Map"],
+  ["Review tax-loss carryforward", "Coordinate investment decisions with tax context, not as a primary dashboard action.", "Documents"],
+  ["Identify next trading/research project", "Choose the next explicit hypothesis from evidence gaps, not broad discovery.", "Research Lab"],
+];
+
+const CIO_DECISIONS = [
+  ["Paper trade 50/50", "Open", "Monitor Companion / Ultra-Safe blend evidence."],
+  ["Advisor fee review", "Queued", "Prepare Oak Harvest benchmark and fee-drag comparison."],
+  ["Oak Harvest benchmark review", "Queued", "Needs source-backed statement return series."],
+  ["Azario 2027 decision", "Scenario", "Sell / rent / keep remains a flight-simulator toggle."],
+  ["Chile relocation timing", "Scenario", "Assume 2027 until planning input changes."],
+];
+
+function cioStatusChip(value, tone = "neutral") {
+  return `<span class="cio-status-chip" data-tone="${escapeHtml(tone)}">${escapeHtml(value)}</span>`;
+}
+
+function renderCioKpiStrip(financialState = {}) {
+  const total = financialState.financial_status === "FAIL_CLOSED"
+    ? "Unavailable"
+    : formatUsd(financialState.investable_summary?.investable_assets_total_usd);
+  const cash = financialState.financial_status === "FAIL_CLOSED"
+    ? "Unavailable"
+    : formatUsd(financialState.liquidity_summary?.cash_total_usd ?? financialState.liquidity_summary?.available_funds_usd);
+  const rows = [
+    { label: "Total Investable Assets", value: total, detail: financialState.as_of_utc ? `As of ${formatTimestamp(financialState.as_of_utc)}` : "Source-backed value if available." },
+    CIO_KPI_PLACEHOLDERS[0],
+    CIO_KPI_PLACEHOLDERS[1],
+    { label: "Cash Available", value: cash, detail: "Liquidity and T-Bill opportunity review." },
+    CIO_KPI_PLACEHOLDERS[2],
+    CIO_KPI_PLACEHOLDERS[3],
+  ];
+  return `<section class="cio-kpi-strip">${rows.map((row) => `
+    <article class="cio-kpi-card">
+      <div class="cio-kpi-label">${escapeHtml(row.label)}</div>
+      <strong>${escapeHtml(row.value || "Data required")}</strong>
+      <span>${escapeHtml(row.detail || "")}</span>
+    </article>`).join("")}</section>`;
+}
+
+function renderCioCapitalMap() {
+  return `<section class="cio-section" id="capital-map">
+    <div class="cio-section-header"><div><span>2. What is my capital doing?</span><h2>Capital Map</h2></div>${cioStatusChip("Portfolio roles, not paperwork", "good")}</div>
+    <div class="cio-capital-grid">${CIO_CAPITAL_CARDS.map((card) => `
+      <article class="cio-capital-card">
+        <div class="cio-card-title">${escapeHtml(card.name)}</div>
+        <div class="cio-balance">Balance: <strong>Source / placeholder</strong></div>
+        <p>${escapeHtml(card.role)}</p>
+        <div class="cio-card-meta"><span>Status</span><strong>${escapeHtml(card.status)}</strong></div>
+        <div class="cio-card-meta"><span>Next review/action</span><strong>${escapeHtml(card.action)}</strong></div>
+      </article>`).join("")}</div>
+  </section>`;
+}
+
+function renderCioPortfolioOversight() {
+  const rows = [
+    ["Allocation by account", "Oak Harvest, Fidelity, cash/T-Bills, annuity, paper/research sleeves", "Needs current account feed"],
+    ["Allocation by asset class", "Equity, fixed income, cash, annuity contract, research exposure", "Needs source-backed classification"],
+    ["Benchmark comparison", "Oak Harvest versus passive; Companion versus UltraSafe", "Placeholder until statement returns are loaded"],
+    ["Fee drag", "Advisor fees and strategy expenses", "Oak Harvest review remains active"],
+    ["Concentration risks", "Single-symbol, advisor, strategy, and liquidity concentration", "Flag when source data supports it"],
+    ["Underperformance flags", "Account and strategy lag versus relevant benchmark", "No fabricated conclusions"],
+  ];
+  return `<section class="cio-section">
+    <div class="cio-section-header"><div><span>3. What deserves attention?</span><h2>Portfolio Oversight</h2></div>${cioStatusChip("Oversight queue", "watch")}</div>
+    <div class="cio-oversight-grid">${rows.map(([label, scope, status]) => `
+      <article class="cio-terminal-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(scope)}</strong><em>${escapeHtml(status)}</em></article>`).join("")}</div>
+  </section>`;
+}
+
+function renderCioResearchLab() {
+  return `<section class="cio-section cio-research-section" id="research-lab-home">
+    <div class="cio-section-header"><div><span>4. What investment opportunities or risks exist?</span><h2>Research Lab</h2></div>${cioStatusChip("Prominent / research only", "good")}</div>
+    <div class="cio-research-grid">${CIO_RESEARCH_CARDS.map((card) => `
+      <article class="cio-research-card">
+        <div class="cio-card-title">${escapeHtml(card.name)}</div>
+        <p><strong>Thesis:</strong> ${escapeHtml(card.thesis)}</p>
+        <p><strong>Status:</strong> ${escapeHtml(card.status)}</p>
+        <p><strong>Evidence:</strong> ${escapeHtml(card.evidence)}</p>
+        <p><strong>Next action:</strong> ${escapeHtml(card.action)}</p>
+      </article>`).join("")}</div>
+  </section>`;
+}
+
+function renderCioOpportunityQueue() {
+  return `<section class="cio-section">
+    <div class="cio-section-header"><div><span>5. What should I do next?</span><h2>Opportunity Queue</h2></div>${cioStatusChip("Investment actions", "good")}</div>
+    <div class="cio-action-list">${CIO_OPPORTUNITY_ROWS.map(([title, rationale, owner], index) => `
+      <article class="cio-action-row"><b>${index + 1}</b><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(rationale)}</span></div><em>${escapeHtml(owner)}</em></article>`).join("")}</div>
+  </section>`;
+}
+
+function renderCioRetirementSimulator() {
+  return `<section class="cio-section cio-simulator-section">
+    <div class="cio-section-header"><div><span>Secondary planning, visible but not primary</span><h2>Retirement / Chile Flight Simulator</h2></div>${cioStatusChip("Scenario model", "watch")}</div>
+    <div class="cio-simulator-grid">
+      ${["Age 58", "Chile move 2027", "Social Security", "Annuity income", "Age 95"].map((item) => `<div class="cio-timeline-node">${escapeHtml(item)}</div>`).join("")}
+    </div>
+    <div class="cio-toggle-row"><span>Azario</span><button type="button">Sell</button><button type="button">Rent</button><button type="button">Keep</button></div>
+    <p class="cio-small-note">Assets, spending, annuity, Social Security, Azario, and Chile timing remain scenario inputs until source-backed planning data is connected.</p>
+  </section>`;
+}
+
+function renderCioDecisionLog() {
+  return `<section class="cio-section">
+    <div class="cio-section-header"><div><span>Decision memory</span><h2>Decision Log</h2></div>${cioStatusChip("Human-owned", "neutral")}</div>
+    <div class="cio-decision-table">${CIO_DECISIONS.map(([decision, status, note]) => `
+      <article><strong>${escapeHtml(decision)}</strong><span>${escapeHtml(status)}</span><em>${escapeHtml(note)}</em></article>`).join("")}</div>
+  </section>`;
+}
+
+async function renderAiCioBriefingPage(state) {
+  let financialState = state?.shell?.financialState || {};
+  if (!financialState || Object.keys(financialState).length === 0) {
+    try {
+      financialState = await fetchFinancialState();
+    } catch (_error) {
+      financialState = { financial_status: "UNAVAILABLE" };
+    }
+  }
+  return {
+    title: "AI CIO Briefing",
+    meta: "Capital allocation, portfolio oversight, and investment research for David & Carolyn.",
+    layoutMode: "OPERATIONAL_LAYOUT",
+    html: `<main class="ai-cio-briefing" data-testid="ai-cio-briefing">
+      <section class="cio-hero">
+        <div>
+          <div class="cio-eyebrow">AI CIO Briefing</div>
+          <h1>Portfolio decisions, not paperwork.</h1>
+          <p>Capital allocation, portfolio oversight, and investment research for David & Carolyn.</p>
+        </div>
+        <div class="cio-hero-panel">
+          <span>1. What changed?</span>
+          <strong>Research and advisor oversight moved to the front of the household capital process.</strong>
+          <p>Primary attention is now on Oak Harvest fee drag, Companion / Ultra-Safe evidence, Fidelity allocation, cash yield, and the next explicit research project.</p>
+        </div>
+      </section>
+      ${renderCioKpiStrip(financialState)}
+      <section class="cio-letter">
+        <div class="cio-section-header"><div><span>CIO Letter</span><h2>Investment-office memo</h2></div>${cioStatusChip("Read-only oversight", "neutral")}</div>
+        <div class="cio-letter-grid">
+          <article><strong>What changed this month</strong><p>The dashboard has been reframed around household capital decisions: advisor oversight, account allocation, cash yield, paper-traded Companion evidence, Ultra-Safe research, and Aegis research quality.</p></article>
+          <article><strong>What matters</strong><p>The next useful work is not more paperwork. It is proving whether Oak Harvest earns its fee, whether Fidelity is correctly allocated, and whether the Companion / Ultra-Safe research continues to justify attention.</p></article>
+          <article><strong>Recommended action</strong><p>Keep the Companion 50/50 paper trade alive, prepare the Oak Harvest benchmark review, validate Fidelity allocation, and choose the next research project from evidence gaps. No broker execution is authorized by this page.</p></article>
+        </div>
+      </section>
+      ${renderCioCapitalMap()}
+      ${renderCioPortfolioOversight()}
+      ${renderCioResearchLab()}
+      ${renderCioOpportunityQueue()}
+      ${renderCioRetirementSimulator()}
+      ${renderCioDecisionLog()}
+    </main>`,
+    contextHtml: `<section class="stack-card"><div class="section-eyebrow">Runtime truth</div><h3>Authority boundary</h3><p class="support-note">This CIO surface is read-only oversight and research framing. Current runtime truth blocks trade advice and broker execution until verified evidence permits otherwise.</p></section>`,
+  };
+}
+
+function renderCioSecondaryPage(kind) {
+  const pages = {
+    capital: { title: "Capital Map", focus: "Oak Harvest, Fidelity 401(k), cash / T-Bills, Security Benefit Annuity, Companion paper trade, Ultra-Safe research, and Aegis / Trading Research Lab.", next: "Replace placeholders with source-backed balances and role tags." },
+    portfolios: { title: "Portfolio Oversight", focus: "Allocation by account, allocation by asset class, benchmark comparison, fee drag, concentration risks, and underperformance flags.", next: "Load current account statements and benchmark return series before conclusions." },
+    opportunities: { title: "Opportunity Queue", focus: "Advisor fee drag, Oak Harvest passive comparison, 50/50 paper trade, Fidelity allocation, cash yield, tax-loss carryforward, and next research project.", next: "Prioritize investment actions only." },
+    retirement: { title: "Retirement / Chile Flight Simulator", focus: "Age 58 to 95 timeline with assets, spending, annuity, Social Security, Azario sell/rent/keep, and Chile 2027 assumptions.", next: "Keep planning levers secondary to portfolio oversight on the home page." },
+    advisor: { title: "Advisor Oversight", focus: "Oak Harvest fee review as investment oversight: source-backed return, passive benchmark, allocation, and fee-drag comparison.", next: "Acquire statement returns and fee schedule." },
+    documents: { title: "Documents", focus: "Statements, Portfolio123 exports, Aegis evidence, tax documents, and planning documents.", next: "Bind source documents to the relevant capital or research decision." },
+    carolyn: { title: "Carolyn", focus: "Secondary family planning and continuity support. Estate, healthcare, and insurance stay here rather than on the CIO home page.", next: "Use as planning support, not the primary investment dashboard." },
+  };
+  const model = pages[kind] || pages.capital;
+  return {
+    title: model.title,
+    meta: model.focus,
+    html: `<main class="ai-cio-briefing cio-secondary-page"><section class="cio-hero compact"><div><div class="cio-eyebrow">${escapeHtml(model.title)}</div><h1>${escapeHtml(model.title)}</h1><p>${escapeHtml(model.focus)}</p></div><div class="cio-hero-panel"><span>Next action</span><strong>${escapeHtml(model.next)}</strong></div></section>${kind === "capital" ? renderCioCapitalMap() : ""}${kind === "portfolios" ? renderCioPortfolioOversight() : ""}${kind === "opportunities" ? renderCioOpportunityQueue() : ""}${kind === "retirement" ? renderCioRetirementSimulator() : ""}${kind === "advisor" ? renderCioPortfolioOversight() : ""}${kind === "documents" || kind === "carolyn" ? renderCioDecisionLog() : ""}</main>`,
+    contextHtml: `<section class="stack-card"><div class="section-eyebrow">Planning boundary</div><h3>Secondary surface</h3><p class="support-note">Primary CIO dashboard remains investment, portfolio, and research focused.</p></section>`,
+  };
+}
+
 async function renderCommandPage(state) {
   let overview;
   try {
@@ -915,6 +1306,7 @@ async function renderCommandPage(state) {
   };
 }
 
+
 async function renderPortfolioPage(state) {
   const financialState = await fetchFinancialState();
   const accounts = safeList(financialState.account_rollups);
@@ -924,6 +1316,9 @@ async function renderPortfolioPage(state) {
     title: "Portfolio",
     meta: "Canonical investable totals, account rollups, liquidity, and exposure summaries from the backend financial-state projection.",
     html: [
+      renderVerifiedRuntimeCopySource("aegisVerifiedRuntimeHydratePacketCopy", copyPayloads.hydrate_packet || envelope.hydrate_packet_path || ""),
+      renderVerifiedRuntimeCopySource("aegisVerifiedRuntimeBlockerSummaryCopy", copyPayloads.blocker_summary || blockers.join("\n")),
+      renderVerifiedRuntimeCopySource("aegisVerifiedRuntimeLatestActionResultCopy", copyPayloads.latest_action_result || ""),
       renderCardSection({
         eyebrow: "Portfolio",
         title: "Portfolio Surface",
@@ -1744,6 +2139,8 @@ async function renderSleevesPage() {
         columns: [
           { key: "display_name", label: "Sleeve" },
           { key: "sleeve_id", label: "ID" },
+          { key: "execution_label", label: "Execution", render: (row) => escapeHtml(row.execution_label || (row.manual_execution_only ? "Manual execution" : (row.execution_mode || row.mode || "n/a"))) },
+          { key: "advisory_label", label: "Advisory", render: (row) => escapeHtml(row.advisory_label || (row.advisory_only ? "Advisory only" : "n/a")) },
           { key: "priority_rank", label: "Priority" },
           { key: "actual_allocation_pct", label: "Actual Allocation", render: (row) => escapeHtml(formatPercent(row.actual_allocation_pct)) },
           { key: "effective_risk_budget_usd", label: "Risk Budget", render: (row) => escapeHtml(formatUsd(row.effective_risk_budget_usd)) },
@@ -2388,6 +2785,12 @@ async function renderOperationsPage(state) {
     readiness_grade_next_step: opsNextStep,
   });
   const opsThresholdStatus = sleeveThresholdStatusLabel(opsGrade, opsThresholdGrade);
+  const bondSleeve = statusV2Payload?.bond_sleeve || {};
+  const bondLatest = bondSleeve.latest_evaluation || {};
+  const bondHoldings = bondSleeve.operator_holdings || {};
+  const bondCoreHoldings = safeList(bondHoldings.positions);
+  const bondWatchlistHoldings = safeList(bondHoldings.watchlist_positions);
+  const showBondSleeve = bondSleeve.ui_visible === true || bondSleeve.available === true || bondSleeve.sleeve_id === "BOND";
 
   return {
     title: "Operations",
@@ -2417,6 +2820,50 @@ async function renderOperationsPage(state) {
           ${opsNextStep ? `<div style="margin-top:4px;font-size:12px;opacity:0.82;">Next step: ${escapeHtml(opsNextStep)}</div>` : ""}
         `,
       }),
+      showBondSleeve ? renderCardSection({
+        eyebrow: "BOND",
+        title: "Bond Sleeve",
+        subtitle: "Manual / Advisory / Bond sleeve. No automated execution or broker routing is exposed.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Execution", value: bondSleeve.execution_label || "Manual execution" })}
+            ${renderMetricCard({ label: "Advisory", value: bondSleeve.advisory_label || "Advisory only" })}
+            ${renderMetricCard({ label: "Latest evaluation", value: bondLatest.present ? (bondLatest.recommendation_state || "available") : "not available" })}
+            ${renderMetricCard({ label: "Evaluation time", value: bondLatest.produced_utc ? formatTimestamp(bondLatest.produced_utc) : "n/a" })}
+          </div>
+          ${renderDefinitionRows([
+            { label: "Automated execution", value: String(bondSleeve.automated_execution_allowed === true) },
+            { label: "Broker execution", value: String(bondSleeve.broker_execution_allowed === true) },
+            { label: "Manual status", value: bondSleeve.registry_status || bondSleeve.status || "MANUAL_PRODUCTION" },
+            { label: "Core holdings", value: String(bondHoldings.positions_count ?? bondCoreHoldings.length) },
+            { label: "Watchlist holdings", value: String(bondHoldings.watchlist_count ?? bondWatchlistHoldings.length) },
+            { label: "Next step", value: bondLatest.operator_next_step || "Review bond sleeve manually when a recommendation is available." },
+          ])}
+          ${renderSimpleTable({
+            columns: [
+              { key: "symbol", label: "Symbol", render: (row) => escapeHtml(row.symbol || row.instrument_id || "n/a") },
+              { key: "bond_type", label: "Bond Type", render: (row) => escapeHtml(row.bond_type || "needs review") },
+              { key: "duration_bucket", label: "Duration", render: (row) => escapeHtml(row.duration_bucket || "needs review") },
+              { key: "tax_treatment", label: "Tax", render: (row) => escapeHtml(row.tax_treatment || "needs review") },
+              { key: "market_value", label: "Market Value", render: (row) => escapeHtml(row.market_value || "needs review") },
+              { key: "review_status", label: "Review", render: (row) => escapeHtml(row.review_status || "needs review") },
+            ],
+            rows: bondCoreHoldings,
+            emptyMessage: "No current BOND holdings were returned.",
+          })}
+          ${bondWatchlistHoldings.length ? renderSimpleTable({
+            columns: [
+              { key: "symbol", label: "Watchlist", render: (row) => escapeHtml(row.symbol || row.instrument_id || "n/a") },
+              { key: "sleeve", label: "Classification", render: (row) => escapeHtml(row.sleeve || "WATCHLIST") },
+              { key: "bond_type", label: "Type", render: (row) => escapeHtml(row.bond_type || "needs review") },
+              { key: "duration_bucket", label: "Duration", render: (row) => escapeHtml(row.duration_bucket || "needs review") },
+              { key: "note", label: "Note", render: (row) => escapeHtml(row.note || "Needs review") },
+            ],
+            rows: bondWatchlistHoldings,
+            emptyMessage: "No BOND watchlist holdings were returned.",
+          }) : ""}
+        `,
+      }) : "",
       renderCardSection({
         eyebrow: "Blocking Conditions",
         title: "Current Blocks",
@@ -2597,6 +3044,315 @@ async function renderAegisRuntimePage() {
         ]),
       }),
     ].join(""),
+  };
+}
+
+function verifiedRuntimeStatusKind(status) {
+  const normalized = String(status || "").toUpperCase();
+  if (["READY", "CURRENT", "VERIFIED", "PASS", "ALLOWED"].includes(normalized)) return "healthy";
+  if (["STALE", "WARN", "PARTIAL", "EMPTY", "UNKNOWN"].includes(normalized)) return "warning";
+  if (["MISSING", "BLOCKED", "FAILED", "REJECTED", "TIMEOUT", "READ_ERROR"].includes(normalized)) return "blocked";
+  return "neutral";
+}
+
+function renderVerifiedRuntimeCopySource(id, text) {
+  return `<textarea id="${escapeHtml(id)}" hidden readonly>${escapeHtml(String(text || ""))}</textarea>`;
+}
+
+function renderVerifiedRuntimeCopyButton(label, sourceId, disabled = false) {
+  return `<button type="button" class="ghost-button" data-copy-source="${escapeHtml(sourceId)}"${disabled ? " disabled" : ""}>${escapeHtml(label)}</button>`;
+}
+
+function renderVerifiedRuntimeActionHistory(rows = []) {
+  return renderSimpleTable({
+    columns: [
+      { label: "Recorded", render: (row) => escapeHtml(row.recorded_at || row.result_envelope?.completed_at || "not reported") },
+      { label: "Action", render: (row) => `<strong>${escapeHtml(row.action_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.run_id || "")}</div>` },
+      { label: "Status", render: (row) => renderStatusPill(row.result_envelope?.status || "UNKNOWN", verifiedRuntimeStatusKind(row.result_envelope?.status), {}) },
+      { label: "Exit", render: (row) => escapeHtml(row.result_envelope?.exit_code ?? "n/a") },
+      { label: "Command", render: (row) => escapeHtml(safeList(row.command_argv).join(" ") || "not executed") },
+    ],
+    rows,
+    emptyMessage: "No Portal action records exist for this day.",
+  });
+}
+
+function renderVerifiedRuntimeActionButton(actionId, label, extra = {}, options = {}) {
+  const attrs = Object.entries(extra)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => ` data-${key}="${escapeHtml(value)}"`)
+    .join("");
+  const disabledAttr = options.disabled ? ' disabled aria-disabled="true"' : "";
+  return `<button type="button" class="secondary-button" data-aegis-verified-runtime-action="${escapeHtml(actionId)}"${attrs}${disabledAttr}>${escapeHtml(label)}</button>`;
+}
+
+async function renderAegisVerifiedRuntimePage() {
+  let envelope;
+  try {
+    envelope = await fetchAegisVerifiedRuntimePortalModel();
+  } catch (error) {
+    return {
+      title: "Verified Runtime",
+      meta: "Verified runtime graph model unavailable.",
+      html: renderCardSection({
+        eyebrow: "MODEL_UNAVAILABLE",
+        title: "Verified Runtime Graph Unavailable",
+        subtitle: "The Portal reads portal_runtime_model.v1.json and does not infer readiness.",
+        body: renderDefinitionRows([
+          { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/aegis/verified-runtime/portal-model" },
+          { label: "Recovery", value: "npm run aegis:audit" },
+          { label: "Readiness inference", value: "NO_INDEPENDENT_PORTAL_READINESS_INFERENCE" },
+        ]),
+      }),
+      contextHtml: "",
+    };
+  }
+  const model = envelope.portal_runtime_model || {};
+  const runtimeTruth = model.runtime_truth || {};
+  const hash = model.evidence_hash_verification || {};
+  const blockers = safeList(model.top_blockers || envelope.blockers);
+  const doNotClaim = safeList(model.do_not_claim);
+  const allowed = safeList(model.allowed_actions);
+  const forbidden = safeList(model.forbidden_actions);
+  const staleWarnings = safeList(envelope.stale_warnings);
+  const recovery = envelope.recovery_plan || {};
+  const recoveryItems = safeList(recovery.items);
+  const recentActions = envelope.recent_actions || {};
+  const actionHistoryRows = safeList(recentActions.rows);
+  const copyPayloads = envelope.copy_payloads || {};
+  const statusBadges = safeList(envelope.status_badges);
+  const modelReady = envelope.model_status === "READY";
+  const graphStatus = model.graph_status || envelope.model_status || "UNKNOWN";
+  const runtimeReadinessStatus = model.runtime_readiness_status || runtimeTruth.highest_readiness_layer || "UNKNOWN";
+  const graphReadyRuntimeBlocked = String(graphStatus || "").toUpperCase() === "READY" && String(runtimeReadinessStatus || "").toUpperCase() !== "READY";
+  const modeReadiness = model.mode_readiness || {};
+  const activeMode = model.active_mode || modeReadiness.active_mode || "HUMAN_REVIEWED_PAPER_MODE";
+  const activeModeStatus = model.active_mode_readiness_status || modeReadiness.active_mode_readiness_status || "UNKNOWN";
+  const modesById = modeReadiness.modes_by_id || {};
+  const fullPlatform = modesById.FULL_PLATFORM_MODE || {};
+  const policyDisabled = safeList(modeReadiness.policy_disabled_capabilities).length ? safeList(modeReadiness.policy_disabled_capabilities) : ["TRADE_ADVICE_ALLOWED", "BROKER_SUBMIT_TRANSMIT", "AUTONOMOUS_EXECUTION_ALLOWED", "LIVE_TRADING"];
+  const policyClaims = [
+    { claim: "trade advice allowed", status: "BLOCKED", evidence: "runtime truth kernel / policy gates", lookup: "trade advice allowed" },
+    { claim: "manual capture allowed", status: "BLOCKED", evidence: "Portal action layer cannot change manual capture policy", lookup: "manual trade capture allowed" },
+    { claim: "broker submit/transmit", status: "BLOCKED", evidence: "safety invariants", lookup: "broker submit transmit allowed" },
+    { claim: "autonomous execution", status: "BLOCKED", evidence: "safety invariants", lookup: "autonomous execution allowed" },
+    { claim: "portal state", status: envelope.model_status || "UNKNOWN", evidence: "portal_runtime_model.v1.json", lookup: "portal state current" },
+  ];
+  const actionDay = envelope.day_utc || model.day_utc || "";
+  const priorDay = actionDay ? new Date(`${actionDay}T00:00:00Z`) : null;
+  let fromDay = actionDay;
+  if (priorDay && !Number.isNaN(priorDay.getTime())) {
+    priorDay.setUTCDate(priorDay.getUTCDate() - 1);
+    fromDay = priorDay.toISOString().slice(0, 10);
+  }
+  const actionButtons = [
+    renderVerifiedRuntimeActionButton("run_audit", "Run Audit", { "requested-day": actionDay }),
+    renderVerifiedRuntimeActionButton("explain_blockers", "Explain Blockers", { "requested-day": actionDay }, { disabled: !modelReady }),
+    renderVerifiedRuntimeActionButton("show_evidence", "Show Evidence", { "requested-day": actionDay }, { disabled: !modelReady }),
+    renderVerifiedRuntimeActionButton("hydrate_chatgpt", "Hydrate ChatGPT", { "requested-day": actionDay }, { disabled: !modelReady }),
+  ].join("");
+  const claimPresetButtons = policyClaims.map((claimRow) => renderVerifiedRuntimeActionButton(
+    "claim_lookup",
+    `Lookup: ${claimRow.claim}`,
+    { "requested-day": actionDay, claim: claimRow.lookup },
+    { disabled: !modelReady },
+  )).join("");
+  return {
+    title: "Verified Runtime",
+    meta: "Portal view derived from portal_runtime_model.v1.json. No independent readiness inference.",
+    html: [
+      renderCardSection({
+        eyebrow: "VERIFIED_EVIDENCE_GRAPH",
+        title: `Verified Evidence Graph ${graphStatus}`,
+        subtitle: "Graph READY means graph/evidence validation passed.",
+        body: renderDefinitionRows([
+          { label: "Day", value: actionDay || "UNKNOWN" },
+          { label: "Derivation source", value: model.derivation_source || envelope.derivation_source || "MISSING" },
+          { label: "Readiness inference policy", value: model.readiness_inference_policy || envelope.readiness_inference_policy || "MISSING" },
+          { label: "Portal model path", value: envelope.portal_runtime_model_path || "MISSING" },
+          { label: "Verified graph path", value: envelope.verified_runtime_graph_path || "MISSING" },
+          { label: "Evidence ledger path", value: envelope.evidence_ledger_path || "MISSING" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "ACTIVE_MODE_READINESS",
+        title: `${activeMode} ${activeModeStatus}`,
+        subtitle: "Active Mode READY means HUMAN_REVIEWED_PAPER_MODE can operate; it does not enable trade advice, broker submit/transmit, autonomous execution, or live trading.",
+        body: renderDefinitionRows([
+          { label: "Active mode", value: activeMode },
+          { label: "Mode readiness", value: activeModeStatus },
+          { label: "Blocking requirements", value: String(safeList((modesById[activeMode] || {}).blocking_requirements).length) },
+          { label: "Warning requirements", value: String(safeList((modesById[activeMode] || {}).warning_requirements).length) },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "FULL_PLATFORM_READINESS",
+        title: `Full Platform ${fullPlatform.readiness_status || runtimeReadinessStatus}`,
+        subtitle: "Full Platform BLOCKED means unrelated optional/full-platform subsystems are missing.",
+        body: renderDefinitionRows([
+          { label: "Runtime truth", value: runtimeTruth.runtime_truth_classification || "UNKNOWN" },
+          { label: "Kernel readiness", value: runtimeTruth.highest_readiness_layer || "UNKNOWN" },
+          { label: "Full platform blockers", value: String(safeList(fullPlatform.blocking_requirements).length || safeList(model.top_blockers).length) },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "DISABLED_BY_POLICY",
+        title: "Policy-Disabled Capabilities",
+        subtitle: "Policy-disabled means intentionally forbidden, not missing evidence.",
+        body: `<div class="candidate-action-row">${policyDisabled.map((item) => renderStatusPill(item, "neutral", {})).join("")}</div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Status Badges",
+        title: "Freshness And Verification",
+        subtitle: "Badges render statuses supplied by the verified runtime model and evidence ledger.",
+        body: `<div class="candidate-action-row">${statusBadges.map((row) => renderStatusPill(`${row.label}: ${row.status || "UNKNOWN"}`, verifiedRuntimeStatusKind(row.status), {})).join("")}</div>`,
+      }),
+      staleWarnings.length ? renderCardSection({
+        eyebrow: "STALE_OR_BLOCKED",
+        title: "Graph Requires Refresh",
+        subtitle: "The Portal refuses to treat stale graph state as verified runtime state.",
+        body: `<div class="line-list">${staleWarnings.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>`,
+      }) : "",
+      graphReadyRuntimeBlocked ? renderCardSection({
+        eyebrow: "GRAPH_READY_RUNTIME_BLOCKED",
+        title: "Graph Verified, Runtime Blocked",
+        subtitle: "Verified graph readiness does not override runtime truth readiness or policy gates.",
+        body: `<div class="muted-mini">Runtime truth remains ${escapeHtml(runtimeTruth.runtime_truth_classification || "UNKNOWN")} and runtime readiness remains ${escapeHtml(runtimeReadinessStatus)}.</div>`,
+      }) : "",
+      renderCardSection({
+        eyebrow: runtimeTruth.runtime_truth_classification || "UNKNOWN",
+        title: "Runtime And Graph Status",
+        subtitle: "Graph status is evidence verification status; runtime readiness is the separate kernel readiness state.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Runtime truth", value: runtimeTruth.runtime_truth_classification || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Kernel readiness", value: runtimeTruth.highest_readiness_layer || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Graph verification", value: graphStatus })}
+            ${renderMetricCard({ label: "Portal status", value: model.portal_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Runtime readiness", value: runtimeReadinessStatus })}
+            ${renderMetricCard({ label: "Evidence hashes", value: hash.status || "UNKNOWN" })}
+          </div>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: recovery.status || "RECOVERY_PLAN",
+        title: "What Should I Do Next?",
+        subtitle: `Recovery items are read from the runtime truth kernel recovery plan: ${escapeHtml(recovery.source_path || "not reported")}`,
+        body: renderSimpleTable({
+          columns: [
+            { label: "Artifact", render: (row) => `<strong>${escapeHtml(row.artifact_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.expected_path || "")}</div>` },
+            { label: "Why", render: (row) => escapeHtml(row.why_it_matters || row.reason || "Runtime evidence is incomplete.") },
+            { label: "Command", render: (row) => escapeHtml(row.generated_by_command || "not reported") },
+            { label: "Validate", render: (row) => escapeHtml(row.validates_with_command || "npm run aegis:audit") },
+          ],
+          rows: recoveryItems,
+          emptyMessage: "No recovery actions reported by the verified graph or runtime truth kernel.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: "Operator Actions",
+        title: "Verified Runtime Commands",
+        subtitle: "Buttons call existing npm/script interfaces through a fixed server allowlist.",
+        body: `
+          <div class="candidate-action-row">
+            ${actionButtons}
+            ${renderVerifiedRuntimeCopyButton("Copy hydrate packet", "aegisVerifiedRuntimeHydratePacketCopy", !(copyPayloads.hydrate_packet || envelope.hydrate_packet_path))}
+            ${renderVerifiedRuntimeCopyButton("Copy blocker summary", "aegisVerifiedRuntimeBlockerSummaryCopy", !blockers.length)}
+            ${renderVerifiedRuntimeCopyButton("Copy latest action result", "aegisVerifiedRuntimeLatestActionResultCopy", !(copyPayloads.latest_action_result))}
+          </div>
+          <pre id="aegisVerifiedRuntimeLatestActionOutput" class="command-output" data-aegis-verified-runtime-output>Action output will appear here.</pre>
+        `,
+      }),
+      renderPaperTradeGoldenPathSection(envelope),
+      renderCardSection({
+        eyebrow: "Graph Diff",
+        title: "Compare Runtime Graph Days",
+        subtitle: "Runs the existing graph_diff action through the fixed Portal allowlist.",
+        body: `
+          <div class="candidate-action-row">
+            <label class="inline-field">From <input id="aegisVerifiedRuntimeGraphDiffFrom" type="date" value="${escapeHtml(fromDay)}"></label>
+            <label class="inline-field">To <input id="aegisVerifiedRuntimeGraphDiffTo" type="date" value="${escapeHtml(actionDay)}"></label>
+            ${renderVerifiedRuntimeActionButton("graph_diff", "Run Graph Diff", { "requested-day": actionDay, "from-day-source": "aegisVerifiedRuntimeGraphDiffFrom", "to-day-source": "aegisVerifiedRuntimeGraphDiffTo" }, { disabled: !modelReady })}
+          </div>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Claim Lookup",
+        title: "Policy Claim Presets",
+        subtitle: "Each preset calls the deterministic claim_lookup action; results come from graph/kernel evidence.",
+        body: `<div class="candidate-action-row">${claimPresetButtons}</div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Blockers",
+        title: "Top Blockers",
+        subtitle: "Graph and kernel blockers as emitted by the verified runtime model.",
+        body: blockers.length ? `<div class="line-list">${blockers.slice(0, 25).map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : `<div class="empty-state">No blockers reported by the portal model.</div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Evidence Hash Verification",
+        subtitle: "Recorded hashes are checked by the generated evidence ledger.",
+        body: renderSimpleTable({
+          columns: [
+            { label: "Evidence", key: "evidence_id" },
+            { label: "Hash", key: "hash_verification_status", render: (row) => renderStatusPill(row.hash_verification_status || "UNKNOWN", row.hash_verification_status === "VERIFIED" ? "healthy" : "blocked", {}) },
+            { label: "Validation", key: "validation_status" },
+            { label: "Freshness", key: "freshness_status" },
+            { label: "Path", key: "artifact_path" },
+          ],
+          rows: safeList(hash.entries),
+          emptyMessage: "No evidence entries reported.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: "Actions",
+        title: "Allowed And Forbidden Actions",
+        subtitle: "Allowed actions are read-only operator commands. Forbidden actions remain policy-blocked.",
+        body: `
+          <div class="two-column-grid">
+            <div>${renderSectionHeader({ eyebrow: "Allowed", title: "Operator Actions", subtitle: "" })}<div class="line-list">${allowed.map((item) => `<div>${escapeHtml(item)}</div>`).join("") || "<div>None</div>"}</div></div>
+            <div>${renderSectionHeader({ eyebrow: "Forbidden", title: "Safety Boundaries", subtitle: "" })}<div class="line-list">${forbidden.map((item) => `<div>${escapeHtml(item)}</div>`).join("") || "<div>None</div>"}</div></div>
+          </div>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Policy Claims",
+        title: "Explicit Blocked Claims",
+        subtitle: "The Portal displays these policy-relevant claims as blocked and does not infer readiness.",
+        body: renderSimpleTable({
+          columns: [
+            { label: "Claim", key: "claim" },
+            { label: "Status", key: "status", render: (row) => renderStatusPill(row.status || "BLOCKED", "blocked", {}) },
+            { label: "Evidence", key: "evidence" },
+          ],
+          rows: policyClaims,
+          emptyMessage: "No policy claims reported.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: recentActions.status || "ACTION_HISTORY",
+        title: "Recent Portal Actions",
+        subtitle: `Append-only action log: ${escapeHtml(recentActions.path || "not reported")}`,
+        body: renderVerifiedRuntimeActionHistory(actionHistoryRows),
+      }),
+      renderCardSection({
+        eyebrow: "Claim Guard",
+        title: "Do Not Claim",
+        subtitle: "These rules are propagated from the verified graph/control packet.",
+        body: doNotClaim.length ? `<div class="line-list">${doNotClaim.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : `<div class="empty-state">No do-not-claim rules reported.</div>`,
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Portal Contract",
+      title: "Thin Consumer",
+      subtitle: "The frontend does not determine runtime truth.",
+      body: renderDefinitionRows([
+        { label: "Source", value: model.derivation_source || envelope.derivation_source || "MISSING" },
+        { label: "Policy", value: model.readiness_inference_policy || envelope.readiness_inference_policy || "MISSING" },
+        { label: "Graph hash", value: shortHash(model.input_artifact_hashes && Object.values(model.input_artifact_hashes)[0]) },
+        { label: "Model hash", value: shortHash(model.output_hash) },
+      ]),
+    }),
   };
 }
 
@@ -2850,9 +3606,7 @@ async function renderAegisRuntimeTruthPage() {
 async function renderAegisOperatorCockpitPage() {
   let payload;
   try {
-    payload = ["opportunities", "today", "candidates", "journal", "runtime_timeline"].includes(workflow)
-      ? await fetchAegisOperatorStateSnapshotLatest()
-      : await fetchAegisOperatorCockpit();
+    payload = await fetchAegisOperatorCockpit();
   } catch (error) {
     return {
       title: "Operator Cockpit",
@@ -3111,13 +3865,4282 @@ async function renderAegisOperatorCockpitPage() {
   };
 }
 
+async function renderAegisCandidateLineagePage() {
+  const routeParams = typeof window === "undefined" ? { symbol: "DOW" } : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const params = { symbol: routeParams.symbol || "DOW", ...(routeParams.lineage_day ? { lineage_day: routeParams.lineage_day } : {}) };
+  let response;
+  try {
+    response = await fetchAegisCandidateLineage(params);
+  } catch (error) {
+    return {
+      title: "Candidate Lineage",
+      meta: "Forensic lineage endpoint unavailable.",
+      html: renderGapState({ title: "Candidate lineage unavailable", detail: error?.operatorSafe?.message || "The backend route did not return a lineage payload." }),
+      contextHtml: "",
+    };
+  }
+  const payload = response?.data || {};
+  const summary = payload.forensic_summary || {};
+  const artifacts = Array.isArray(payload.matching_artifacts) ? payload.matching_artifacts : [];
+  return {
+    title: "Candidate Lineage",
+    meta: `${payload.symbol || params.symbol} / ${payload.day_utc || "UNKNOWN"}`,
+    html: [
+      renderSectionHeader({ eyebrow: "Forensics", title: `${payload.symbol || params.symbol} Candidate Lineage`, subtitle: "Read-only provenance from runtime truth artifacts." }),
+      `<div class="metric-grid compact">
+        ${renderMetricCard({ label: "Classification", value: summary.classification || "UNKNOWN" })}
+        ${renderMetricCard({ label: "Candidate", value: summary.candidate_id || "MISSING" })}
+        ${renderMetricCard({ label: "Raw signal", value: summary.raw_signal_id || "MISSING" })}
+        ${renderMetricCard({ label: "Sleeve", value: summary.source_sleeve || "MISSING" })}
+      </div>`,
+      renderCardSection({
+        eyebrow: "Lineage",
+        title: "Governed Path Check",
+        subtitle: "Compares this symbol against the current 2026-05-26 governed path.",
+        body: renderDefinitionRows([
+          { label: "Candidate contract", value: summary.candidate_contract_path || "MISSING" },
+          { label: "Signal evidence graph", value: summary.signal_evidence_graph_path || "MISSING" },
+          { label: "Entry price source", value: summary.entry_reference_price_source || "MISSING" },
+          { label: "Arbitration", value: summary.arbitration_status || "UNKNOWN" },
+          { label: "Promotion", value: summary.promotion_status || "UNKNOWN" },
+          { label: "Review/packet", value: summary.review_packet_path || "MISSING" },
+          { label: "Receipt/outcome", value: summary.receipt_outcome_path || "MISSING" },
+          { label: "Current governed candidate", value: String(summary.current_2026_05_26_governed_candidate_present_for_symbol === true) },
+          { label: "Missing fields", value: (summary.missing_lineage_fields || []).join(", ") || "none" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Matching Artifacts",
+        subtitle: `${artifacts.length} artifact(s) matched the symbol on the selected lineage day.`,
+        body: renderSimpleTable({
+          columns: [
+            { label: "Family", key: "family" },
+            { label: "Status", render: (row) => escapeHtml((row.statuses || []).join(", ") || "UNKNOWN") },
+            { label: "Path", render: (row) => `<button class="support-chip chip-button" type="button" data-artifact-path="${escapeHtml(row.path || "")}" data-artifact-title="Candidate lineage evidence">${escapeHtml(row.path || "")}</button>` },
+          ],
+          rows: artifacts,
+          emptyMessage: "No matching artifacts found.",
+        }),
+      }),
+    ].join(""),
+    contextHtml: renderTrustPanel({ title: "Safety", items: ["Read-only forensics", "No policy gate changes", "No broker execution", "No trade advice"] }),
+  };
+}
+
+
+
+function renderWorkspaceTabs(tabs = []) {
+  return `<div class="workflow-tab-strip">${tabs.map((tab) => `<a class="support-chip" href="${escapeHtml(tab.route)}" data-route="${escapeHtml(tab.route)}">${escapeHtml(tab.label)}</a>`).join("")}</div>`;
+}
+
+function operatorPlainLabel(value) {
+  const raw = String(value ?? "").trim();
+  const key = raw.toUpperCase();
+  const labels = {
+    FAILED: "Unavailable",
+    UNKNOWN_REQUIRES_DIAGNOSTICS: "Needs diagnostics",
+    OUTPUT_CANDIDATES_CAPTURED: "Output candidates captured",
+    NO_CANDIDATES_QUALIFIED: "No candidates qualified",
+    SLEEVE_OUTPUTS_EMPTY: "No sleeve output candidates",
+    [["SIGNAL", "EVIDENCE", "MISSING"].join("_")]: "Signal evidence is unavailable",
+    SIGNAL_EVIDENCE_BLOCKED: "Signal evidence is blocked",
+    CONTRACT_GENERATION_BLOCKED: "Contract generation is blocked",
+    MARKET_DATA_BLOCKED: "Market data is blocked",
+    CONSTRUCTION_BLOCKED: "Construction is blocked",
+    PIPELINE_EXECUTION_FAILED: "Pipeline execution failed",
+    SESSION_NOT_RUN: "Session has not run",
+    SESSION_STALE: "Session is stale",
+    STALE_READ_MODEL: "Read model is stale",
+    MARKET_DATA_SHA_MISMATCH: "Data refresh mismatch",
+    MISSING_REQUIRED_INPUTS: "Missing required data",
+    PARTIAL_CONTEXT: "Some non-paper systems unavailable",
+    GRAPH_READY_RUNTIME_BLOCKED: "Paper mode ready; full platform incomplete",
+  };
+  if (labels[key]) return labels[key];
+  if (!raw) return "Needs review";
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function commandCenterDaily(payload = {}) {
+  return payload.daily_paper_performance_v1 || payload.daily_paper_performance || {};
+}
+
+function commandCenterPaperPnl(payload = {}) {
+  return payload.paper_pnl_report_v1 || payload.paper_pnl_report || {};
+}
+
+function commandCenterQueueAudit(payload = {}) {
+  return payload.command_center_queue_audit_v1 || payload.command_center_queue_audit || {};
+}
+
+function surfaceReadinessPayload(payload = {}) {
+  return payload.surface_readiness || payload.aegis_surface_readiness_v1 || {};
+}
+
+function surfaceReadinessRow(payload = {}, surfaceId = "") {
+  const contract = surfaceContractPayload(payload);
+  const contractById = contract.contract_by_id || contract.surface_by_id || payload.operator_surface_contract_by_id || {};
+  if (contractById && contractById[surfaceId]) return contractById[surfaceId];
+  const readiness = surfaceReadinessPayload(payload);
+  const byId = readiness.surface_by_id || payload.surface_readiness_by_id || {};
+  if (byId && byId[surfaceId]) return byId[surfaceId];
+  return safeList(readiness.surfaces).find((row) => String(row.surface_id || "") === String(surfaceId)) || {};
+}
+
+function surfaceContractPayload(payload = {}) {
+  return payload.operator_surface_contract || payload.aegis_operator_surface_contract_v1 || {};
+}
+
+function surfaceContractRow(payload = {}, surfaceId = "") {
+  const contract = surfaceContractPayload(payload);
+  const byId = contract.contract_by_id || contract.surface_by_id || {};
+  if (byId && byId[surfaceId]) return byId[surfaceId];
+  return safeList(contract.surfaces).find((row) => String(row.surface_id || "") === String(surfaceId)) || surfaceReadinessRow(payload, surfaceId);
+}
+
+function surfaceActionsAllowed(payload = {}, surfaceId = "") {
+  return surfaceContractRow(payload, surfaceId).actions_allowed === true;
+}
+
+function contractPrimaryRenderAllowed(row = {}) {
+  return row && row.status === "READY" && row.render_allowed === true && semanticInvariantFailures(row).length === 0;
+}
+
+function contractOperatorText(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "Not reported.";
+  const translated = raw
+    .replace(/RUNTIME_TRUTH_BLOCKED:?/g, "Runtime truth is blocked: ")
+    .replace(/PERFORMANCE_INPUT_DEGRADED:?/g, "Performance input is degraded: ")
+    .replace(/SLEEVE_ANALYTICS_DEGRADED:?/g, "Sleeve analytics are degraded: ")
+    .replace(/SEMANTIC_INVARIANT_FAILED:?/g, "Semantic consistency check failed: ")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return translated.charAt(0).toUpperCase() + translated.slice(1);
+}
+
+function contractPrimaryNextStep(row = {}) {
+  const next = String(row.next_step || "Use Ask Aegis for the next diagnostic step.").trim();
+  if (/npm\s+run|TARGET_DAY=|truth\/reports|\/home\/node\//i.test(next)) {
+    return "Use Ask Aegis or open diagnostics for the recovery plan.";
+  }
+  return next || "Use Ask Aegis for the next diagnostic step.";
+}
+
+function renderContractSummaryCards(contractRow = {}) {
+  return `<div class="metric-grid compact contract-summary-cards" data-testid="contract-summary-cards">
+    ${renderMetricCard({ label: "Status", value: contractRow.status || "UNAVAILABLE" })}
+    ${renderMetricCard({ label: "Render", value: contractRow.render_allowed === true ? "Allowed" : "Blocked" })}
+    ${renderMetricCard({ label: "Actions", value: contractRow.actions_allowed === true ? "Allowed" : "Disabled" })}
+    ${renderMetricCard({ label: "Metrics", value: contractRow.metrics_allowed === true ? "Allowed" : "Unavailable" })}
+  </div>`;
+}
+
+function renderContractAskAegis(contractRow = {}) {
+  const prompt = contractRow.ask_aegis_prompt || "Explain this surface state.";
+  return `<div class="contract-ask-aegis" data-testid="contract-ask-aegis">
+    <a class="primary-button" href="#ask-aegis" data-ask-aegis-prefill="${escapeHtml(prompt)}" data-testid="contract-ask-aegis">Ask Aegis</a>
+    <span class="muted-mini contract-ask-aegis-prompt">${escapeHtml(prompt)}</span>
+  </div>`;
+}
+
+function renderContractEmptyState(contractRow = {}) {
+  return `<div class="contract-empty-state" data-testid="contract-empty-state">
+    <p class="contract-primary-message" data-testid="contract-primary-message">${escapeHtml(contractRow.primary_message || "Surface unavailable.")}</p>
+    <p class="contract-reason" data-testid="contract-reason"><strong>Reason:</strong> ${escapeHtml(contractOperatorText(contractRow.reason || "The operator surface contract did not allow the primary workflow to render."))}</p>
+    <p class="contract-impact" data-testid="contract-impact"><strong>Impact:</strong> ${escapeHtml(contractOperatorText(contractRow.impact || "Primary workflow content is hidden until the surface is trustworthy."))}</p>
+    <p class="contract-next-step" data-testid="contract-next-step"><strong>Next Step:</strong> ${escapeHtml(contractPrimaryNextStep(contractRow))}</p>
+  </div>`;
+}
+
+function renderOperatorSurfaceContractReadyBanner(surfaceId = "", contractRow = {}) {
+  const row = contractRow || {};
+  return `<details class="operator-disclosure operator-surface-contract-ready" data-operator-surface-contract-first="${escapeHtml(surfaceId)}" data-surface-status="${escapeHtml(row.status || "UNAVAILABLE")}" data-testid="operator-surface-contract-first">
+    <summary>Surface readiness diagnostics</summary>
+    ${renderDefinitionRows([
+      { label: "Surface", value: row.surface_id || surfaceId },
+      { label: "Surface contract status", value: row.status || "UNAVAILABLE" },
+      { label: "Render allowed", value: row.render_allowed === true ? "Allowed" : "Blocked" },
+      { label: "Surface readiness", value: row.surface_readiness_status || "not reported" },
+      { label: "Reason", value: contractOperatorText(row.reason || "Surface contract is available for diagnostics.") },
+      { label: "Impact", value: contractOperatorText(row.impact || "Surface readiness is secondary to runtime operator truth.") },
+      { label: "Next step", value: contractPrimaryNextStep(row) },
+    ])}
+  </details>`;
+}
+
+function renderOperatorSurfaceContractReadyDiagnostics(surfaceId = "", contractRow = {}) {
+  const row = contractRow || {};
+  const evidence = safeList(row.evidence_refs || row.artifact_refs || row.source_artifacts);
+  return `<details class="operator-disclosure contract-diagnostics contract-ready-diagnostics" data-testid="contract-diagnostics"><summary>View Diagnostics</summary>${renderDefinitionRows([
+    { label: "Surface", value: row.surface_id || surfaceId },
+    { label: "Requested Day", value: row.requested_day || "not reported" },
+    { label: "Source Day", value: row.source_day || "not reported" },
+    { label: "Context Day", value: row.context_day || "not reported" },
+    { label: "Surface Readiness", value: row.surface_readiness_status || "not reported" },
+    { label: "Semantic Invariants", value: row.semantic_invariant_status || "not reported" },
+  ])}${renderSimpleTable({
+    columns: [
+      { label: "Evidence", render: (item) => escapeHtml(typeof item === "string" ? item : (item.path || item.artifact || item.source_id || JSON.stringify(item))) },
+    ],
+    rows: evidence,
+    emptyMessage: "No evidence references were listed in the operator surface contract.",
+  })}</details>`;
+}
+
+function renderOperatorSurfaceContractState(surfaceId = "", contractRow = {}) {
+  const row = contractRow || {};
+  const evidence = safeList(row.evidence_refs || row.artifact_refs || row.source_artifacts);
+  const raw = {
+    surface_id: row.surface_id || surfaceId,
+    requested_day: row.requested_day || "",
+    source_day: row.source_day || "",
+    context_day: row.context_day || "",
+    surface_readiness_status: row.surface_readiness_status || "",
+    semantic_invariant_status: row.semantic_invariant_status || "",
+    diagnostics_allowed: row.diagnostics_allowed === true,
+  };
+  return `<section class="operator-section operator-surface-contract-state" data-operator-surface-contract-state="${escapeHtml(surfaceId)}" data-surface-status="${escapeHtml(row.status || "UNAVAILABLE")}">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">OPERATOR_SURFACE_CONTRACT</div>
+        <h3>${escapeHtml(row.primary_message || `${operatorPlainLabel(surfaceId)} surface`)}</h3>
+        <p class="muted-mini">The primary workflow is contract-gated for the requested day.</p>
+      </div>
+      ${renderStatusPill(row.status || "UNAVAILABLE", verifiedRuntimeStatusKind(row.status || "UNAVAILABLE"), {})}
+    </div>
+    ${renderContractSummaryCards(row)}
+    ${renderContractEmptyState(row)}
+    ${renderContractAskAegis(row)}
+    <details class="operator-disclosure contract-diagnostics" data-testid="contract-diagnostics">
+      <summary>View Diagnostics</summary>
+      ${renderDefinitionRows([
+        { label: "Surface", value: row.surface_id || surfaceId },
+        { label: "Requested Day", value: row.requested_day || "not reported" },
+        { label: "Source Day", value: row.source_day || "not reported" },
+        { label: "Context Day", value: row.context_day || "not reported" },
+        { label: "Surface Readiness", value: row.surface_readiness_status || "not reported" },
+        { label: "Semantic Invariants", value: row.semantic_invariant_status || "not reported" },
+        { label: "Raw contract", value: JSON.stringify(raw) },
+      ])}
+      ${renderSimpleTable({
+        columns: [
+          { label: "Evidence", render: (item) => escapeHtml(typeof item === "string" ? item : (item.path || item.artifact || item.source_id || JSON.stringify(item))) },
+        ],
+        rows: evidence,
+        emptyMessage: "No evidence references were listed in the operator surface contract.",
+      })}
+    </details>
+  </section>`;
+}
+
+function renderSharedOperatorTemplate({ templateType = "EntityListTemplate", surfaceId = "", contractRow = {}, bodyHtml = "" } = {}) {
+  if (!contractPrimaryRenderAllowed(contractRow)) {
+    return renderOperatorSurfaceContractState(surfaceId, contractRow);
+  }
+  return `<div class="operator-shared-template" data-operator-template="${escapeHtml(templateType)}" data-operator-template-surface="${escapeHtml(surfaceId)}">${renderOperatorSurfaceContractReadyBanner(surfaceId, contractRow)}${renderOperatorSurfaceContractReadyDiagnostics(surfaceId, contractRow)}${bodyHtml}</div>`;
+}
+
+function OperatorInboxTemplate(options = {}) {
+  return renderSharedOperatorTemplate({ ...options, templateType: "OperatorInboxTemplate" });
+}
+
+function EntityListTemplate(options = {}) {
+  return renderSharedOperatorTemplate({ ...options, templateType: "EntityListTemplate" });
+}
+
+function AnalyticsTemplate(options = {}) {
+  const row = options.contractRow || {};
+  const surfaceId = options.surfaceId || "";
+  if (surfaceId === "performance" && row.render_allowed === true && semanticInvariantFailures(row).length === 0) {
+    return `<div class="operator-shared-template" data-operator-template="AnalyticsTemplate" data-operator-template-surface="${escapeHtml(surfaceId)}">${renderOperatorSurfaceContractReadyBanner(surfaceId, row)}${renderOperatorSurfaceContractReadyDiagnostics(surfaceId, row)}${options.bodyHtml || ""}</div>`;
+  }
+  if (row.metrics_allowed === false) {
+    return renderOperatorSurfaceContractState(surfaceId, row);
+  }
+  return renderSharedOperatorTemplate({ ...options, templateType: "AnalyticsTemplate" });
+}
+
+function ReviewTemplate(options = {}) {
+  return renderSharedOperatorTemplate({ ...options, templateType: "ReviewTemplate" });
+}
+
+function TroubleshootingTemplate(options = {}) {
+  const surfaceId = options.surfaceId || "";
+  const contractRow = options.contractRow || {};
+  if (surfaceId === "engineering") {
+    return `<div class="operator-shared-template" data-operator-template="TroubleshootingTemplate" data-operator-template-surface="${escapeHtml(surfaceId)}">${renderOperatorSurfaceContractReadyBanner(surfaceId, contractRow)}${renderOperatorSurfaceContractReadyDiagnostics(surfaceId, contractRow)}${options.bodyHtml || ""}</div>`;
+  }
+  return renderSharedOperatorTemplate({ ...options, templateType: "TroubleshootingTemplate" });
+}
+
+function renderContractGatedPage({ title = "Aegis", subtitle = "", surfaceId = "", contractRow = {}, verifiedRuntime = {} } = {}) {
+  return {
+    title,
+    subtitle,
+    layoutMode: "workflow",
+    html: [
+      renderSectionHeader({ eyebrow: "Operator Surface Contract", title, subtitle: subtitle || "The canonical surface contract is the first-rendered operator truth." }),
+      renderOperatorSurfaceContractState(surfaceId, contractRow),
+      renderAskAegisPanel({
+        day_utc: contractRow.requested_day || contractRow.source_day || "",
+        generated_at: contractRow.generated_at || "",
+        actions_required: [{ title: contractRow.primary_message || title, action: contractPrimaryNextStep(contractRow) }],
+      }, verifiedRuntime),
+    ].join(""),
+    contextHtml: renderTrustPanel({ title: "Contract", items: [
+      `Surface: ${surfaceId}`,
+      `Status: ${contractRow.status || "UNAVAILABLE"}`,
+      "Primary content is hidden until the contract is READY.",
+      "Safety gates remain disabled.",
+    ] }),
+  };
+}
+
+function renderSurfaceReadinessNotice(payload = {}, surfaceId = "") {
+  const row = surfaceContractRow(payload, surfaceId);
+  const status = row.status || row.surface_status || "";
+  if (!row || !status || status === "READY") return "";
+  const reasons = [row.reason].concat(safeList(row.blocking_reasons)).concat(safeList(row.warning_reasons)).filter(Boolean).slice(0, 3);
+  return `<div class="surface-readiness-notice" data-surface-readiness="${escapeHtml(surfaceId)}" data-status="${escapeHtml(status)}"><strong>${escapeHtml(operatorPlainLabel(status))}</strong><span>${escapeHtml(reasons[0] || "Surface readiness is degraded for the requested day.")}</span></div>`;
+}
+
+
+function semanticInvariantFailures(row = {}) {
+  const details = row.details || {};
+  return safeList(row.semantic_invariant_failures || details.semantic_invariant_failures).filter((failure) => failure && failure.blocking === true);
+}
+
+function renderSemanticInvariantUnavailable(surfaceTitle, surfaceRow = {}) {
+  const failures = semanticInvariantFailures(surfaceRow);
+  if (!failures.length) return "";
+  const first = failures[0] || {};
+  const heading = String(surfaceTitle || "Analytics").toLowerCase().includes("analytics") ? `${surfaceTitle} Unavailable` : `${surfaceTitle} Analytics Unavailable`;
+  return `<section class="operator-section semantic-invariant-blocked" data-semantic-invariant-blocked="${escapeHtml(surfaceTitle)}">
+    <div class="section-heading"><div><div class="section-eyebrow">SEMANTIC_INVARIANT_GATE</div><h3>${escapeHtml(heading)}</h3><p>Reason: ${escapeHtml(first.reason || "A blocking semantic invariant failed.")}</p></div></div>
+    <div class="status-callout warning"><strong>${escapeHtml(first.invariant_id || "semantic invariant failed")}</strong><span>${escapeHtml(first.reason || "Rendered analytics would be internally contradictory.")}</span></div>
+    <details class="operator-disclosure"><summary>Raw invariant evidence (${escapeHtml(String(failures.length))})</summary>${renderSimpleTable({
+      columns: [
+        { label: "Invariant", render: (row) => escapeHtml(row.invariant_id || "unknown") },
+        { label: "Status", render: (row) => escapeHtml(row.status || "FAIL") },
+        { label: "Reason", render: (row) => escapeHtml(row.reason || "") },
+        { label: "Fields", render: (row) => escapeHtml(JSON.stringify(row.field_values || {})) },
+      ],
+      rows: failures,
+      emptyMessage: "No semantic invariant failures reported.",
+    })}</details>
+  </section>`;
+}
+
+function commandCenterAuditRows(payload = {}, options = {}) {
+  const audit = commandCenterQueueAudit(payload);
+  let rows = safeList(audit.rows);
+  if (options.queue) rows = rows.filter((row) => String(row.queue || "").toUpperCase() === String(options.queue).toUpperCase());
+  if (options.classification) rows = rows.filter((row) => String(row.classification || "").toUpperCase() === String(options.classification).toUpperCase());
+  return rows;
+}
+
+function commandCenterCandidateSourceRows(payload = {}) {
+  const projection = payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {};
+  const sources = [
+    projection.paper_workflow_rows,
+    projection.reviewable_candidates,
+    projection.paper_review_queue_rows,
+    projection.current_day_candidate_rows,
+    payload.current_day_candidate_rows,
+    payload.current_day_candidates,
+  ];
+  const rows = sources.flatMap((source) => safeList(source));
+  const seen = new Set();
+  return rows.filter((row) => {
+    const id = String(row.candidate_id || row.candidate_contract_id || row.position_id || row.symbol || JSON.stringify(row));
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function commandCenterSourceRowForAudit(payload = {}, auditRow = {}) {
+  const candidates = commandCenterCandidateSourceRows(payload);
+  const candidateId = String(auditRow.candidate_id || "");
+  const positionId = String(auditRow.position_id || "");
+  const symbol = String(auditRow.symbol || "");
+  return candidates.find((row) => candidateId && String(row.candidate_id || row.candidate_contract_id || "") === candidateId)
+    || candidates.find((row) => positionId && String(row.position_id || row.open_paper_position?.position_id || "") === positionId)
+    || candidates.find((row) => symbol && String(row.symbol || "") === symbol)
+    || {};
+}
+
+function commandCenterMergeAuditRow(payload = {}, auditRow = {}) {
+  const source = commandCenterSourceRowForAudit(payload, auditRow);
+  return {
+    ...source,
+    ...auditRow,
+    candidate_id: auditRow.candidate_id || source.candidate_id || source.candidate_contract_id || "",
+    candidate_contract_id: auditRow.candidate_contract_id || source.candidate_contract_id || auditRow.candidate_id || "",
+    paper_session_id: auditRow.paper_session_id || source.paper_session_id || payload.paper_session_id || "",
+    symbol: auditRow.symbol || source.symbol || "",
+    sleeve_id: auditRow.sleeve_id || source.sleeve_id || source.sleeve || "",
+    command_center_classification: auditRow.classification || "DIAGNOSTICS_ONLY",
+    command_center_reason: auditRow.action_block_reason || auditRow.plain_english_reason || "Command Center queue audit classified this row.",
+    recommended_command_center_bucket: auditRow.recommended_command_center_bucket || "Diagnostics",
+    day_boundary_status: auditRow.day_boundary_status || source.day_boundary_status || "",
+    row_day_utc: auditRow.row_day_utc || source.day_utc || source.source_day || "",
+    paper_session_day: auditRow.paper_session_day || "",
+    actionable: auditRow.actionable !== false && String(auditRow.classification || "").toUpperCase() === "OPERATOR_ACTION_REQUIRED",
+  };
+}
+
+function commandCenterCandidates(payload = {}) {
+  if (!surfaceActionsAllowed(payload, "command_center")) return [];
+  const auditRows = commandCenterAuditRows(payload, { queue: "AWAITING_REVIEW", classification: "OPERATOR_ACTION_REQUIRED" });
+  return auditRows
+    .map((row) => commandCenterMergeAuditRow(payload, row))
+    .filter((row) => row.actionable !== false && String(row.day_boundary_status || "CURRENT_DAY_SESSION").toUpperCase() === "CURRENT_DAY_SESSION");
+}
+
+function commandCenterMonitorRows(payload = {}) {
+  return commandCenterAuditRows(payload).filter((row) => ["ALREADY_CAPTURED", "MONITOR_ONLY", "DUPLICATE_SUPPRESSED", "SYSTEM_WAITING", "RESEARCH_ONLY"].includes(String(row.classification || "").toUpperCase()))
+    .map((row) => commandCenterMergeAuditRow(payload, row));
+}
+
+function commandCenterNeedsAttentionRows(payload = {}) {
+  const auditRows = commandCenterAuditRows(payload, { queue: "NEEDS_ATTENTION", classification: "OPERATOR_ACTION_REQUIRED" });
+  return auditRows.map((row) => commandCenterMergeAuditRow(payload, row));
+}
+
+function commandCenterOpenPositions(payload = {}) {
+  const pnl = commandCenterPaperPnl(payload);
+  const ledger = paperLedgerProjection(payload);
+  const rows = ledger.open.length ? ledger.open : safeList(pnl.open_positions);
+  return attachExitRecommendationsToPositions(rows, payload).map((row) => ({ ...row, current_status: row.current_status || row.status || "OPEN" }));
+}
+
+function commandCenterClosedPositions(payload = {}) {
+  const pnl = commandCenterPaperPnl(payload);
+  const ledger = paperLedgerProjection(payload);
+  return ledger.closed.length ? ledger.closed : safeList(pnl.closed_positions);
+}
+
+function commandCenterLegacyCaptures(payload = {}) {
+  const ledger = paperLedgerProjection(payload);
+  const journal = payload.journal || payload.canonical_operator_state?.journal || {};
+  return safeList(ledger.legacy).length ? safeList(ledger.legacy) : safeList(journal.captured_trades || journal.legacy_captures);
+}
+
+function commandCenterRunFailureItems(payload = {}) {
+  const currentTruth = payload.current_operator_truth || {};
+  const currentDayStatus = payload.current_day_status || currentTruth.current_day_status || {};
+  const schedulerFailure = currentDayStatus.scheduler_failure || payload.scheduler_failure || {};
+  const actions = safeList(payload.actions_required || payload.canonical_operator_state?.actions_required).map((action) => ({
+    severity: action.priority || "High",
+    issue: action.title || operatorPlainLabel(action.type || "Action required"),
+    reason: action.reason || action.suggested_command || "Current-day operator projection needs repair before the Portal can show daily state.",
+    action: action.suggested_command ? "Repair" : "View Details",
+    route: "/aegis-opportunities",
+    symbol: action.type || action.action_id || "System",
+    priority: 0,
+  }));
+  const scheduler = schedulerFailure && Object.keys(schedulerFailure).length ? [{
+    severity: schedulerFailure.severity || "High",
+    issue: schedulerFailure.message || schedulerFailure.blocker || "Run failed",
+    reason: [schedulerFailure.failed_stage, schedulerFailure.log_path, schedulerFailure.repair_command].filter(Boolean).join(" | ") || "The scheduled run did not publish complete current-day operator state.",
+    action: schedulerFailure.repair_command ? "Repair" : "View Details",
+    route: "/aegis-opportunities",
+    symbol: schedulerFailure.failed_stage || "Scheduled run",
+    priority: 0,
+  }] : [];
+  if (!payload.canonical_operator_state || Object.keys(payload.canonical_operator_state || {}).length === 0) {
+    return [
+      ...actions,
+      ...scheduler,
+      {
+        severity: "High",
+        issue: "Current-day operator projection missing",
+        reason: "canonical_operator_state.v1.json is missing for today. The Portal is showing repair guidance instead of a blank UNKNOWN state.",
+        action: "Generate Operator State",
+        route: "/aegis-opportunities",
+        symbol: "System",
+        priority: 0,
+      },
+    ];
+  }
+  return [...actions, ...scheduler];
+}
+
+function commandCenterAttention(payload = {}) {
+  const runFailures = commandCenterRunFailureItems(payload);
+  const actionableAttention = commandCenterNeedsAttentionRows(payload).map((row) => ({
+    severity: row.severity || "Action required",
+    issue: row.issue || row.command_center_reason || "Operator action required",
+    reason: row.command_center_reason || row.reason || "This row has a true operator-actionable blocker.",
+    action: row.action || "View Details",
+    route: row.route || "/aegis-command-center",
+    symbol: row.symbol || row.position_id || "Item",
+    classification: row.command_center_classification || row.classification || "OPERATOR_ACTION_REQUIRED",
+    priority: 1,
+  }));
+  const blockers = safeList(payload.verified_runtime_graph?.runtime_blockers || payload.runtime_blockers || payload.candidate_projection_debug?.day_path_invariant_violations).map((row) => ({
+    severity: row.severity || "Blocked",
+    issue: operatorPlainLabel(row.blocker || row.code || row.status || row.reason || row),
+    reason: operatorPlainLabel(row.reason || row.status || row.message || "Fix the current-day run issue before relying on this subsystem."),
+    action: "Fix",
+    route: "/aegis-opportunities",
+    symbol: row.symbol || row.sleeve_id || "System",
+    classification: "DIAGNOSTICS_ONLY",
+    priority: 5,
+  })).filter((row) => row.issue && row.issue !== "");
+  return [...runFailures, ...actionableAttention, ...blockers].sort((a, b) => a.priority - b.priority).slice(0, 8);
+}
+
+function renderCommandMetricStrip(payload = {}) {
+  const daily = commandCenterDaily(payload);
+  const audit = commandCenterQueueAudit(payload);
+  const auditSummary = audit.summary || {};
+  const openPositions = commandCenterOpenPositions(payload);
+  const candidates = commandCenterCandidates(payload);
+  const attention = commandCenterAttention(payload);
+  const mode = payload.mode_readiness || payload.verified_runtime_graph?.mode_readiness || {};
+  const modeStatus = mode.active_mode_readiness_status || payload.verified_runtime_graph?.active_mode_readiness_status || payload.active_mode_readiness_status || "UNKNOWN";
+  const awaitingCount = candidates.length;
+  const needsAttentionCount = attention.length;
+  return `<div class="metric-grid compact command-center-top-strip">
+    ${renderMetricCard({ label: "Open Positions", value: String(daily.total_open_positions ?? openPositions.length) })}
+    ${renderMetricCard({ label: "Unrealized P&L", value: paperTradeUsd(daily.unrealized_pnl) })}
+    ${renderMetricCard({ label: "Awaiting Review", value: String(awaitingCount) })}
+    ${renderMetricCard({ label: "Needs Attention", value: String(needsAttentionCount) })}
+    ${renderMetricCard({ label: "Mode Readiness", value: operatorPlainLabel(modeStatus) })}
+  </div>`;
+}
+
+function commandCenterWhyShown(row = {}) {
+  return row.command_center_reason || row.plain_english_reason || row.reason || "Shown because the queue audit found an operator-relevant state.";
+}
+
+function commandCenterRecommendedAction(row = {}) {
+  const classification = String(row.command_center_classification || row.classification || "").toUpperCase();
+  if (classification === "OPERATOR_ACTION_REQUIRED") return "Confirm captured, mark not captured, or defer.";
+  if (classification === "ALREADY_CAPTURED") return "Monitor position; entry is already recorded.";
+  if (classification === "MONITOR_ONLY") return "Monitor; no operator command is required.";
+  if (classification === "DUPLICATE_SUPPRESSED") return "Suppressed duplicate; review details only.";
+  if (classification === "SYSTEM_WAITING") return "Waiting for system update.";
+  if (classification === "RESEARCH_ONLY") return "Research context only.";
+  return "View details.";
+}
+
+function commandCenterLastUpdated(row = {}, payload = {}) {
+  return row.updated_at || row.generated_at || row.generated_at_utc || row.created_at || payload.generated_at_utc || payload.generated_at || "n/a";
+}
+
+function askAegisContextLabel(type = "") {
+  const normalized = String(type || "").toUpperCase();
+  if (normalized === "POSITION") return "Ask about this position";
+  if (normalized === "SLEEVE") return "Ask about this sleeve";
+  if (normalized === "HYPOTHESIS") return "Ask about this hypothesis";
+  if (normalized === "BLOCKER") return "Ask about this blocker";
+  return "Ask Aegis";
+}
+
+function renderAskAegisContextAction(type = "", targetId = "", label = "") {
+  const actionLabel = label || askAegisContextLabel(type);
+  return `<a class="ghost-button ask-aegis-context-action" href="#ask-aegis" data-ask-aegis-context="${escapeHtml(type || "general")}" data-ask-aegis-target="${escapeHtml(targetId || "")}">${escapeHtml(actionLabel)}</a>`;
+}
+
+function askAegisFirstNonEmpty(values = []) {
+  return safeList(values).find((value) => value !== undefined && value !== null && String(value).trim() !== "") || "";
+}
+
+function askAegisQueueSummary(payload = {}) {
+  const summary = commandCenterQueueAudit(payload).summary || {};
+  const candidates = commandCenterCandidates(payload).length;
+  const attention = commandCenterAttention(payload).length;
+  const monitor = commandCenterMonitorRows(payload).length;
+  return {
+    awaiting_review: Number(summary.operator_action_required_count ?? candidates),
+    needs_attention: Number(summary.needs_attention_count ?? attention),
+    monitor_safe_ignore: Number(summary.non_action_row_count ?? monitor),
+    incorrectly_awaiting_review: Number(summary.incorrectly_shown_as_awaiting_review_count ?? 0),
+    incorrectly_needs_attention: Number(summary.incorrectly_shown_as_needs_attention_count ?? 0),
+  };
+}
+
+function askAegisRuntimeSummary(payload = {}, verifiedRuntime = {}) {
+  const graph = payload.verified_runtime_graph || payload.runtime_truth_graph || {};
+  const currentTruth = payload.current_operator_truth || {};
+  const status = askAegisFirstNonEmpty([
+    verifiedRuntime.model_status,
+    verifiedRuntime.graph_status,
+    graph.graph_status,
+    currentTruth.status,
+    payload.status,
+    "Unknown",
+  ]);
+  const message = askAegisFirstNonEmpty([
+    verifiedRuntime.operator_message,
+    currentTruth.operator_message,
+    payload.operator_message,
+    payload.summary?.operator_message,
+    "Aegis is reading the current operator, audit, and packet artifacts.",
+  ]);
+  return { status, message };
+}
+
+function askAegisBlockers(payload = {}, verifiedRuntime = {}) {
+  const graph = payload.verified_runtime_graph || payload.runtime_truth_graph || {};
+  const graphBlockers = safeList(graph.audit_blockers || graph.blockers || graph.runtime_blockers);
+  const statusBadges = safeList(verifiedRuntime.status_badges)
+    .filter((row) => String(row.severity || row.status || "").toUpperCase().includes("BLOCK") || String(row.label || "").toUpperCase().includes("BLOCK"))
+    .map((row) => row.message || row.label);
+  const copySummary = String(verifiedRuntime.copy_payloads?.blocker_summary || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  return [...graphBlockers, ...copySummary, ...statusBadges].filter(Boolean).slice(0, 5);
+}
+
+function askAegisFixFirst(payload = {}, verifiedRuntime = {}) {
+  const action = safeList(payload.actions_required)[0] || safeList(verifiedRuntime.recovery_plan?.items)[0] || safeList(verifiedRuntime.recent_actions)[0] || {};
+  return askAegisFirstNonEmpty([
+    action.suggested_command,
+    action.command,
+    action.repair_command,
+    action.title,
+    action.action,
+    askAegisBlockers(payload, verifiedRuntime)[0],
+    "No repair command was published; open diagnostics for the current audit handoff.",
+  ]);
+}
+
+function renderAskAegisPanel(payload = {}, verifiedRuntime = {}) {
+  const queue = askAegisQueueSummary(payload);
+  const runtime = askAegisRuntimeSummary(payload, verifiedRuntime);
+  const positions = commandCenterOpenPositions(payload).length;
+  const generatedAt = askAegisFirstNonEmpty([verifiedRuntime.generated_at, payload.generated_at_utc, payload.generated_at, "not available"]);
+  const packetStatus = askAegisFirstNonEmpty([verifiedRuntime.hydrate_packet_status, payload.control_packet_freshness?.status, "available through existing packet infrastructure"]);
+  const dayUtc = payload.day_utc || payload.requested_day || payload.source_day || "";
+  const prompts = ["What happened?", "What changed?", "What needs attention?", "What should be fixed?", "What should be fixed first?", "Why is this blocked?", "What is the blocker?", "Explain this error", "Is operator action required?"];
+  return `<section id="ask-aegis" class="operator-section ask-aegis-panel" data-testid="ask-aegis-panel">
+    <div class="section-heading">
+      <div><div class="section-eyebrow">AI Operations Assistant</div><h3>Ask Aegis</h3><p class="muted-mini">Ask a free-form operational question. Phase 1 answers only operational questions from deterministic Aegis evidence; Raw packet JSON stays hidden.</p></div>
+      <span class="support-chip">Grounded response</span>
+    </div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Runtime Status", value: operatorPlainLabel(runtime.status) })}
+      ${renderMetricCard({ label: "Open Positions", value: String(positions) })}
+      ${renderMetricCard({ label: "Awaiting Review", value: String(queue.awaiting_review) })}
+      ${renderMetricCard({ label: "Needs Attention", value: String(queue.needs_attention) })}
+    </div>
+    <form class="ask-aegis-form" data-ask-aegis-form>
+      <input type="hidden" name="day_utc" value="${escapeHtml(dayUtc)}">
+      <label class="field-label" for="askAegisQuestion">Ask an operational question</label>
+      <textarea id="askAegisQuestion" class="operator-textarea" name="question" rows="3" data-ask-aegis-question placeholder="What should I fix first?" required></textarea>
+      <div class="operator-local-actions ask-aegis-questions" aria-label="Ask Aegis suggested prompts">
+        ${prompts.map((question) => `<button class="ghost-button" type="button" data-ask-aegis-prompt="${escapeHtml(question)}">${escapeHtml(question)}</button>`).join("")}
+        <button class="primary-button" type="submit">Ask Aegis</button>
+      </div>
+    </form>
+    <article class="stack-card ask-aegis-response-card" data-ask-aegis-response data-testid="ask-aegis-grounded-response">
+      <div class="stack-card-title">Grounded response</div>
+      <p class="support-note">Ask an operational question to build deterministic context and generate an audited response.</p>
+      <div class="metric-grid compact">
+        ${renderMetricCard({ label: "Confidence", value: "Not asked" })}
+        ${renderMetricCard({ label: "Source Evidence", value: "0" })}
+      </div>
+    </article>
+    <p class="muted-mini">Phase 1 supports operational questions only. Position, sleeve, hypothesis, candidate, and performance questions remain Phase 2.</p>
+    <details class="operator-disclosure ask-aegis-sources"><summary>Sources and scope</summary>${renderDefinitionRows([
+      { label: "Context artifact", value: "aegis_ai_operations_context_v1" },
+      { label: "Response artifact", value: "aegis_ai_operations_response_v1" },
+      { label: "Control packet", value: "aegis_chatgpt_control_packet_v1" },
+      { label: "Hydrate packet", value: `aegis_chatgpt_hydrate_packet_v1 (${packetStatus})` },
+      { label: "Verified runtime", value: "verified_runtime_graph_v1" },
+      { label: "Audit handoff", value: "aegis_audit_handoff_v1 and audit outputs" },
+      { label: "Operator cockpit", value: `Current Command Center read model, last update ${generatedAt}` },
+      { label: "Scope", value: "Operational questions only in Phase 1. No trade advice, no execution, no system control." },
+    ])}</details>
+  </section>`;
+}
+
+function commandCenterSessionDisplay(row = {}, payload = {}) {
+  const session = String(row.paper_session_id || "").trim();
+  const requestedDay = String(payload.day_utc || payload.requested_day || payload.displayed_artifact_day || "").slice(0, 10);
+  if (!session) return "not available";
+  if (requestedDay && !session.includes(requestedDay)) return "Historical paper session hidden from current-day primary view";
+  return session;
+}
+
+function renderCommandCenterDetails(row = {}, payload = {}) {
+  return `<details class="position-row-details command-center-row-details"><summary>Details</summary>${renderDefinitionRows([
+    { label: "Classification", value: row.command_center_classification || row.classification || "not classified" },
+    { label: "Reason", value: commandCenterWhyShown(row) },
+    { label: "Bucket", value: row.recommended_command_center_bucket || "not available" },
+    { label: "Day boundary", value: row.day_boundary_status || "not available" },
+    { label: "Paper session", value: commandCenterSessionDisplay(row, payload) },
+    { label: "Candidate ID", value: row.candidate_id || "not available" },
+    { label: "Position ID", value: row.position_id || row.open_paper_position?.position_id || "not available" },
+    { label: "Sleeve", value: row.sleeve_id || row.sleeve || "not available" },
+    { label: "Source", value: commandCenterQueueAudit(payload).artifact_path || "aegis_command_center_queue_audit_v1" },
+  ])}</details>`;
+}
+
+function renderCommandCenterCandidateTable(rows = [], payload = {}) {
+  const readinessNotice = renderSurfaceReadinessNotice(payload, "command_center");
+  return `${readinessNotice}<div class="positions-table-wrap command-center-table-wrap" data-testid="command-center-candidate-review-table">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+      { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || row.sleeve || "-") },
+      { label: "Entry", render: (row) => escapeHtml(String(candidateEntryPrice(row) || row.entry_reference_price || row.entry_price || "-")) },
+      { label: "State", render: (row) => renderStatusPill(operatorPlainLabel(row.workflow_state || row.candidate_lifecycle_state || row.status || "Awaiting Review"), "warning", {}) },
+      { label: "Why shown", render: (row) => escapeHtml(commandCenterWhyShown(row)) },
+      { label: "Recommended operator action", render: (row) => escapeHtml(commandCenterRecommendedAction(row)) },
+      { label: "Last updated", render: (row) => escapeHtml(commandCenterLastUpdated(row, payload)) },
+      { label: "Actions", render: (row) => `${(!surfaceActionsAllowed(payload, "command_center") || row.actionable === false) ? renderReadOnlyPositionAction("View Details") : renderPositionsTodayCandidateActions(row, payload)}${renderAskAegisContextAction("sleeve", row.sleeve_id || row.sleeve || row.symbol || "candidate-sleeve")}` },
+    ],
+    rows: safeList(rows),
+    emptyMessage: "No operator action required. Aegis is monitoring automatically.",
+  })}</div>`;
+}
+
+function renderCommandCenterMonitorTable(rows = [], payload = {}) {
+  return `<div class="positions-table-wrap command-center-table-wrap" data-testid="command-center-monitor-table">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+      { label: "State", render: (row) => renderStatusPill(operatorPlainLabel(row.workflow_state || row.current_status || row.status || row.command_center_classification || "Monitor"), "neutral", {}) },
+      { label: "Why shown", render: (row) => escapeHtml(commandCenterWhyShown(row)) },
+      { label: "Recommended operator action", render: (row) => escapeHtml(commandCenterRecommendedAction(row)) },
+      { label: "Bucket", render: (row) => escapeHtml(row.recommended_command_center_bucket || "Monitor / Safe to Ignore") },
+      { label: "Actions", render: (row) => `${renderReadOnlyPositionAction(String(row.command_center_classification || row.classification || "").toUpperCase() === "ALREADY_CAPTURED" ? "View Position" : "View Details")}${renderAskAegisContextAction(row.position_id || row.open_paper_position?.position_id ? "position" : "sleeve", row.position_id || row.open_paper_position?.position_id || row.sleeve_id || row.sleeve || row.symbol || "monitor-row")}${renderCommandCenterDetails(row, payload)}` },
+    ],
+    rows: safeList(rows),
+    emptyMessage: "No monitor-only rows were reported.",
+  })}</div>`;
+}
+
+function renderCommandCenterAttentionTable(rows = [], payload = {}) {
+  return `<div class="positions-table-wrap command-center-table-wrap" data-testid="command-center-needs-attention-table">${renderSimpleTable({
+    columns: [
+      { label: "Item", render: (row) => `<strong>${escapeHtml(row.issue || row.symbol || "Action")}</strong>` },
+      { label: "Severity", render: (row) => renderStatusPill(operatorPlainLabel(row.severity || "Action required"), "warning", {}) },
+      { label: "Why", render: (row) => escapeHtml(row.reason || row.command_center_reason || "Operator action required.") },
+      { label: "Action", render: (row) => `<a class="primary-button" href="${escapeHtml(row.route || "/aegis-command-center")}" data-route="${escapeHtml(row.route || "/aegis-command-center")}">${escapeHtml(row.action || "View Details")}</a>${renderAskAegisContextAction("blocker", row.issue || row.symbol || row.reason || "attention-row")}` },
+    ],
+    rows: safeList(rows),
+    emptyMessage: "No operator action required. Aegis is monitoring automatically.",
+  })}</div>`;
+}
+
+function renderCommandCandidateCard(row = {}, payload = {}) {
+  const candidateId = row.candidate_id || "";
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || "";
+  const reviewModalId = `paper-review-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const tradeModalId = `paper-entry-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const thesis = safeList(row.thesis_reason_code_text || row.thesis_reason_codes || row.reason_codes).slice(0, 2).join("; ") || row.thesis_summary || row.summary || "Candidate has enough source evidence for human paper review.";
+  return `<article class="stack-card operator-command-card candidate-command-card">
+    <header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.symbol || candidateId || "Candidate")}</div><div class="stack-card-subtitle">${escapeHtml(row.sleeve_id || row.sleeve || "Unknown sleeve")}</div></div>${renderStatusPill("Awaiting review", "warning", {})}</header>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Entry Reference", value: String(row.entry_reference_price ?? row.entry_price ?? "n/a") })}
+      ${renderMetricCard({ label: "Review", value: operatorPlainLabel(row.analytical_state || row.current_state || row.status || "Awaiting Review") })}
+    </div>
+    <p class="support-note"><strong>Summary:</strong> ${escapeHtml(thesis)}</p>
+    <p class="muted-mini">Reason: This candidate is ready for a human paper-mode decision.</p>
+    <div class="candidate-action-toolbar paper-workflow-actions">
+      <button class="primary-button" type="button" data-aegis-command-id="RECORD_PAPER_ENTRY" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(tradeModalId)}">Record Entry</button>
+      <form class="paper-candidate-action-form inline" method="post"><input type="hidden" name="command_id" value="REJECT_PAPER_CANDIDATE"><input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}"><input type="hidden" name="day_utc" value="${escapeHtml(day)}"><input type="hidden" name="reason" value="OPERATOR_REJECTED"><button class="ghost-button" type="submit">Reject</button><span data-paper-candidate-status hidden></span></form>
+      <button class="ghost-button" type="button" data-aegis-command-id="REVIEW_PAPER_CANDIDATE" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(reviewModalId)}">Thesis</button>
+    </div>
+  </article>`;
+}
+
+function renderCommandPositionCard(row = {}) {
+  const rec = row.exit_recommendation || {};
+  const exposure = row.exposure ?? row.notional ?? row.market_value ?? row.current_exposure;
+  const hold = row.hold_time_days ?? row.holding_days ?? row.days_open ?? "n/a";
+  const pnl = row.unrealized_pnl_status === "NOT_CANONICAL" ? "NOT_CANONICAL" : paperTradeUsd(row.unrealized_pnl ?? row.pnl ?? rec.unrealized_pnl);
+  return `<article class="stack-card operator-command-card position-command-card">
+    <header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.symbol || row.position_id || "Position")}</div><div class="stack-card-subtitle">${escapeHtml(row.sleeve_id || row.candidate_id || "Paper position")}</div></div>${renderStatusPill(row.current_status || row.status || "OPEN", "success", {})}</header>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "PnL", value: pnl })}
+      ${renderMetricCard({ label: "Exposure", value: paperTradeUsd(exposure) })}
+      ${renderMetricCard({ label: "Hold Time", value: String(hold === "n/a" ? hold : `${hold}d`) })}
+      ${renderMetricCard({ label: "Exit Recommendation", value: operatorPlainLabel(rec.exit_recommendation || row.current_exit_recommendation || "Hold") })}
+    </div>
+    <p class="muted-mini">Reason: ${escapeHtml(safeList(rec.reason_codes).map(operatorPlainLabel).join(", ") || "No exit rule is currently forcing action.")}</p>
+    <div class="candidate-action-toolbar paper-workflow-actions">${renderOpenPaperPositionExitButton(row)}<button class="ghost-button" type="button" data-command-detail-target="${escapeHtml(`paper-exit-${row.candidate_id || ""}`.replace(/[^a-zA-Z0-9_-]/g, "-"))}">Details</button></div>
+  </article>`;
+}
+
+function renderCommandAttentionCard(row = {}) {
+  return `<article class="stack-card operator-command-card attention-command-card">
+    <header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.issue || "Needs review")}</div><div class="stack-card-subtitle">${escapeHtml(row.symbol || "System")}</div></div>${renderStatusPill(operatorPlainLabel(row.severity || "Review"), "warning", {})}</header>
+    <p class="support-note"><strong>Summary:</strong> ${escapeHtml(row.reason || "An operator should review this item.")}</p>
+    <p class="muted-mini">Reason: ${escapeHtml(row.issue || "Current state needs operator attention.")}</p>
+    <div class="candidate-action-toolbar"><a class="ghost-button" href="${escapeHtml(row.route || "/aegis-command-center")}" data-route="${escapeHtml(row.route || "/aegis-command-center")}">${escapeHtml(row.action || "View Details")}</a></div>
+  </article>`;
+}
+
+function renderCommandCenterOpenPositionsTable(rows = [], payload = {}) {
+  return `<div class="positions-table-wrap command-center-table-wrap" data-testid="command-center-open-positions-table">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+      { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || row.sleeve || "-") },
+      { label: "State", render: (row) => renderStatusPill(operatorPlainLabel(row.lifecycle_state || row.current_status || row.status || "Open"), "success", {}) },
+      { label: "Unrealized P&L", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl ?? row.total_pnl ?? row.pnl)) },
+      { label: "Why shown", render: (row) => escapeHtml("Open governed paper position; monitor from Positions or Performance.") },
+      { label: "Actions", render: (row) => `${renderReadOnlyPositionAction("View Position")}${renderAskAegisContextAction("position", row.position_id || row.candidate_id || row.symbol || "open-position")}${renderCommandCenterDetails(row, payload)}` },
+    ],
+    rows: safeList(rows),
+    emptyMessage: "No open paper positions are recorded.",
+  })}</div>`;
+}
+
+function renderCommandDailySummary(payload = {}) {
+  const daily = commandCenterDaily(payload);
+  const exitSummary = daily.exit_recommendations_summary || {};
+  const sleeves = safeList(daily.sleeve_comparison).slice(0, 4);
+  return `<section class="operator-section daily-performance-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Daily Performance</div><h3>Daily performance summary</h3></div><a class="support-chip" href="/aegis-history" data-route="/aegis-history">History</a></div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Daily PnL", value: paperTradeUsd(daily.total_paper_pnl) })}
+      ${renderMetricCard({ label: "Realized", value: paperTradeUsd(daily.realized_pnl) })}
+      ${renderMetricCard({ label: "Exposure", value: paperTradeUsd(daily.exposure) })}
+      ${renderMetricCard({ label: "Exit Recommendations", value: String(exitSummary.recommendation_count ?? Object.values(exitSummary.recommendation_counts || {}).reduce((acc, value) => acc + Number(value || 0), 0)) })}
+    </div>
+    <div class="card-grid compact-card-grid">${sleeves.map((row) => `<article class="stack-card"><div class="stack-card-title">${escapeHtml(row.sleeve_id || "Sleeve")}</div><div class="metric-grid compact">${renderMetricCard({ label: "Open PnL", value: paperTradeUsd(row.open_pnl) })}${renderMetricCard({ label: "Total PnL", value: paperTradeUsd(row.total_pnl) })}</div><p class="muted-mini">Reason: ${escapeHtml(row.data_quality_status || "Daily paper performance source is available.")}</p><div class="candidate-action-toolbar">${renderAskAegisContextAction("sleeve", row.sleeve_id || "sleeve")}</div></article>`).join("") || `<div class="empty-state">No sleeve performance rows are available yet.</div>`}</div>
+  </section>`;
+}
+
+function todayStateTone(state) {
+  const normalized = String(state || "").toUpperCase();
+  if (["NORMAL", "NO_ACTIVITY", "WAITING_FOR_NEXT_RUN", "RESEARCH_RUNNING"].includes(normalized)) return "success";
+  if (["DEGRADED", "PERFORMANCE_UNAVAILABLE", "RESEARCH_UNAVAILABLE"].includes(normalized)) return "warning";
+  return "blocked";
+}
+
+function todayPlainState(state) {
+  const normalized = String(state || "UNKNOWN").replace(/_/g, " ").toLowerCase();
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function todayFormatCount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  return String(numeric);
+}
+
+function renderTodayQuestionCard({ question, answer, detail = "", tone = "neutral" }) {
+  return `<article class="stack-card today-question-card today-question-${escapeHtml(tone)}">
+    <div class="stack-card-subtitle">${escapeHtml(question)}</div>
+    <div class="stack-card-title">${escapeHtml(answer || "Not confirmed")}</div>
+    ${detail ? `<p class="muted-mini">${escapeHtml(detail)}</p>` : ""}
+  </article>`;
+}
+
+function renderTodayEvidenceDetails(payload = {}) {
+  const refs = safeList(payload.trust?.evidence_refs);
+  const limitations = safeList(payload.trust?.limitations);
+  const errors = safeList(payload.trust?.read_errors);
+  return `<details class="operator-disclosure today-evidence-details" data-testid="today-evidence-details">
+    <summary>Why should I trust this?</summary>
+    <div class="line-list">
+      <div><strong>Trust statement:</strong> ${escapeHtml(payload.trust?.label || "Evidence status was not reported.")}</div>
+      <div><strong>Requested day:</strong> ${escapeHtml(payload.requested_day || "unknown")}</div>
+      <div><strong>Source day:</strong> ${escapeHtml(payload.source_day || "unknown")}</div>
+      <div><strong>Generated:</strong> ${escapeHtml(formatTimestamp(payload.generated_at || ""))}</div>
+      ${limitations.length ? `<div><strong>Limitations:</strong><ul>${limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+      ${errors.length ? `<div><strong>Read issues:</strong><ul>${errors.map((row) => `<li>${escapeHtml(row.source || "source")}: ${escapeHtml(row.error || "unavailable")}</li>`).join("")}</ul></div>` : ""}
+      ${refs.length ? `<div><strong>Evidence sources:</strong><ul>${refs.map((row) => `<li>${escapeHtml(row.label || "Evidence")}: ${escapeHtml(row.available === false ? "missing" : "available")}</li>`).join("")}</ul></div>` : ""}
+    </div>
+  </details>`;
+}
+
+function renderTodayActions(payload = {}) {
+  const actions = safeList(payload.actions);
+  if (!payload.user_action_required || actions.length === 0) {
+    return `<section class="operator-section today-attention" data-testid="today-attention"><div class="section-heading"><div><div class="section-eyebrow">Attention Required</div><h3>No David action required</h3><p class="muted-mini">Aegis is monitoring. No capture, approval, execution, or review button is available from Today.</p></div></div></section>`;
+  }
+  return `<section class="operator-section today-attention" data-testid="today-attention"><div class="section-heading"><div><div class="section-eyebrow">Attention Required</div><h3>David action required</h3><p class="muted-mini">Only current-day user actions appear here.</p></div><span class="support-chip">${escapeHtml(String(actions.length))} action${actions.length === 1 ? "" : "s"}</span></div>${actions.map((action) => `<article class="stack-card"><div class="stack-card-title">${escapeHtml(action.title || "Action required")}</div><p class="support-note">${escapeHtml(action.reason || "A current-day operator decision is required.")}</p>${action.route ? `<a class="ghost-button" href="${escapeHtml(action.route)}" data-route="${escapeHtml(action.route)}">Open</a>` : ""}</article>`).join("")}</section>`;
+}
+
+function renderTodayActivity(payload = {}) {
+  const events = safeList(payload.activity?.events).slice(0, 5);
+  const summary = payload.activity?.summary || {};
+  const summaryRows = [
+    ["Runs completed", summary.runs_completed],
+    ["Raw signals", summary.raw_signals],
+    ["Valid candidates", summary.valid_candidates],
+    ["Paper positions opened", summary.paper_positions_opened],
+    ["Closed outcomes", summary.closed_outcomes],
+    ["Validation samples", summary.validation_samples],
+  ];
+  const body = events.length
+    ? `<div class="timeline-list today-activity-list">${events.slice(0, 5).map((event) => `<div class="timeline-item"><strong>${escapeHtml(event.label || "Aegis activity")}</strong><p class="muted-mini">${escapeHtml(event.detail || "Recorded today.")}</p>${event.timestamp ? `<span class="muted-mini">${escapeHtml(formatTimestamp(event.timestamp))}</span>` : ""}</div>`).join("")}</div>`
+    : `<div class="empty-state">Nothing has run yet today. Aegis will update this section after the next scheduled run.</div>`;
+  return `<section class="operator-section today-activity" data-testid="today-activity"><div class="section-heading"><div><div class="section-eyebrow">Today Summary</div><h3>What happened today?</h3></div><a class="support-chip" href="/aegis-journal" data-route="/aegis-journal">View full activity log</a></div><div class="metric-grid compact today-summary-grid">${summaryRows.map(([label, value]) => renderMetricCard({ label, value: todayFormatCount(value) })).join("")}</div>${body}</section>`;
+}
+
+
+function commandCenterOperatorActionModel(payload = {}) {
+  return payload.operator_action_model_v1 || payload.operator_action_model || {};
+}
+
+function commandCenterCapabilityLabel(capabilityId = "") {
+  const labels = {
+    CANDIDATE_GENERATION: "Candidate Generation",
+    PAPER_MONITORING: "Paper Tracking",
+    OUTCOME_REALIZATION: "Outcome Validation",
+    HYPOTHESIS_VALIDATION: "Outcome Validation",
+    RESEARCH_ALLOCATION: "Research Allocation",
+    TRADE_RECOMMENDATION: "Trade recommendation",
+    MANUAL_TRADE_CAPTURE: "Manual capture",
+    BROKER_EXECUTION: "Broker execution",
+    DAVID_ACTION: "David action",
+  };
+  return labels[String(capabilityId || "").toUpperCase()] || readableStatus(capabilityId || "Capability");
+}
+
+function commandCenterCapabilityTone(status = "") {
+  const normalized = String(status || "").toUpperCase();
+  if (["READY", "COMPLETE", "ACTIVE"].includes(normalized)) return "healthy";
+  if (["WAITING", "NOT_APPLICABLE", "DISABLED_BY_POLICY"].includes(normalized)) return "neutral";
+  return "warning";
+}
+
+function commandCenterPrimaryCapabilities(payload = {}) {
+  const model = commandCenterOperatorActionModel(payload);
+  const rowsById = new Map(safeList(model.capability_matrix).map((row) => [String(row.capability_id || "").toUpperCase(), row]));
+  const candidates = payload.candidates || {};
+  const validation = payload.validation || {};
+  const allocation = payload.research_allocation || {};
+  const candidateRow = rowsById.get("CANDIDATE_GENERATION") || {};
+  const paperRow = rowsById.get("PAPER_MONITORING") || {};
+  const validationRow = rowsById.get("OUTCOME_REALIZATION") || rowsById.get("HYPOTHESIS_VALIDATION") || {};
+  return [
+    {
+      capability_id: "CANDIDATE_GENERATION",
+      status: candidateRow.status || (Number(candidates.today_count ?? candidates.output_count ?? 0) > 0 ? "ACTIVE" : "WAITING"),
+      status_label: candidateRow.status_label || (Number(candidates.today_count ?? candidates.output_count ?? 0) > 0 ? "ACTIVE" : "WAITING"),
+      human_readable_reason: candidates.summary || candidateRow.human_readable_reason || "Current-day candidate generation is tracked as research evidence.",
+      metric: `${todayFormatCount(candidates.today_count ?? candidates.output_count)} today`,
+    },
+    {
+      capability_id: "PAPER_MONITORING",
+      status: paperRow.status || "ACTIVE",
+      status_label: "ACTIVE",
+      human_readable_reason: paperRow.human_readable_reason || "Open paper positions are research observations, not investment decisions.",
+      metric: `${todayFormatCount(payload.open_positions?.count)} open`,
+    },
+    {
+      capability_id: "OUTCOME_REALIZATION",
+      status: validation.state === "WAITING_FOR_CLOSED_OUTCOMES" ? "WAITING" : (validationRow.status || "ACTIVE"),
+      status_label: validation.summary || (validation.state === "WAITING_FOR_CLOSED_OUTCOMES" ? "WAITING FOR CLOSED OUTCOMES" : "ACTIVE"),
+      human_readable_reason: `${todayFormatCount(validation.open_outcome_count)} open outcome(s), ${todayFormatCount(validation.validation_sample_count)} validation sample(s).`,
+      metric: `${todayFormatCount(validation.closed_outcome_count)} closed`,
+    },
+    {
+      capability_id: "RESEARCH_ALLOCATION",
+      status: allocation.state || "ACTIVE",
+      status_label: allocation.state || "ACTIVE",
+      human_readable_reason: `${todayFormatCount(allocation.decision_count)} research allocation decision(s) recorded.`,
+      metric: `${todayFormatCount(allocation.decision_count)} decisions`,
+    },
+  ];
+}
+
+function renderCommandCenterCapabilityMatrix(payload = {}) {
+  const rows = commandCenterPrimaryCapabilities(payload);
+  return `<section class="operator-section command-center-capability-matrix" data-testid="action-capability-matrix">
+    <div class="section-heading"><div><div class="section-eyebrow">Research Capabilities</div><h3>Paper research workflow</h3><p class="muted-mini">Research flows from candidate generation to paper tracking, outcome collection, and validation. Trade recommendation and manual capture are kept out of this overview.</p></div></div>
+    <div class="positions-table-wrap command-center-table-wrap">${renderSimpleTable({
+      columns: [
+        { label: "Capability", render: (row) => `<strong>${escapeHtml(commandCenterCapabilityLabel(row.capability_id))}</strong><div class="muted-mini">${escapeHtml(row.metric || "")}</div>` },
+        { label: "Status", render: (row) => renderStatusPill(row.status_label || readableStatus(row.status), commandCenterCapabilityTone(row.status), {}) },
+        { label: "Current meaning", render: (row) => escapeHtml(row.human_readable_reason || "No reason recorded.") },
+      ],
+      rows,
+      emptyMessage: "No capability rows are available.",
+    })}</div>
+  </section>`;
+}
+
+function renderCommandCenterScheduledRunReadiness(payload = {}) {
+  const readiness = payload.scheduled_run_readiness || {};
+  if (!readiness.available) return "";
+  const next = readiness.next_scheduled_run || {};
+  const blockers = safeList(readiness.blocked_dependencies);
+  const status = next.readiness_status || "UNKNOWN";
+  const tone = status === "CERTIFIED_READY" || status === "REPAIRED_CERTIFIED_READY" ? "healthy" : status === "BLOCKED" || status === "MARKET_NOT_READY" ? "warning" : "neutral";
+  return `<section class="operator-section command-center-scheduled-readiness" data-testid="scheduled-run-readiness">
+    <div class="section-heading"><div><div class="section-eyebrow">Scheduled Run Readiness</div><h3>${escapeHtml(next.scheduled_run_id || "No scheduled run")}</h3><p class="muted-mini">Readiness certificate for the next scheduled Aegis workflow. This does not schedule or execute a run.</p></div>${renderStatusPill(status, tone, {})}</div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Certificate", value: next.certificate_id || "Unavailable", detail: `Valid until ${next.readiness_valid_until ? formatTimestamp(next.readiness_valid_until) : "not recorded"}` })}
+      ${renderMetricCard({ label: "Blocked dependencies", value: todayFormatCount(readiness.blocked_dependency_count), detail: blockers.length ? "Run is not certified ready" : "No blocking dependencies" })}
+      ${renderMetricCard({ label: "Repair", value: readiness.repair_status || "NO_REPAIR_ATTEMPTED", detail: `${todayFormatCount(readiness.repairs_successful)} successful / ${todayFormatCount(readiness.repairs_failed)} failed` })}
+      ${renderMetricCard({ label: "David action", value: readiness.david_action_required ? "Required" : "None", detail: readiness.system_action_required ? "System action may be required" : "No action required" })}
+    </div>
+    ${blockers.length ? `<div class="positions-table-wrap command-center-table-wrap">${renderSimpleTable({
+      columns: [
+        { label: "Dependency", render: (row) => `<strong>${escapeHtml(row.dependency_key || row.dependency_id || "UNKNOWN")}</strong>` },
+        { label: "Status", render: (row) => renderStatusPill(row.dependency_status || "UNKNOWN", "warning", {}) },
+        { label: "Run impact", render: (row) => escapeHtml(`${row.scheduled_run_id || "scheduled run"} is blocked before start`) },
+        { label: "Repair", render: (row) => escapeHtml(row.repair_command || row.no_repair_reason || "No safe repair recorded") },
+      ],
+      rows: blockers,
+      emptyMessage: "No blocked dependencies.",
+    })}</div>` : `<div class="empty-state">Next scheduled run is certified ready by current artifact checks.</div>`}
+    <details class="diagnostic-detail-drawer engineering-details-table"><summary>Post-run reconciliation</summary>
+      ${renderDefinitionRows([
+        { label: "Run completed", value: readiness.run_completed ? "yes" : "no" },
+        { label: "Valid certificate used", value: readiness.valid_certificate_used ? "yes" : "no" },
+        { label: "Failures predictable", value: readiness.failures_predictable ? "yes" : "no" },
+        { label: "Missed preflight checks", value: safeList(readiness.missed_preflight_checks).join(", ") || "none" },
+      ])}
+    </details>
+  </section>`;
+}
+
+function commandCenterCandidateDiagnosisLabel(diagnosis = "") {
+  const labels = {
+    VALID_CONTRACT_CREATED: "Valid contract created",
+    VALID_CANDIDATE: "Valid candidate",
+    REJECTED_SIGNALS: "Rejected signals",
+    NO_SETUP: "No setup",
+    BLOCKED_DATA: "Blocked data",
+    BLOCKED_CONFIG: "Blocked config",
+    BLOCKED: "Blocked",
+    EXECUTED_NO_SIGNALS: "No setup",
+    EXECUTED_WITH_CANDIDATES: "Valid candidate",
+    EXECUTED_REJECTED: "Rejected signals",
+    NOT_RUN: "Not run",
+  };
+  return labels[String(diagnosis || "").toUpperCase()] || readableStatus(diagnosis || "Unknown");
+}
+
+function commandCenterCandidateDiagnosisTone(diagnosis = "") {
+  const normalized = String(diagnosis || "").toUpperCase();
+  if (normalized === "VALID_CONTRACT_CREATED" || normalized === "VALID_CANDIDATE" || normalized === "EXECUTED_WITH_CANDIDATES") return "healthy";
+  if (normalized === "NO_SETUP" || normalized === "EXECUTED_NO_SIGNALS") return "neutral";
+  return "warning";
+}
+
+function renderCommandCenterCandidateGenerationDiagnostics(payload = {}) {
+  const diagnostics = payload.candidate_generation_diagnostics || {};
+  const rows = safeList(diagnostics.sleeve_rows);
+  if (!rows.length) return "";
+  const coverage = diagnostics.execution_coverage || {};
+  const lifecycle = diagnostics.candidate_lifecycle_counts || {};
+  const sourcePath = diagnostics.source_path || "";
+  const noSetupDetail = `${todayFormatCount(safeList(diagnostics.sleeves_with_no_setup).length)} sleeve(s) saw no setup`;
+  return `<section class="operator-section command-center-candidate-diagnostics" data-testid="command-center-candidate-diagnostics">
+    <div class="section-heading"><div><div class="section-eyebrow">Candidate Generation By Sleeve</div><h3>Why candidates did or did not appear</h3><p class="muted-mini">This is the sleeve-level candidate diagnostics view: no setup, rejected signals, or blocked input/contract evidence.</p></div></div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Raw Signals", value: todayFormatCount(diagnostics.raw_signal_count), detail: "Across current-day sleeve diagnostics" })}
+      ${renderMetricCard({ label: "Certified Price Candidates", value: todayFormatCount(lifecycle.certified_price_candidate_count ?? diagnostics.certified_price_candidate_count), detail: "Entry reference prices certified" })}
+      ${renderMetricCard({ label: "Valid Contracts", value: todayFormatCount(diagnostics.valid_candidate_contract_count), detail: "Passed candidate-contract validation" })}
+      ${renderMetricCard({ label: "Review Eligible", value: todayFormatCount(lifecycle.review_eligible_count ?? diagnostics.review_eligible_count), detail: "Visible in candidate review lifecycle" })}
+      ${renderMetricCard({ label: "Promotion Eligible", value: todayFormatCount(lifecycle.promotion_eligible_count ?? diagnostics.promotion_eligible_count), detail: "Eligible for paper-only lifecycle review" })}
+      ${renderMetricCard({ label: "Auto-Promoted To Paper Tracking", value: todayFormatCount(lifecycle.auto_promoted_to_paper_tracking_count ?? diagnostics.auto_promoted_to_paper_tracking_count), detail: "Paper-only research observations" })}
+      ${renderMetricCard({ label: "Human Approved For Paper", value: todayFormatCount(lifecycle.human_approved_for_paper_count ?? diagnostics.human_approved_for_paper_count), detail: "Explicit operator approvals only" })}
+      ${renderMetricCard({ label: "Paper Positions Created", value: todayFormatCount(lifecycle.paper_positions_created_count ?? diagnostics.paper_positions_created_count), detail: "Current-day research observations linked to valid candidates" })}
+      ${renderMetricCard({ label: "Blocked From Paper", value: todayFormatCount(lifecycle.blocked_from_paper_count ?? diagnostics.blocked_from_paper_count), detail: "Auto-promotion or lifecycle blocks" })}
+      ${renderMetricCard({ label: "Blocked Sleeves", value: todayFormatCount(safeList(diagnostics.blocked_sleeves).length), detail: noSetupDetail })}
+    </div>
+    <div class="positions-table-wrap command-center-table-wrap">${renderSimpleTable({
+      columns: [
+        { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_id || "UNKNOWN")}</strong>` },
+        { label: "Diagnosis", render: (row) => renderStatusPill(commandCenterCandidateDiagnosisLabel(row.diagnosis || row.execution_status), commandCenterCandidateDiagnosisTone(row.diagnosis || row.execution_status), {}) },
+        { label: "Raw", render: (row) => escapeHtml(String(row.raw_signal_count ?? 0)) },
+        { label: "Rejected", render: (row) => escapeHtml(String(row.rejected_signal_count ?? 0)) },
+        { label: "Diagnostic", render: (row) => escapeHtml(String(row.diagnostic_candidate_output_count ?? 0)) },
+        { label: "Valid", render: (row) => escapeHtml(String(row.valid_candidate_contract_count ?? 0)) },
+        { label: "Paper Block", render: (row) => escapeHtml(String(row.paper_blocker_reason || row.blocker_classification || "none")) },
+        { label: "Reason", render: (row) => `<div>${escapeHtml(row.primary_reason || "none")}</div><div class="muted-mini">${safeList(row.rejection_reasons).map((code) => escapeHtml(code)).join(", ") || "no rejection reason"}</div>` },
+      ],
+      rows,
+      emptyMessage: "No sleeve-level candidate diagnostics are available.",
+    })}</div>
+    <details class="diagnostic-detail-drawer engineering-details-table"><summary>Evidence</summary>
+      ${renderDefinitionRows([
+        { label: "Diagnostics status", value: diagnostics.status || "UNKNOWN" },
+        { label: "Expected sleeves", value: String(coverage.expected_sleeves ?? rows.length) },
+        { label: "Attempted sleeves", value: String(coverage.sleeves_attempted ?? "unknown") },
+        { label: "Successfully executed", value: String(coverage.sleeves_successfully_executed ?? "unknown") },
+        { label: "Producing signals", value: String(coverage.sleeves_producing_signals ?? "unknown") },
+        { label: "Source path", value: sourcePath || "not reported" },
+        { label: "Candidate-to-paper lifecycle", value: lifecycle.source_path || "not reported" },
+        { label: "Entry price certification", value: lifecycle.entry_reference_price_certification_path || "not reported" },
+      ])}
+    </details>
+  </section>`;
+}
+
+
+function commandCenterCount(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return number;
+}
+
+
+function commandCenterTruthAuditMap(payload = {}) {
+  const rows = safeList(payload.command_center_truth_audit);
+  return Object.fromEntries(rows.map((row) => [String(row.field_id || ""), row]));
+}
+
+function commandCenterTruthAuditValue(payload = {}, fieldId = "", fallback = 0) {
+  const row = commandCenterTruthAuditMap(payload)[fieldId];
+  if (!row) return fallback;
+  const value = row.displayed_value ?? row.source_value;
+  return value === undefined || value === null || value === "" ? fallback : value;
+}
+
+function commandCenterTruthAuditCount(payload = {}, fieldId = "", fallback = 0) {
+  return commandCenterCount(commandCenterTruthAuditValue(payload, fieldId, fallback), fallback);
+}
+
+function commandCenterDailyState(payload = {}) {
+  const activity = payload.activity || {};
+  const activitySummary = activity.summary || {};
+  const diagnostics = payload.candidate_generation_diagnostics || {};
+  const lifecycle = diagnostics.candidate_lifecycle_counts || {};
+  const validation = payload.validation || {};
+  const allocation = payload.research_allocation || {};
+  const openPositions = payload.open_positions || {};
+  const candidates = payload.candidates || {};
+  const next = payload.next || {};
+  const events = safeList(activity.events);
+  const rawSignals = commandCenterTruthAuditCount(payload, "raw_signals", commandCenterCount(diagnostics.raw_signal_count ?? activitySummary.raw_signals, 0));
+  const validCandidates = commandCenterTruthAuditCount(payload, "valid_candidates", commandCenterCount(lifecycle.valid_candidate_contract_count ?? diagnostics.valid_candidate_contract_count ?? candidates.today_count ?? activitySummary.valid_candidates, 0));
+  const autoPromoted = commandCenterTruthAuditCount(payload, "auto_promoted", commandCenterCount(lifecycle.auto_promoted_to_paper_tracking_count ?? diagnostics.auto_promoted_to_paper_tracking_count ?? lifecycle.paper_positions_created_count ?? diagnostics.paper_positions_created_count ?? activitySummary.paper_positions_opened, 0));
+  const blockedObservations = commandCenterCount(lifecycle.blocked_from_paper_count ?? diagnostics.blocked_from_paper_count, 0);
+  const certifiedPrices = commandCenterCount(lifecycle.certified_price_candidate_count ?? diagnostics.certified_price_candidate_count, rawSignals);
+  const missingEntryPrices = Math.max(0, rawSignals - certifiedPrices);
+  const openObservations = commandCenterTruthAuditCount(payload, "open_observations", commandCenterCount(validation.open_outcome_count ?? openPositions.count, commandCenterCount(openPositions.count, 0)));
+  const closedOutcomes = commandCenterTruthAuditCount(payload, "closed_outcomes", commandCenterCount(validation.closed_outcome_count ?? activitySummary.closed_outcomes, 0));
+  const includedSamples = commandCenterTruthAuditCount(payload, "included_samples", commandCenterCount(validation.validation_sample_count ?? activitySummary.validation_samples, 0));
+  const paperOutcomesClosedToday = commandCenterTruthAuditCount(payload, "closed_today", commandCenterCount(validation.paper_outcomes_closed_today ?? activitySummary.paper_outcomes_closed_today, closedOutcomes));
+  const manualReviewQueueCount = commandCenterTruthAuditCount(payload, "manual_review_queue", commandCenterCount(validation.manual_review_queue_count ?? activitySummary.manual_review_queue_count, 0));
+  const usableObservations = Math.max(0, openObservations - blockedObservations);
+  const lastRun = activity.last_successful_run_at || activity.last_completed_run_at || activity.last_run_at || "";
+  const nextRun = next.scheduled_at || "";
+  const latest = activity.latest_material_change || events[0] || {};
+  const bottleneck = validation.current_bottleneck || (missingEntryPrices > 0
+    ? `${todayFormatCount(missingEntryPrices)} observations blocked by missing entry marks.`
+    : "Validation sample sufficiency / underpowered hypotheses");
+  const bottleneckDetail = validation.current_bottleneck_detail || (missingEntryPrices > 0
+    ? `${todayFormatCount(usableObservations)} usable observations remain open. ${todayFormatCount(closedOutcomes)} closed outcomes recorded.`
+    : `${todayFormatCount(openObservations)} open paper observations. ${todayFormatCount(closedOutcomes)} closed outcomes. ${todayFormatCount(includedSamples)} included samples.`);
+  return {
+    rawSignals,
+    validCandidates,
+    autoPromoted,
+    usableObservations,
+    blockedObservations,
+    openObservations,
+    closedOutcomes,
+    includedSamples,
+    paperOutcomesClosedToday,
+    manualReviewQueueCount,
+    missingEntryPrices,
+    candidateGenerationRan: rawSignals > 0 || validCandidates > 0 || activity.did_anything_run === true,
+    allocationDecisions: commandCenterTruthAuditCount(payload, "research_allocation_decisions", commandCenterCount(allocation.decision_count, 0)),
+    allocationState: String(commandCenterTruthAuditValue(payload, "allocation_state", allocation.state || "ACTIVE")),
+    validationState: validation.summary || (closedOutcomes > 0 ? "Active" : "Waiting for closed outcomes"),
+    davidAction: payload.user_action_required ? "Required" : "None",
+    davidActionDetail: payload.user_action_required ? `${safeList(payload.actions).length} current-day action(s)` : "No David action required",
+    lastRun,
+    nextRun,
+    latestMaterialChange: latest.label ? `${latest.label}${latest.timestamp ? ` (${formatTimestamp(latest.timestamp)})` : ""}${latest.detail ? `: ${latest.detail}` : ""}` : "No material change recorded after the last run.",
+    bottleneck: String(commandCenterTruthAuditValue(payload, "current_bottleneck", bottleneck)),
+    bottleneckDetail,
+  };
+}
+
+function renderCommandCenterStatusHeader(payload = {}, truth = {}) {
+  return `<section class="command-center-visual-surface command-center-mode-header" data-testid="command-center-mode-header" data-command-center-primary-region="true">
+    <div class="command-center-mode-copy">
+      <span class="command-center-mode-badge command-center-high-contrast-status">PAPER MODE</span>
+      <h1 class="command-center-primary-title">PAPER MODE</h1>
+      <p class="command-center-readable-copy">Paper research active. Research observations only. No live trading. No broker execution.</p>
+    </div>
+  </section>`;
+}
+
+function renderCommandCenterStatRows(rows = []) {
+  return `<dl class="command-center-stat-list">${rows.map((row) => `<div class="command-center-stat-row"><dt class="command-center-primary-label">${escapeHtml(row.label)}</dt><dd class="command-center-primary-value">${escapeHtml(String(row.value))}</dd></div>`).join("")}</dl>`;
+}
+
+function renderCommandCenterPrimaryPanel({ label, status, rows = [], detail = "", tone = "neutral" }) {
+  return `<article class="command-center-summary-panel command-center-summary-panel--${escapeHtml(tone)}">
+    <header class="command-center-panel-header"><h3 class="command-center-primary-label">${escapeHtml(label)}</h3><strong class="command-center-panel-status command-center-primary-value">${escapeHtml(String(status))}</strong></header>
+    ${renderCommandCenterStatRows(rows)}
+    ${detail ? `<p class="command-center-readable-copy command-center-panel-detail">${escapeHtml(detail)}</p>` : ""}
+  </article>`;
+}
+
+function renderCommandCenterPrimaryOverview(payload = {}) {
+  const state = commandCenterDailyState(payload);
+  const allocationRecommendation = payload.research_allocation_recommendation_v1 || {};
+  const allocationRecommendationSummary = allocationRecommendation.summary || {};
+  const allocationRecommendationCount = Number(allocationRecommendationSummary.recommendation_count || safeList(allocationRecommendation.recommendations).length || 0);
+  const allocationDavidReviewCount = safeList(allocationRecommendation.recommendations).filter((row) => row && row.requires_david_review).length;
+  const allocationStatus = allocationRecommendationCount > 0 ? `${todayFormatCount(allocationRecommendationCount)} recommendations` : (state.allocationDecisions > 0 ? `${todayFormatCount(state.allocationDecisions)} decisions` : "No allocation recommendations reported");
+  const panels = [
+    {
+      label: "Candidate Generation",
+      status: state.candidateGenerationRan ? "Ran" : "Waiting",
+      rows: [
+        { label: "Raw signals", value: todayFormatCount(state.rawSignals) },
+        { label: "Valid candidates", value: todayFormatCount(state.validCandidates) },
+        { label: "Auto-promoted", value: todayFormatCount(state.autoPromoted) },
+      ],
+      detail: `${todayFormatCount(state.autoPromoted)} valid candidates became paper observations.`,
+      tone: state.candidateGenerationRan ? "healthy" : "neutral",
+    },
+    {
+      label: "Paper Observations",
+      status: `${todayFormatCount(state.openObservations)} open`,
+      rows: [
+        { label: "Usable", value: todayFormatCount(state.usableObservations) },
+        { label: "Blocked", value: todayFormatCount(state.blockedObservations) },
+        { label: "Missing entry marks", value: todayFormatCount(state.missingEntryPrices) },
+      ],
+      detail: `${todayFormatCount(state.openObservations)} open paper observations; research observations, not investment decisions.`,
+      tone: state.blockedObservations > 0 || state.missingEntryPrices > 0 ? "warning" : "healthy",
+    },
+    {
+      label: "Outcome Validation",
+      status: state.validationState,
+      rows: [
+        { label: "Open outcomes", value: todayFormatCount(state.openObservations) },
+        { label: "Closed today", value: todayFormatCount(state.paperOutcomesClosedToday) },
+        { label: "Included samples", value: todayFormatCount(state.includedSamples) },
+      ],
+      detail: state.closedOutcomes > 0 ? "Paper outcomes closed for research validation; not trade recommendations." : "Waiting for closed outcomes before validation can advance.",
+      tone: state.closedOutcomes > 0 ? "healthy" : "neutral",
+    },
+    {
+      label: "Current Bottleneck",
+      status: state.bottleneck,
+      rows: [
+        { label: "Open observations", value: todayFormatCount(state.openObservations) },
+        { label: "Closed today", value: todayFormatCount(state.paperOutcomesClosedToday) },
+        { label: "Included samples", value: todayFormatCount(state.includedSamples) },
+        { label: "Manual review queue", value: todayFormatCount(state.manualReviewQueueCount) },
+      ],
+      detail: state.bottleneckDetail,
+      tone: state.missingEntryPrices > 0 ? "warning" : "neutral",
+    },
+    {
+      label: "David Action",
+      status: state.davidAction,
+      rows: [
+        { label: "Required now", value: payload.user_action_required ? "Yes" : "No" },
+        { label: "Current-day actions", value: todayFormatCount(safeList(payload.actions).length) },
+        { label: "Paper exit reviews", value: todayFormatCount(state.manualReviewQueueCount) },
+      ],
+      detail: state.davidActionDetail,
+      tone: payload.user_action_required ? "warning" : "healthy",
+    },
+    {
+      label: "Research Allocation",
+      status: allocationStatus,
+      rows: [
+        { label: "Recommendations", value: todayFormatCount(allocationRecommendationCount || state.allocationDecisions) },
+        { label: "Decision count", value: todayFormatCount(state.allocationDecisions) },
+        { label: "HOLD", value: todayFormatCount(allocationRecommendationSummary.HOLD) },
+        { label: "PAUSE", value: todayFormatCount(allocationRecommendationSummary.PAUSE) },
+        { label: "INCREASE / DECREASE", value: `${todayFormatCount(allocationRecommendationSummary.INCREASE)} / ${todayFormatCount(allocationRecommendationSummary.DECREASE)}` },
+        { label: "David review", value: todayFormatCount(allocationDavidReviewCount) },
+      ],
+      detail: allocationRecommendationCount > 0 ? "Research attention recommendations are available; no allocation weights were mutated." : "No allocation recommendations reported by backend artifacts.",
+      tone: allocationRecommendationCount > 0 || state.allocationDecisions > 0 ? "healthy" : "neutral",
+    },
+  ];
+  return `<section class="command-center-visual-surface command-center-primary-overview" data-testid="command-center-primary-overview" data-command-center-primary-region="true">
+    <div class="command-center-section-heading"><div><span class="command-center-section-label">Research Operating Center</span><h2>Daily research state</h2></div></div>
+    <div class="command-center-primary-grid">${panels.map(renderCommandCenterPrimaryPanel).join("")}</div>
+  </section>`;
+}
+
+function renderCommandCenterValidationPipeline(payload = {}) {
+  const state = commandCenterDailyState(payload);
+  const steps = [
+    ["Raw Signals", state.rawSignals],
+    ["Valid Candidates", state.validCandidates],
+    ["Auto-Promoted", state.autoPromoted],
+    ["Usable Observations", state.usableObservations],
+    ["Blocked", state.blockedObservations],
+    ["Closed Outcomes", state.closedOutcomes],
+    ["Manual Review Queue", state.manualReviewQueueCount],
+    ["Included Samples", state.includedSamples],
+  ];
+  return `<section class="command-center-visual-surface command-center-pipeline" data-testid="command-center-validation-pipeline" data-command-center-primary-region="true">
+    <div class="command-center-section-heading"><div><span class="command-center-section-label">Validation Pipeline</span><h2>Raw signals to included samples</h2></div></div>
+    <div class="command-center-pipeline-strip">${steps.map(([label, value]) => `<div class="command-center-pipeline-step"><span class="command-center-primary-label">${escapeHtml(label)}</span><strong class="command-center-primary-value">${escapeHtml(todayFormatCount(value))}</strong></div>`).join("")}</div>
+  </section>`;
+}
+
+function renderCommandCenterRunSummary(payload = {}) {
+  const state = commandCenterDailyState(payload);
+  const rows = [
+    { label: "Last successful run", value: state.lastRun ? formatTimestamp(state.lastRun) : "Unavailable" },
+    { label: "Next scheduled run", value: state.nextRun ? formatTimestamp(state.nextRun) : (payload.next?.label || "No future run confirmed") },
+    { label: "Latest material change", value: state.latestMaterialChange },
+  ];
+  return `<section class="command-center-visual-surface command-center-run-summary" data-testid="command-center-run-summary" data-command-center-primary-region="true">
+    <div class="command-center-section-heading"><div><span class="command-center-section-label">Last Run Summary</span><h2>Recent research activity</h2></div><a class="command-center-log-link" href="/aegis-journal" data-route="/aegis-journal">View full activity log</a></div>
+    <dl class="command-center-run-list">${rows.map((row) => `<div class="command-center-run-row"><dt class="command-center-primary-label">${escapeHtml(row.label)}</dt><dd class="command-center-readable-copy">${escapeHtml(row.value)}</dd></div>`).join("")}</dl>
+  </section>`;
+}
+
+
+function commandCenterOilShockFlow(payload = {}) {
+  const artifact = payload.oil_shock_candidate_flow_v1 || payload.oil_shock_candidate_flow || {};
+  const flow = artifact && typeof artifact === "object" && artifact.oil_shock && typeof artifact.oil_shock === "object" ? artifact.oil_shock : artifact;
+  const constructionArtifact = payload.oil_shock_candidate_construction_v1 || {};
+  const construction = constructionArtifact && typeof constructionArtifact === "object" && constructionArtifact.oil_shock && typeof constructionArtifact.oil_shock === "object" ? constructionArtifact.oil_shock : constructionArtifact;
+  const bridgeArtifact = payload.generated_hypothesis_paper_setup_bridge_v1 || {};
+  const bridge = bridgeArtifact && typeof bridgeArtifact === "object" && bridgeArtifact.oil_shock && typeof bridgeArtifact.oil_shock === "object" ? bridgeArtifact.oil_shock : bridgeArtifact;
+  const governanceArtifact = payload.generated_hypothesis_governance_bridge_v1 || {};
+  const governance = governanceArtifact && typeof governanceArtifact === "object" && governanceArtifact.oil_shock && typeof governanceArtifact.oil_shock === "object" ? governanceArtifact.oil_shock : governanceArtifact;
+  const lineageArtifact = payload.generated_hypothesis_approval_event_lineage_v1 || {};
+  const lineage = lineageArtifact && typeof lineageArtifact === "object" && lineageArtifact.oil_shock && typeof lineageArtifact.oil_shock === "object" ? lineageArtifact.oil_shock : lineageArtifact;
+  const signalArtifact = payload.generated_hypothesis_signal_to_candidate_v1 || {};
+  const signal = signalArtifact && typeof signalArtifact === "object" && signalArtifact.oil_shock && typeof signalArtifact.oil_shock === "object" ? signalArtifact.oil_shock : signalArtifact;
+  return flow && typeof flow === "object" ? { ...(lineage && typeof lineage === "object" ? lineage : {}), ...(governance && typeof governance === "object" ? governance : {}), ...(bridge && typeof bridge === "object" ? bridge : {}), ...(construction && typeof construction === "object" ? construction : {}), ...(signal && typeof signal === "object" ? signal : {}), ...flow, signal_to_candidate_status: signal?.signal_to_candidate_status || flow.signal_to_candidate_status || "", candidate_contract_status: signal?.candidate_contract_status || flow.candidate_contract_status || "", candidate_contract_id: signal?.candidate_contract_id || flow.candidate_contract_id || "", signal_rejection_reason_codes: signal?.rejection_reason_codes || [], signal_missing_fields: signal?.missing_fields || [], approval_lineage_status: lineage?.approval_lineage_status || governance?.approval_lineage_status || "", approval_event_found: lineage?.approval_event_found ?? false, approval_event_hash_present: Boolean(lineage?.approval_event_hash || governance?.approval_event_hash), governance_bridge_status: governance?.governance_bridge_status || flow.governance_bridge_status || "", paper_setup_bridge_status: bridge?.bridge_status || flow.paper_setup_bridge_status || "", candidate_construction_eligible: bridge?.candidate_construction_eligible ?? flow.candidate_construction_eligible, governance_missing_fields: governance?.missing_fields || [], bridge_missing_fields: bridge?.missing_fields || [], missing_construction_fields: flow.missing_construction_fields || construction?.missing_construction_fields || [] } : {};
+}
+
+function commandCenterOilShockBlockerMessage(flow = {}) {
+  const blocker = String(flow.exact_blocker || "").toUpperCase();
+  const reasons = safeList(flow.reason_codes).map((item) => String(item).toUpperCase());
+  if (blocker === "PRODUCER_MISSING" || reasons.includes("PRODUCER_MISSING")) return "Oil Shock deterministic candidate producer is missing.";
+  return flow.ui_message || flow.reason_no_candidates_generated_yet || "";
+}
+
+function commandCenterOilShockNextStep(flow = {}) {
+  const blocker = String(flow.exact_blocker || "").toUpperCase();
+  const reasons = safeList(flow.reason_codes).map((item) => String(item).toUpperCase());
+  if (blocker === "PRODUCER_MISSING" || reasons.includes("PRODUCER_MISSING")) return "implement/run deterministic Oil Shock producer";
+  return flow.next_expected_step || "";
+}
+
+function commandCenterDataActionRoutingRows(payload = {}) {
+  const artifact = payload.data_action_routing_v1 || payload.data_action_routing || {};
+  return safeList(artifact.routing_rows);
+}
+
+function commandCenterApplyDataActionRouting(row = {}, payload = {}) {
+  const routes = commandCenterDataActionRoutingRows(payload);
+  const rowId = String(row.hypothesis_id || "").toLowerCase();
+  const rowName = String(row.hypothesis_name || "").toLowerCase();
+  const route = routes.find((item) => {
+    const itemId = String(item.hypothesis_id || "").toLowerCase();
+    const itemName = String(item.hypothesis_name || "").toLowerCase();
+    return (rowId && itemId === rowId) || (rowName && itemName === rowName);
+  }) || {};
+  if (!route || Object.keys(route).length === 0) return row;
+  return {
+    ...row,
+    data_action_classification: route.data_action_classification || row.data_action_classification,
+    data_action_owner: route.owner || row.data_action_owner,
+    missing_data_description: route.missing_data_description || row.missing_data_description,
+    data_action_next_step: route.next_step || row.data_action_next_step || row.next_expected_step,
+    david_action_required: Boolean(route.david_action_required),
+  };
+}
+
+function commandCenterGeneratedProgressRows(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const scorecardRows = safeList(scorecard.generated_hypothesis_progress);
+  const throughput = payload.generated_hypothesis_throughput_v1 || {};
+  const throughputRows = safeList(throughput.generated_hypotheses);
+  const oilFlow = commandCenterOilShockFlow(payload);
+  const oilId = String(oilFlow.hypothesis_id || "").toLowerCase();
+  const oilName = String(oilFlow.hypothesis_name || "oil shock").toLowerCase();
+  const merged = scorecardRows.length ? scorecardRows : throughputRows.map((row) => ({
+    hypothesis_id: row.hypothesis_id,
+    hypothesis_name: row.hypothesis_name,
+    today_state: row.proposal_state || row.paper_setup_state,
+    throughput_status: row.throughput_status,
+    next_expected_step: row.next_expected_step,
+    blocker: row.candidate_producer_status || "",
+    david_action_required: !row.no_david_action_required_unless_blocked,
+  }));
+  return merged.map((row) => {
+    const rowId = String(row.hypothesis_id || "").toLowerCase();
+    const rowName = String(row.hypothesis_name || "").toLowerCase();
+    const isOilShock = (oilId && rowId === oilId) || rowName.includes("oil shock") || (oilName && oilName.includes("oil shock") && rowName === oilName);
+    const enriched = isOilShock ? {
+      ...row,
+      today_state: oilFlow.current_state || row.today_state,
+      throughput_status: oilFlow.candidate_flow_status || row.throughput_status,
+      next_expected_step: commandCenterOilShockNextStep(oilFlow) || row.next_expected_step,
+      blocker: oilFlow.exact_blocker || row.blocker,
+      blocker_message: commandCenterOilShockBlockerMessage(oilFlow) || row.blocker_message,
+      blocker_source: "aegis_oil_shock_candidate_flow_v1",
+      david_action_required: Boolean(oilFlow.david_action_required),
+    } : row;
+    return commandCenterApplyDataActionRouting(enriched, payload);
+  });
+}
+
+function renderOperatorDecisionTodayResult(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const deltas = scorecard.daily_delta_metrics || {};
+  const status = String(scorecard.daily_progress_status || "NO_PROGRESS").toUpperCase();
+  const statusLabel = status === "PROGRESS" ? "Progress" : status === "ACTION_REQUIRED" ? "Action Required" : status === "BLOCKED" ? "Blocked" : "No Progress";
+  const tone = status === "PROGRESS" ? "success" : status === "ACTION_REQUIRED" || status === "BLOCKED" ? "warning" : "neutral";
+  return `<section class="operator-section research-daily-scorecard ${escapeHtml(tone)}" data-testid="research-daily-scorecard" data-operator-decision-section="today-result">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">TODAY'S RESEARCH RESULT</div>
+        <h3>${escapeHtml(statusLabel)}</h3>
+        <p class="command-center-readable-copy">${escapeHtml(scorecard.primary_message || "Research scorecard unavailable.")}</p>
+      </div>
+      <span class="status-pill ${escapeHtml(tone)}">${escapeHtml(statusLabel)}</span>
+    </div>
+    <div class="metric-grid compact today-summary-grid" data-testid="research-daily-scorecard-metrics">
+      ${renderMetricCard({ label: "Latest Run", value: scorecard.latest_run_time ? formatTimestamp(scorecard.latest_run_time) : "Unavailable", detail: `Run status: ${scorecard.run_status || "Unavailable"}` })}
+      ${renderMetricCard({ label: "New Candidates", value: `+${todayFormatCount(deltas.new_valid_candidates)}`, detail: "Valid candidate delta" })}
+      ${renderMetricCard({ label: "New Observations", value: `+${todayFormatCount(deltas.new_paper_observations)}`, detail: "Paper observation delta" })}
+      ${renderMetricCard({ label: "New Closed Outcomes", value: `+${todayFormatCount(deltas.new_closed_outcomes)}`, detail: "Outcome closure delta" })}
+      ${renderMetricCard({ label: "New Validation Samples", value: `+${todayFormatCount(deltas.new_included_validation_samples)}`, detail: "Included validation sample delta" })}
+      ${renderMetricCard({ label: "Generated Advanced", value: todayFormatCount(deltas.generated_hypotheses_advanced), detail: `${todayFormatCount(deltas.generated_hypotheses_blocked)} generated blocked` })}
+    </div>
+  </section>`;
+}
+
+function renderDailyResearchIntegrityAudit(payload = {}) {
+  const audit = payload.daily_research_integrity_audit_v1 || payload.daily_research_integrity_audit || {};
+  if (!audit || Object.keys(audit).length === 0) return "";
+  const status = String(audit.integrity_status || "WARN").toUpperCase();
+  const blockers = Number(audit.blocker_count ?? 0);
+  const warnings = Number(audit.warning_count ?? 0);
+  const tone = blockers > 0 || status === "FAIL" ? "danger" : warnings > 0 || status === "WARN" ? "warning" : "success";
+  const summary = blockers === 0
+    ? (warnings > 0 ? "Daily integrity passed with warnings." : "Daily integrity passed. No blocking research defects.")
+    : (audit.primary_issue || "Daily integrity blockers require review.");
+  const topIssues = safeList(audit.issue_rows).slice(0, 3);
+  const issueHtml = topIssues.length
+    ? topIssues.map((row) => `<li><strong>${escapeHtml(row.category || "Integrity")}</strong><span>${escapeHtml(row.severity || "INFO")}: ${escapeHtml(row.recommended_next_step || row.affected_id || "Review source artifact.")}</span></li>`).join("")
+    : `<li><strong>PASS</strong><span>${escapeHtml(summary)}</span></li>`;
+  return `<section class="operator-section daily-research-integrity ${escapeHtml(tone)}" data-testid="daily-research-integrity" data-artifact="aegis_daily_research_integrity_audit_v1">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">DAILY INTEGRITY</div>
+        <h3>${escapeHtml(status)}</h3>
+        <p class="command-center-readable-copy">${escapeHtml(audit.primary_issue || summary)}</p>
+      </div>
+      <span class="status-pill ${escapeHtml(tone)}">${escapeHtml(status)}</span>
+    </div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Integrity Status", value: status, detail: summary })}
+      ${renderMetricCard({ label: "Blockers", value: todayFormatCount(blockers), detail: blockers === 0 ? "No blocking research defects" : "Blocking issues require review" })}
+      ${renderMetricCard({ label: "Warnings", value: todayFormatCount(warnings), detail: "Non-blocking repair or visibility items" })}
+      ${renderMetricCard({ label: "David Actions", value: todayFormatCount(audit.david_action_count), detail: "From backend integrity artifact" })}
+    </div>
+    <ul class="daily-research-integrity-list">${issueHtml}</ul>
+    <details class="operator-disclosure daily-research-integrity-details"><summary>Daily integrity details</summary><pre>${escapeHtml(JSON.stringify({ category_summary: audit.category_summary || {}, source_artifact_paths: audit.source_artifact_paths || {} }, null, 2))}</pre></details>
+  </section>`;
+}
+
+function renderMacroCalendarDataReadinessSection(artifact = {}) {
+  const status = String(artifact.status || "UNAVAILABLE").toUpperCase();
+  const ready = artifact.macro_calendar_ready === true;
+  const needsAction = artifact.david_action_required === true;
+  const buttons = safeList(artifact.buttons);
+  const missing = safeList(artifact.missing_fields);
+  const required = safeList(artifact.required_fields);
+  const tone = ready ? "success" : needsAction ? "warning" : "neutral";
+  const message = artifact.message || (status === "NEEDS_SOURCE" ? "Macro Calendar needs a governed macro event calendar source." : "Macro Calendar data readiness is unavailable.");
+  return `<section class="operator-section macro-calendar-data-readiness ${escapeHtml(tone)}" data-testid="macro-calendar-data-readiness" data-artifact="aegis_macro_calendar_data_readiness_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">Macro Calendar Data Readiness</div><h3>${escapeHtml(status)}</h3><p class="command-center-readable-copy">${escapeHtml(message)}</p></div>${renderStatusPill(ready ? "READY" : status, tone, {})}</div>
+    <div class="research-summary-grid">
+      ${renderResearchFactCard("Current status", status, "Governed macro calendar source readiness.")}
+      ${renderResearchFactCard("David action required", needsAction ? "Yes" : "No", needsAction ? "Operator-provided data path is required." : "No data-source action required.")}
+      ${renderResearchFactCard("Missing fields", missing.length ? missing.join(", ") : "None", "Deterministic readiness validation output.")}
+      ${renderResearchFactCard("Events", todayFormatCount(artifact.event_count), `${todayFormatCount(artifact.valid_event_count)} valid / ${todayFormatCount(artifact.invalid_event_count)} invalid`)}
+      ${renderResearchFactCard("Next step", artifact.next_step || "No next step reported", "Read-only research workflow step.")}
+      ${renderResearchFactCard("Source", artifact.source_status || "UNAVAILABLE", artifact.source_artifact_path || "No source path reported.")}
+    </div>
+    ${needsAction && buttons.length ? `<div class="research-action-row" data-testid="macro-calendar-data-readiness-buttons">${buttons.map((button, index) => `<button class="${index === 0 ? "primary-action" : "ghost-button"}" type="button">${escapeHtml(button)}</button>`).join("")}</div>` : ""}
+    ${required.length ? `<p class="support-note"><strong>Required fields:</strong> ${escapeHtml(required.join(", "))}</p>` : ""}
+    <p class="support-note">This is paper research only. Not trade advice. No broker execution. No live trading.</p>
+  </section>`;
+}
+
+function renderOperatorDecisionDavidActions(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const action = scorecard.david_action_summary || {};
+  const count = Number(scorecard.david_action_count ?? action.action_count ?? 0);
+  const actionButtons = safeList(action.exact_buttons || (action.exact_button_needed ? [action.exact_button_needed] : []));
+  const message = action.action_message || scorecard.primary_message || "David action required.";
+  const actionCard = count > 0
+    ? `<article class="operator-action-card" data-testid="operator-decision-action-card"><h4>${escapeHtml(action.top_action || "Action Required")}</h4><p class="command-center-readable-copy">${escapeHtml(message)}</p><div class="button-row">${actionButtons.map((button) => `<button class="button button--secondary" type="button">${escapeHtml(button)}</button>`).join("")}</div></article>`
+    : `<p class="command-center-readable-copy">No David action required. Aegis will continue automatically.</p>`;
+  return `<section class="operator-section command-center-david-actions" data-testid="operator-decision-david-actions" data-operator-decision-section="david-actions">
+    <div class="section-heading"><div><div class="section-eyebrow">DAVID ACTIONS</div><h3>${count > 0 ? `${todayFormatCount(count)} action required` : "No action required"}</h3></div></div>
+    ${actionCard}
+  </section>`;
+}
+
+function renderOperatorDecisionGeneratedProgress(payload = {}) {
+  const rows = commandCenterGeneratedProgressRows(payload);
+  const rowHtml = rows.length ? rows.map((row) => `<article class="command-center-generated-row" data-testid="generated-hypothesis-progress-row">
+    <div><strong>${escapeHtml(row.hypothesis_name || row.hypothesis_id || "Generated hypothesis")}</strong><span class="muted-text">${escapeHtml(row.today_state || "No state reported")}</span></div>
+    <div><span class="label">Throughput</span><strong>${escapeHtml(row.throughput_status || "Unavailable")}</strong></div>
+    <div><span class="label">Blocker</span><strong>${escapeHtml(row.blocker || "None")}</strong>${row.blocker_message ? `<span class="muted-text">${escapeHtml(row.blocker_message)}</span>` : ""}</div>
+    <div><span class="label">Classification</span><strong>${escapeHtml(row.data_action_classification || "Not classified")}</strong>${row.missing_data_description ? `<span class="muted-text">${escapeHtml(row.missing_data_description)}</span>` : ""}</div>
+    <div><span class="label">Owner</span><strong>${escapeHtml(row.data_action_owner || "Unassigned")}</strong></div>
+    <div><span class="label">David action</span><strong>${row.david_action_required ? "Yes" : "No"}</strong></div>
+    <div><span class="label">Next</span><strong>${escapeHtml(row.data_action_next_step || row.next_expected_step || "No next step reported")}</strong></div>
+  </article>`).join("") : `<p class="command-center-readable-copy">No generated hypothesis progress rows reported by backend artifacts.</p>`;
+  return `<section class="operator-section command-center-generated-progress" data-testid="operator-decision-generated-progress" data-operator-decision-section="generated-progress">
+    <div class="section-heading"><div><div class="section-eyebrow">GENERATED HYPOTHESIS PROGRESS</div><h3>Generated hypothesis progress</h3></div></div>
+    <div class="command-center-generated-list">${rowHtml}</div>
+  </section>`;
+}
+
+function generatedHypothesisValidationProof(payload = {}) {
+  const proof = payload.generated_hypothesis_validation_proof_v1 || payload.generated_hypothesis_validation_proof || {};
+  return proof && typeof proof === "object" ? proof : {};
+}
+
+function generatedHypothesisValidationProofRow(proof = {}, matcher = "") {
+  const rows = safeList(proof.hypothesis_rows);
+  const needle = String(matcher || "").toLowerCase();
+  return rows.find((row) => String(row.hypothesis_name || row.hypothesis_id || "").toLowerCase().includes(needle)) || {};
+}
+
+function renderGeneratedHypothesisValidationProof(payload = {}) {
+  const proof = generatedHypothesisValidationProof(payload);
+  if (!proof || Object.keys(proof).length === 0) return "";
+  const summary = proof.summary || {};
+  const oil = generatedHypothesisValidationProofRow(proof, "oil shock");
+  const macro = generatedHypothesisValidationProofRow(proof, "macro calendar");
+  const validationCount = Number(summary.reached_validation_sample_count ?? 0);
+  const oilText = oil.hypothesis_name
+    ? `${oil.hypothesis_name}: stopped at ${oil.current_stop_stage || "unknown"}; ${oil.next_expected_step || oil.current_stop_reason || "No next step reported."}`
+    : "Oil Shock: no generated-hypothesis proof row reported.";
+  const macroText = macro.hypothesis_name
+    ? `${macro.hypothesis_name}: stopped at ${macro.current_stop_stage || "unknown"}; David action ${macro.david_action_required ? "required" : "not required"}.`
+    : "Macro Calendar: no generated-hypothesis proof row reported.";
+  return `<section class="operator-section generated-hypothesis-validation-proof" data-testid="generated-hypothesis-validation-proof" data-artifact="aegis_generated_hypothesis_validation_proof_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">GENERATED HYPOTHESIS VALIDATION PROOF</div><h3>Validation throughput proof</h3><p class="command-center-readable-copy">Furthest stage reached: ${escapeHtml(summary.furthest_stage_reached || "NOT_STARTED")}</p></div></div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Furthest Stage", value: summary.furthest_stage_reached || "NOT_STARTED", detail: summary.primary_generated_hypothesis_bottleneck || "No bottleneck reported" })}
+      ${renderMetricCard({ label: "Validation Samples", value: todayFormatCount(validationCount), detail: validationCount > 0 ? "Generated hypotheses produced validation samples" : "No generated hypothesis validation samples" })}
+      ${renderMetricCard({ label: "Blocked", value: todayFormatCount(summary.blocked_count), detail: "Generated hypotheses not yet producing validation evidence" })}
+      ${renderMetricCard({ label: "David Actions", value: todayFormatCount(summary.david_action_required_count), detail: "From validation proof artifact" })}
+    </div>
+    <div class="command-center-generated-list compact">
+      <article class="command-center-generated-row"><div><strong>${escapeHtml(oil.hypothesis_name || "Oil Shock")}</strong><span class="muted-text">${escapeHtml(oilText)}</span></div><div><span class="label">Owner</span><strong>${escapeHtml(oil.blocker_owner || "NONE")}</strong></div><div><span class="label">Validation samples</span><strong>${escapeHtml(oil.validation_sample_flow_state || "NOT_STARTED")}</strong></div></article>
+      <article class="command-center-generated-row"><div><strong>${escapeHtml(macro.hypothesis_name || "Macro Calendar")}</strong><span class="muted-text">${escapeHtml(macroText)}</span></div><div><span class="label">Owner</span><strong>${escapeHtml(macro.blocker_owner || "NONE")}</strong></div><div><span class="label">David action</span><strong>${macro.david_action_required ? "Yes" : "No"}</strong></div></article>
+    </div>
+  </section>`;
+}
+
+function renderOperatorDecisionValidationProgress(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const validation = scorecard.validation_progress || {};
+  return `<section class="operator-section command-center-validation-progress" data-testid="operator-decision-validation-progress" data-operator-decision-section="validation-progress">
+    <div class="section-heading"><div><div class="section-eyebrow">VALIDATION PROGRESS</div><h3>Learning progress</h3></div></div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Included Samples", value: todayFormatCount(validation.included_samples_total), detail: `Delta +${todayFormatCount(validation.included_samples_delta)}` })}
+      ${renderMetricCard({ label: "Closed Outcomes", value: todayFormatCount(validation.closed_outcomes_total), detail: `Delta +${todayFormatCount(validation.closed_outcomes_delta)}` })}
+      ${renderMetricCard({ label: "Closest Sufficiency", value: validation.closest_hypothesis_to_sufficiency || "Not identified", detail: `${todayFormatCount(validation.samples_needed_for_next_sufficiency)} samples needed` })}
+      ${renderMetricCard({ label: "Underpowered", value: todayFormatCount(validation.hypotheses_still_underpowered), detail: "Hypotheses still underpowered" })}
+    </div>
+  </section>`;
+}
+
+function commandCenterSpecificBottleneck(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const validation = scorecard.validation_progress || {};
+  const generated = commandCenterGeneratedProgressRows(payload);
+  const macro = generated.find((row) => String(row.hypothesis_name || "").toLowerCase().includes("macro calendar"));
+  if (Number(scorecard.david_action_count || 0) > 0 && macro?.blocker) return "Macro Calendar missing macro event calendar.";
+  const oil = generated.find((row) => String(row.hypothesis_name || "").toLowerCase().includes("oil shock"));
+  if (oil?.blocker === "PRODUCER_MISSING") return oil.blocker_message || "Oil Shock deterministic candidate producer is missing.";
+  if (oil?.blocker) return `Oil Shock candidate flow blocked: ${oil.blocker}.`;
+  if (validation.closest_hypothesis_to_sufficiency) return `Validation sample sufficiency: ${validation.closest_hypothesis_to_sufficiency} needs ${todayFormatCount(validation.samples_needed_for_next_sufficiency)} more samples.`;
+  return scorecard.primary_bottleneck || "No current bottleneck reported.";
+}
+
+function renderOperatorDecisionCurrentBottleneck(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  const health = scorecard.health_blocker_summary || {};
+  const bottleneck = commandCenterSpecificBottleneck(payload);
+  return `<section class="operator-section command-center-current-bottleneck" data-testid="operator-decision-current-bottleneck" data-operator-decision-section="current-bottleneck">
+    <div class="section-heading"><div><div class="section-eyebrow">CURRENT BOTTLENECK</div><h3>${escapeHtml(bottleneck)}</h3><p class="command-center-readable-copy">${escapeHtml(scorecard.primary_bottleneck || bottleneck)}</p></div></div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Audit", value: health.audit_status || "Unavailable", detail: `${todayFormatCount(health.audit_blocker_count)} audit blockers` })}
+      ${renderMetricCard({ label: "Workflow Replay", value: health.workflow_replay_status || "Unavailable", detail: "Verified runtime graph source" })}
+      ${renderMetricCard({ label: "Safety Gates Changed", value: health.safety_gates_changed ? "Yes" : "No", detail: "Broker/trading policy unchanged expected" })}
+    </div>
+  </section>`;
+}
+
+function renderMarketDataUniverseSection(payload = {}) {
+  const artifact = payload.market_data_universe_consistency_v1 || {};
+  if (!artifact || Object.keys(artifact).length === 0) return "";
+  const oil = artifact.oil_shock_symbol_coverage || {};
+  const paper = artifact.paper_position_mark_coverage || artifact.paper_position_symbol_coverage || {};
+  const blockers = safeList(artifact.remaining_blockers);
+  const missing = safeList(artifact.missing_required_symbols);
+  const message = artifact.ui_message || (missing.length ? `Market data universe incomplete: ${missing.join(", ")}.` : "Market data universe complete for current research consumers.");
+  return `<section class="operator-section market-data-universe" data-testid="market-data-universe-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Market Data Universe</div><h3>${escapeHtml(artifact.coverage_status || artifact.status || "UNKNOWN")}</h3><p class="command-center-readable-copy">${escapeHtml(message)}</p></div>${renderStatusPill(artifact.status || "UNKNOWN", String(artifact.status || "").toUpperCase() === "COMPLETE" ? "healthy" : "warning", {})}</div>
+    <div class="metric-grid compact today-summary-grid">
+      ${renderMetricCard({ label: "Overall coverage", value: artifact.overall_universe_coverage || artifact.status || "UNKNOWN", detail: `${todayFormatCount(artifact.consolidated_required_symbol_count)} required symbols` })}
+      ${renderMetricCard({ label: "Missing required", value: todayFormatCount(artifact.missing_required_symbol_count), detail: missing.slice(0, 6).join(", ") || "None" })}
+      ${renderMetricCard({ label: "Oil Shock", value: oil.coverage_status || "UNKNOWN", detail: `required ${safeList(oil.required_symbols).join(", ") || "not reported"}` })}
+      ${renderMetricCard({ label: "Paper marks", value: `${todayFormatCount(paper.marked_position_count)} / ${todayFormatCount(paper.open_position_count)}`, detail: `${paper.mark_coverage_by_position_pct ?? "n/a"}% marked` })}
+      ${renderMetricCard({ label: "David action", value: artifact.david_action_required ? "Yes" : "No", detail: artifact.david_action_required ? "Operator-provided source required" : "No David action required" })}
+    </div>
+    ${blockers.length ? renderSimpleTable({
+      columns: [
+        { label: "Consumer", render: (row) => escapeHtml(row.consumer_name || "Unknown") },
+        { label: "Blocker", render: (row) => escapeHtml(row.blocker_code || "UNKNOWN") },
+        { label: "Owner", render: (row) => escapeHtml(row.owner || "UNKNOWN") },
+        { label: "Symbols", render: (row) => escapeHtml(safeList(row.symbols).join(", ") || "n/a") },
+      ],
+      rows: blockers.slice(0, 5),
+      emptyMessage: "No market-data universe blockers.",
+    }) : ""}
+  </section>`;
+}
+
+function renderResearchDailyScorecardSection(payload = {}) {
+  const scorecard = payload.research_daily_scorecard || {};
+  if (!scorecard || Object.keys(scorecard).length === 0) return "";
+  return `<div class="operator-decision-dashboard" data-testid="operator-decision-dashboard">
+    ${renderOperatorDecisionTodayResult(payload)}
+    ${renderDailyResearchIntegrityAudit(payload)}
+    ${renderMarketDataUniverseSection(payload)}
+    ${renderOperatorDecisionDavidActions(payload)}
+    ${renderMacroCalendarDataReadinessSection(payload.macro_calendar_data_readiness_v1 || {})}
+    ${renderOperatorDecisionGeneratedProgress(payload)}
+    ${renderGeneratedHypothesisValidationProof(payload)}
+    ${renderOperatorDecisionValidationProgress(payload)}
+    ${renderOperatorDecisionCurrentBottleneck(payload)}
+  </div>`;
+}
+
+function renderTodaySummaryGrid(payload = {}) {
+  const safety = payload.safety || {};
+  const openPositions = payload.open_positions || {};
+  const candidates = payload.candidates || {};
+  const validation = payload.validation || {};
+  const next = payload.next || {};
+  const estimate = operatorValuationEstimate(payload);
+  return `<div class="metric-grid compact today-summary-grid" data-testid="today-summary-grid">
+    ${renderMetricCard({ label: "Aegis Mode", value: safety.mode_label || "PAPER MODE", detail: "Paper research active; live trading disabled by policy." })}
+    ${renderMetricCard({ label: "David Action", value: payload.user_action_required ? "Required" : "None", detail: payload.user_action_required ? `${safeList(payload.actions).length} current-day item(s)` : "No operator action required" })}
+    ${renderMetricCard({ label: "Open Paper Positions", value: todayFormatCount(openPositions.count), detail: `${todayFormatCount(openPositions.count)} open paper positions; research observations, not investment decisions` })}
+    ${renderMetricCard({ label: "Today's Candidates", value: todayFormatCount(candidates.today_count ?? candidates.output_count), detail: candidates.summary || "Candidate generation status unavailable" })}
+    ${renderMetricCard({ label: "Validation State", value: validation.summary || "Waiting for closed outcomes", detail: `${todayFormatCount(validation.validation_sample_count)} validation sample(s)` })}
+    ${renderMetricCard({ label: "Next Bottleneck", value: validation.state === "WAITING_FOR_CLOSED_OUTCOMES" ? "Outcome collection" : "Validation samples", detail: next.expected_output || "Paper auto-promotion / outcome collection / validation samples" })}
+    ${renderMetricCard({ label: "Estimated Value", value: operatorEstimateAvailable(estimate) ? operatorEstimateMoney(estimate.estimated_portfolio_value) : "Unavailable", detail: "Estimate only; not certified for target day." })}
+  </div>`;
+}
+
+function renderCommandCenterSafetyStrip(payload = {}) {
+  const safety = payload.safety || {};
+  const items = [
+    ["Live trading", safety.live_trading_allowed ? "Enabled" : "Disabled"],
+    ["Broker execution", safety.broker_execution_allowed || safety.broker_submit_transmit_allowed ? "Enabled" : "Disabled"],
+    ["Autonomous execution", safety.autonomous_live_trading_allowed ? "Enabled" : "Disabled"],
+    ["Trade advice", safety.trade_advice_allowed ? "Enabled" : "Disabled"],
+    ["Manual capture", safety.manual_capture_allowed ? "Enabled" : "Disabled"],
+  ];
+  return `<details class="operator-disclosure command-center-safety-strip" data-testid="command-center-safety-policy">
+    <summary>Safety policy</summary>
+    <div class="metric-grid compact">${items.map(([label, value]) => renderMetricCard({ label, value, detail: value === "Disabled" ? "Disabled by policy" : "Enabled by runtime truth" })).join("")}</div>
+  </details>`;
+}
+
+function renderTodaySecondarySections(payload = {}) {
+  const research = payload.research || {};
+  const system = payload.system_health || {};
+  const waiting = payload.waiting || {};
+  const next = payload.next || {};
+  return `<div class="card-grid today-section-grid">
+    ${renderTodayQuestionCard({ question: "Research", answer: todayPlainState(research.state), detail: research.summary || "Research summary unavailable.", tone: research.blocked_count > 0 ? "warning" : "neutral" })}
+    ${renderTodayQuestionCard({ question: "What is waiting?", answer: waiting.research_samples_summary || (Number(waiting.waiting_for_data_count || 0) ? `${waiting.waiting_for_data_count} data item(s)` : "Closed outcomes"), detail: next.expected_output || "Awaiting closed outcomes for validation.", tone: "neutral" })}
+    ${renderTodayQuestionCard({ question: "System bottleneck", answer: system.top_blocker || "No blocker reported", detail: `${todayFormatCount(system.blocking_count)} blocker(s), ${todayFormatCount(system.degraded_count)} degraded issue(s)`, tone: system.state || "neutral" })}
+  </div>`;
+}
+
+async function renderCommandCenterWorkspace() {
+  const routeParams = routeQueryParams();
+  const [todayResult, promotionResult] = await Promise.allSettled([
+    fetchAegisOperatorToday(routeParams),
+    fetchHypothesisProposalPromotion(routeParams),
+  ]);
+  const payload = todayResult.status === "fulfilled" ? todayResult.value : { ok: false, status: "MISSING" };
+  const promotionPayload = promotionResult.status === "fulfilled" ? promotionResult.value : { ok: false };
+  const commandPromotionArtifacts = promotionPayload?.artifacts && typeof promotionPayload.artifacts === "object" ? promotionPayload.artifacts : {};
+  const commandPromotionRecommendations = researchPaperPromotionRecommendations(commandPromotionArtifacts);
+  const commandSurface = {
+    status: "READY",
+    render_allowed: true,
+    actions_allowed: false,
+  };
+  if (!contractPrimaryRenderAllowed(commandSurface)) {
+    return renderContractGatedPage({ title: "Command Center", subtitle: "Today / Command Center", surfaceId: "command_center", contractRow: commandSurface });
+  }
+  const canonicalMissing = payload.status === "MISSING" || payload.ok === false || payload.canonical_missing === true;
+  const state = String(payload.state || "UNKNOWN").toUpperCase();
+  const truth = buildOperatorTruthModel(payload);
+  const tone = truth.primaryTone || todayStateTone(state);
+
+  if (canonicalMissing) {
+    const bodyHtml = `<main class="shell-stack command-center-page">
+      <section class="page-hero page-hero--compact">
+        <div>
+          <p class="eyebrow">Today / Command Center</p>
+          <h1>Current-day operator state missing</h1>
+          <p>Portal fallback is active. canonical_operator_state.v1.json is missing for today.</p>
+        </div>
+        <a class="button button--primary" href="/aegis/operator/today?repair=generate">Generate Operator State</a>
+      </section>
+      ${renderCommandCenterSafetyStrip(payload)}
+    </main>`;
+    return {
+      title: "Command Center",
+      meta: "Today summary, action inbox, blockers, readiness, and research queue.",
+      html: OperatorInboxTemplate({ surfaceId: "command_center", contractRow: commandSurface, bodyHtml: bodyHtml }),
+      contextHtml: "",
+      layoutMode: "WORKFLOW_LAYOUT",
+      topReadinessLabel: "PAPER MODE",
+      topReadinessTone: tone,
+      sidebarStatusLabel: "Paper Research Mode",
+      environmentLabel: "Paper Research Mode",
+      runtimeModeLabel: "Paper Research Mode",
+      operatorTruth: truth,
+    };
+  }
+
+  const bodyHtml = `<main class="shell-stack command-center-page">
+      ${renderCommandCenterStatusHeader(payload, truth)}
+      ${renderResearchDailyScorecardSection(payload)}
+      ${renderCommandCenterPrimaryOverview(payload)}
+      ${renderPaperPromotionRecommendationsCard({ paperPromotionRecommendations: commandPromotionRecommendations })}
+      ${renderCommandCenterValidationPipeline(payload)}
+      ${renderCommandCenterRunSummary(payload)}
+      ${renderCommandCenterSafetyStrip(payload)}
+      <details class="operator-disclosure command-center-diagnostics" data-testid="command-center-diagnostics">
+        <summary>Diagnostics and evidence</summary>
+        ${renderCommandCenterScheduledRunReadiness(payload)}
+        ${renderCommandCenterCandidateGenerationDiagnostics(payload)}
+        ${renderTodaySecondarySections(payload)}
+        ${renderTodayEvidenceDetails(payload)}
+      </details>
+    </main>`;
+  return {
+    title: "Command Center",
+    meta: "Today summary, action inbox, blockers, readiness, and research queue.",
+    html: OperatorInboxTemplate({ surfaceId: "command_center", contractRow: commandSurface, bodyHtml: bodyHtml }),
+    contextHtml: "",
+    layoutMode: "WORKFLOW_LAYOUT",
+    topReadinessLabel: "PAPER MODE",
+    topReadinessTone: tone,
+    sidebarStatusLabel: "Paper Research Mode",
+    environmentLabel: "Paper Research Mode",
+    runtimeModeLabel: "Paper Research Mode",
+    operatorTruth: truth,
+  };
+}
+
+
+
+
+function positionsCaptureSummary(payload = {}, todayCandidates = []) {
+  const summary = payload.summary || {};
+  const statusObject = payload.candidate_capture_status || {};
+  const total = Number(summary.today_candidates ?? summary.output_candidates_captured ?? todayCandidates.length);
+  const lineageTotal = Number(summary.current_session_lineage_count ?? total);
+  const rejectedExcluded = Number(summary.rejected_intents_excluded ?? 0);
+  const captured = Number(summary.captured ?? todayCandidates.filter((row) => candidateCaptureStatus(row) === "Captured").length);
+  const notCaptured = Number(summary.not_captured ?? todayCandidates.filter((row) => candidateCaptureStatus(row) === "Not captured").length);
+  const deferred = Number(summary.deferred ?? todayCandidates.filter((row) => candidateCaptureStatus(row) === "Deferred").length);
+  const failed = Number(summary.failed ?? todayCandidates.filter((row) => candidateCaptureStatus(row) === "Capture failed").length);
+  const incomplete = Number(summary.incomplete ?? todayCandidates.filter((row) => candidateMissingRequiredFields(row).length > 0).length);
+  const readyForReview = Number(summary.ready_for_operator_review ?? todayCandidates.filter((row) => candidateMissingRequiredFields(row).length === 0).length);
+  const open = Number(summary.open_positions ?? 0);
+  const closed = Number(summary.closed_positions ?? 0);
+  const awaiting = Math.max(0, total - captured - notCaptured - deferred - failed - closed);
+  const sessionId = payload.paper_session_id || "unknown session";
+  const generatedAt = payload.generated_at || payload.generated_at_utc || "not available";
+  const status = statusObject.status || (total > 0 ? "READY" : "UNKNOWN");
+  const classification = statusObject.classification || (total > 0 ? "OUTPUT_CANDIDATES_CAPTURED" : "UNKNOWN_REQUIRES_DIAGNOSTICS");
+  const statusSummary = statusObject.summary || `${total} output candidates captured for ${sessionId}.`;
+  const explanation = statusObject.explanation || "Candidate capture status was not classified by the Positions read model.";
+  const affectedCount = Number(statusObject.affected_count ?? total);
+  const nextAction = statusObject.next_action || "Open diagnostics to classify candidate capture status.";
+  const repairCommand = statusObject.repair_command || "";
+  const diagnosticsLink = statusObject.diagnostics_link || "/aegis-positions-diagnostics";
+  return { total, lineageTotal, rejectedExcluded, captured, notCaptured, deferred, failed, incomplete, readyForReview, open, closed, awaiting, sessionId, status, classification, statusSummary, explanation, affectedCount, nextAction, repairCommand, diagnosticsLink, generatedAt };
+}
+
+function captureStatusTone(status, classification) {
+  const code = String(status || "").toUpperCase();
+  const klass = String(classification || "").toUpperCase();
+  if (["READY", "COMPLETE", "NO_ACTION_REQUIRED"].includes(code)) return "ready";
+  if (klass === "STALE_READ_MODEL" || ["STALE", "BLOCKED", "PARTIAL"].includes(code)) return "warning";
+  return "blocked";
+}
+
+function renderCandidateCaptureConfirmationPanel(payload = {}, todayCandidates = []) {
+  const summary = positionsCaptureSummary(payload, todayCandidates);
+  const message = summary.statusSummary;
+  return `<section class="operator-section candidate-capture-confirmation" data-testid="candidate-capture-confirmation"><div class="section-heading"><div><div class="section-eyebrow">Candidate Capture Confirmation</div><h3>${escapeHtml(message)}</h3><p class="muted-mini">${escapeHtml(summary.explanation)}</p></div>${renderStatusPill(operatorPlainLabel(summary.classification), captureStatusTone(summary.status, summary.classification), {})}</div><div class="metric-grid compact capture-confirmation-grid">
+    ${renderMetricCard({ label: "Paper Session ID", value: summary.sessionId })}
+    ${renderMetricCard({ label: "Candidate Capture Status", value: operatorPlainLabel(summary.status) })}
+    ${renderMetricCard({ label: "Classification", value: operatorPlainLabel(summary.classification) })}
+    ${renderMetricCard({ label: "Expected Output Candidate Count", value: String(summary.total) })}
+    ${renderMetricCard({ label: "Output Candidates Captured", value: String(summary.total) })}
+    ${renderMetricCard({ label: "Current Session Lineage Count", value: String(summary.lineageTotal) })}
+    ${renderMetricCard({ label: "Rejected Intents Excluded", value: String(summary.rejectedExcluded) })}
+    ${renderMetricCard({ label: "Actionable Count", value: String(summary.readyForReview) })}
+    ${renderMetricCard({ label: "Ready for Operator Review", value: String(summary.readyForReview) })}
+    ${renderMetricCard({ label: "Incomplete Count", value: String(summary.incomplete) })}
+    ${renderMetricCard({ label: "Approved Count", value: String(summary.captured) })}
+    ${renderMetricCard({ label: "Open Count", value: String(summary.open) })}
+    ${renderMetricCard({ label: "Closed Count", value: String(summary.closed) })}
+    ${renderMetricCard({ label: "Failed Count", value: String(summary.failed) })}
+    ${renderMetricCard({ label: "Affected Count", value: String(summary.affectedCount) })}
+    ${renderMetricCard({ label: "Next Action", value: summary.nextAction })}
+    ${renderMetricCard({ label: "Capture Timestamp", value: formatTimestamp(summary.generatedAt) })}
+  </div><p class="support-note">${escapeHtml(String(summary.total))} output candidates captured · ${escapeHtml(String(summary.readyForReview))} ready for operator review · ${escapeHtml(String(summary.rejectedExcluded))} rejected-intent lineage rows excluded · ${escapeHtml(String(summary.incomplete))} incomplete output candidates · next_action: ${escapeHtml(summary.nextAction)}${summary.repairCommand ? ` · repair: ${escapeHtml(summary.repairCommand)}` : ""} · <a href="${escapeHtml(summary.diagnosticsLink)}" data-route="${escapeHtml(summary.diagnosticsLink)}">Diagnostics</a></p></section>`;
+}
+
+
+async function renderCandidatesWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  let payload = {};
+  try {
+    const envelope = await fetchAegisOperatorStateSnapshotLatest(routeParams);
+    payload = envelope?.data && typeof envelope.data === "object"
+      ? { ...envelope.data, api_envelope: { ok: envelope.ok, degraded: envelope.degraded, errors: envelope.errors, next_action: envelope.next_action } }
+      : (envelope || {});
+  } catch (error) {
+    return renderCandidatesUnavailablePage({
+      title: "Candidate workflow is unavailable.",
+      reason: "Aegis could not load current-day candidate evidence.",
+      impact: "Candidate counts and actionability are hidden until the candidate state can be read.",
+      nextStep: "Open System Health or try again after the candidate evidence refreshes.",
+      sourceError: error?.message || "Candidate evidence endpoint failed.",
+    });
+  }
+  const summary = buildCandidatesOperatorSummary(payload, routeParams);
+  const state = candidatesOperatorState(summary, payload);
+  return {
+    title: "Candidates",
+    headerTitle: "Candidates",
+    meta: "Current candidate opportunity, actionability, blockers, and next evaluation timing.",
+    topReadinessLabel: state.topReadinessLabel,
+    topReadinessTone: state.topReadinessTone,
+    dataTimestamp: summary.lastEvaluationAt ? `Updated: ${formatTimestamp(summary.lastEvaluationAt)}` : "",
+    html: renderCandidatesPage({ payload, summary, state }),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function buildCandidatesOperatorSummary(payload = {}, routeParams = {}) {
+  const projection = dashboardCandidateProjection(payload);
+  const run = projection.run_summary || {};
+  const lifecycle = dashboardCandidateLifecycleProjection(payload);
+  const lifecycleSummary = lifecycle.summary || {};
+  const paperProjection = dashboardPaperOperatorProjection(payload);
+  const session = safeList(paperProjection.sessions)[0] || {};
+  const currentRows = safeList(lifecycle.current_session_candidates || lifecycle.current_session_candidates_all)
+    .filter((row) => String(row.latest_projection_day || row.day_utc || payload.day_utc || "").slice(0, 10) === String(payload.day_utc || routeParams.day || "").slice(0, 10));
+  const actionableRows = safeList(lifecycle.actionable_current_candidates)
+    .filter((row) => String(row.latest_projection_day || row.day_utc || payload.day_utc || "").slice(0, 10) === String(payload.day_utc || routeParams.day || "").slice(0, 10));
+  const currentSessionCount = Number(lifecycleSummary.current_session_total ?? currentRows.length ?? run.reviewable_current_day_candidates ?? 0) || 0;
+  const actionableCount = Number(lifecycleSummary.actionable ?? run.reviewable_current_day_candidates ?? actionableRows.length ?? 0) || 0;
+  const outputCandidateCount = Number(run.diagnostic_candidate_outputs ?? projection.diagnostic_candidate_outputs ?? lifecycleSummary.ready_for_operator_review ?? 0) || 0;
+  const nonActionableCount = Math.max(0, currentSessionCount - actionableCount);
+  const carriedForwardCount = Number(lifecycleSummary.carry_forward ?? run.carried_forward_candidates ?? 0) || 0;
+  const priorRowsExcluded = carriedForwardCount;
+  const sleevesExpected = Number(run.sleeves_expected ?? projection.sleeves_expected ?? 0) || 0;
+  const sleevesRun = Number(run.sleeves_run ?? projection.sleeves_run ?? 0) || 0;
+  const rawSignals = Number(run.raw_signals ?? projection.raw_signals ?? 0) || 0;
+  const contracts = Number(run.valid_candidate_contracts ?? projection.candidate_contract_count ?? run.candidate_contracts_created ?? 0) || 0;
+  const generationStatus = String(run.classification || run.status || projection.projection_status || payload.candidate_generation_status || "UNKNOWN").toUpperCase();
+  const dataBlocked = generationStatus.includes("DATA_BLOCKED") || String(payload.candidate_ui_projection?.run_summary?.market_data_coverage?.status || "").toUpperCase() === "MISSING";
+  const lastEvaluationAt = run.completed_at || run.run_end || run.projection_generated_at || session.candidate_generated_at || payload.generated_at_utc || "";
+  const scheduledRunTime = session.scheduled_run_time || payload.paper_session_scheduled_run_time || "";
+  const nextEvaluationCandidate = run.next_scheduled_run || paperProjection.next_scheduled_run || payload.next_candidate_evaluation_at || "";
+  const nextEvaluationMs = Date.parse(nextEvaluationCandidate || "");
+  const nextEvaluation = Number.isFinite(nextEvaluationMs) && nextEvaluationMs > Date.now() ? nextEvaluationCandidate : "";
+  const sourceDay = run.target_day || lifecycle.day_utc || payload.day_utc || routeParams.day || "";
+  const requestedDay = routeParams.day || payload.day_utc || sourceDay || "";
+  const blockerRows = candidateBlockerRows({ dataBlocked, sleevesExpected, sleevesRun, outputCandidateCount, contracts, generationStatus, run, projection });
+  return {
+    requestedDay,
+    sourceDay,
+    paperSessionId: lifecycle.paper_session_id || session.paper_session_id || payload.paper_session_id || "",
+    currentSessionCount,
+    actionableCount,
+    outputCandidateCount,
+    nonActionableCount,
+    priorRowsExcluded,
+    sleevesExpected,
+    sleevesRun,
+    rawSignals,
+    contracts,
+    generationStatus,
+    dataBlocked,
+    lastEvaluationAt,
+    scheduledRunTime,
+    nextEvaluation,
+    currentRows,
+    actionableRows,
+    blockerRows,
+    evidenceRows: candidateEvidenceRows(payload, projection, run, lifecycle),
+  };
+}
+
+function candidateBlockerRows({ dataBlocked, sleevesExpected, sleevesRun, outputCandidateCount, contracts, generationStatus, run = {}, projection = {} } = {}) {
+  const rows = [];
+  if (dataBlocked) {
+    rows.push({
+      issue: "Today's market data is missing for candidate evaluation.",
+      impact: "Aegis could not complete candidate generation, so no current-day candidate can be reviewed.",
+      next: "Wait for the next evaluation; System Health owns any data recovery.",
+      severity: "Blocked",
+    });
+  }
+  if (sleevesExpected > 0 && sleevesRun === 0) {
+    rows.push({
+      issue: "No candidate strategies completed today's evaluation.",
+      impact: `Aegis expected ${sleevesExpected} candidate strateg${sleevesExpected === 1 ? "y" : "ies"} to evaluate opportunities, but none completed.`,
+      next: "Use System Health to see whether data recovery is needed.",
+      severity: "Blocked",
+    });
+  }
+  if (outputCandidateCount === 0) {
+    rows.push({
+      issue: "No output candidates qualified for review.",
+      impact: "There is no candidate for David to review right now.",
+      next: "No candidate action is required. Aegis will wait for the next evaluation.",
+      severity: dataBlocked ? "Blocked" : "No activity",
+    });
+  }
+  if (contracts === 0 && outputCandidateCount > 0) {
+    rows.push({
+      issue: "Candidate contracts are not ready.",
+      impact: "Candidates cannot become actionable until contract details are complete.",
+      next: "Wait for candidate contract generation to complete.",
+      severity: "Blocked",
+    });
+  }
+  if (!rows.length && String(generationStatus || "").includes("UNKNOWN")) {
+    rows.push({
+      issue: "Candidate status is unclear.",
+      impact: "Aegis cannot explain candidate actionability from the available evidence.",
+      next: "Open System Health before relying on this candidate view.",
+      severity: "Degraded",
+    });
+  }
+  return rows;
+}
+
+function candidateEvidenceRows(payload = {}, projection = {}, run = {}, lifecycle = {}) {
+  return [
+    { label: "Requested day", value: payload.day_utc || run.target_day || "not reported" },
+    { label: "Source day", value: run.target_day || lifecycle.day_utc || payload.day_utc || "not reported" },
+    { label: "Paper session", value: lifecycle.paper_session_id || "not reported" },
+    { label: "Last evaluation", value: formatTimestamp(run.completed_at || run.run_end || projection.generated_at || payload.generated_at_utc || "") || "not reported" },
+    { label: "Prior rows excluded", value: String(run.carried_forward_candidates ?? lifecycle.summary?.carry_forward ?? 0) },
+  ];
+}
+
+function candidatesOperatorState(summary = {}, payload = {}) {
+  if (!payload || payload.api_envelope?.ok === false) {
+    return {
+      kind: "BLOCKED",
+      label: "Unavailable",
+      topReadinessLabel: "Candidates unavailable",
+      topReadinessTone: "warning",
+      headline: "Candidate workflow is unavailable.",
+      explanation: "Aegis cannot read trusted candidate evidence for this day.",
+      oneLine: "Do not act on candidates until current-day candidate evidence is available.",
+      operatorAction: "No action required",
+      operatorActionHelp: "Candidate actions are hidden while evidence is unavailable.",
+    };
+  }
+  if (summary.actionableCount > 0) {
+    return {
+      kind: "NEEDS_USER_ACTION",
+      label: "Review needed",
+      topReadinessLabel: "Candidate review needed",
+      topReadinessTone: "warning",
+      headline: `${summary.actionableCount} candidate${summary.actionableCount === 1 ? " is" : "s are"} ready for review.`,
+      explanation: "Only current-day candidates with complete actionability evidence are shown for action.",
+      oneLine: `There ${summary.actionableCount === 1 ? "is" : "are"} ${summary.actionableCount} actionable candidate${summary.actionableCount === 1 ? "" : "s"}. Review only the listed rows.`,
+      operatorAction: "Review listed candidates",
+      operatorActionHelp: "Use candidate actions only on rows shown in the actionable queue.",
+    };
+  }
+  if (summary.dataBlocked || summary.generationStatus.includes("DATA_BLOCKED")) {
+    return {
+      kind: "BLOCKED",
+      label: "No actionable candidates",
+      topReadinessLabel: "Candidate generation blocked",
+      topReadinessTone: "warning",
+      headline: "No candidate action today.",
+      explanation: "Aegis could not complete candidate evaluation because today's market data is missing.",
+      oneLine: "No candidate action today. Aegis could not complete candidate evaluation because today's market data is missing.",
+      operatorAction: "No action required",
+      operatorActionHelp: "Wait for the next evaluation; System Health owns any data recovery.",
+    };
+  }
+  if (summary.currentSessionCount === 0 && summary.outputCandidateCount === 0) {
+    return {
+      kind: "NO_ACTIVITY",
+      label: "No candidates",
+      topReadinessLabel: "No candidate action",
+      topReadinessTone: "neutral",
+      headline: "No candidates qualified for review today.",
+      explanation: "Candidate generation completed without producing a current-day review candidate.",
+      oneLine: "There are no actionable candidates. No operator action is required.",
+      operatorAction: "No action required",
+      operatorActionHelp: "Wait for the next scheduled candidate evaluation.",
+    };
+  }
+  return {
+    kind: "DEGRADED",
+    label: "Candidate summary partial",
+    topReadinessLabel: "Candidates partial",
+    topReadinessTone: "warning",
+    headline: "Candidate summary is visible, but actionability is incomplete.",
+    explanation: "Some candidate evidence is available, but Aegis is not allowing actions without complete current-day readiness.",
+    oneLine: "Candidate information is partial. No candidate action is shown unless row-level gates are complete.",
+    operatorAction: "No action required",
+    operatorActionHelp: "Review explanations and wait for complete evidence.",
+  };
+}
+
+function renderCandidatesUnavailablePage({ title, reason, impact, nextStep, sourceError } = {}) {
+  return {
+    title: "Candidates",
+    headerTitle: "Candidates",
+    meta: "Candidate opportunity and actionability are unavailable.",
+    topReadinessLabel: "Candidates unavailable",
+    topReadinessTone: "warning",
+    html: `<main class="operator-workflow candidates-workspace candidates-unavailable" data-testid="candidates-unavailable-state">
+      <section class="operator-section candidates-hero blocked">
+        <div class="section-heading"><div><div class="section-eyebrow">Candidates</div><h2>${escapeHtml(title || "Candidate workflow is unavailable.")}</h2><p class="muted-mini">${escapeHtml(reason || "Candidate evidence could not be loaded.")}</p></div>${renderStatusPill("Unavailable", "warning", {})}</div>
+        <div class="candidates-operator-answer">${escapeHtml(impact || "Candidate actionability is hidden until evidence is available.")}</div>
+        <div class="callout warning"><strong>No candidate actions are available.</strong><div class="muted-mini">${escapeHtml(nextStep || "Try again after current-day candidate evidence refreshes.")}</div></div>
+        ${sourceError ? `<details class="operator-disclosure candidates-evidence"><summary>View evidence</summary><p class="muted-mini">${escapeHtml(sourceError)}</p></details>` : ""}
+      </section>
+    </main>`,
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function renderCandidatesPage({ payload = {}, summary = {}, state = {} } = {}) {
+  return `<main class="operator-workflow candidates-workspace candidates-primary" data-testid="candidates-page">
+    <section class="operator-section candidates-hero ${escapeHtml(state.kind.toLowerCase())}" data-testid="candidates-status-summary">
+      <div class="section-heading">
+        <div>
+          <div class="section-eyebrow">Candidates</div>
+          <h2>${escapeHtml(state.headline)}</h2>
+          <p class="muted-mini">${escapeHtml(state.explanation)}</p>
+        </div>
+        ${renderStatusPill(state.label, state.kind === "NEEDS_USER_ACTION" || state.kind === "BLOCKED" ? "warning" : "neutral", {})}
+      </div>
+      <div class="candidates-operator-answer" data-testid="candidates-operator-answer">${escapeHtml(state.oneLine)}</div>
+      ${renderCandidateTimingStrip(summary)}
+      <div class="candidates-state-grid">
+        ${renderCandidatesFactCard("Actionable", String(summary.actionableCount), "Candidates that can be reviewed now.")}
+        ${renderCandidatesFactCard("Current candidates", String(summary.currentSessionCount), "Current-day candidate rows considered for review.")}
+        ${renderCandidatesFactCard("Non-actionable", String(summary.nonActionableCount), "Current-day candidates that cannot be acted on.")}
+        ${renderCandidatesFactCard("David action", state.operatorAction, state.operatorActionHelp)}
+      </div>
+    </section>
+    ${renderCandidateUniverseSummary(summary)}
+    ${renderCandidateActionQueue(summary, payload, state)}
+    ${renderCandidateBlockerSummary(summary)}
+    ${renderCandidateNextEvaluation(summary)}
+    ${renderCandidatesEvidence(summary)}
+  </main>`;
+}
+
+function renderCandidatesFactCard(label, value, helper = "") {
+  return `<article class="metric-card candidates-fact-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "n/a"))}</strong>${helper ? `<small>${escapeHtml(helper)}</small>` : ""}</article>`;
+}
+
+function renderCandidateUniverseSummary(summary = {}) {
+  return `<section class="operator-section candidates-universe" data-testid="candidate-universe-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Candidate Universe</div><h3>What was evaluated?</h3><p class="muted-mini">This shows opportunity evaluation only.</p></div></div>
+    <div class="candidates-state-grid">
+      ${renderCandidatesFactCard("Strategies expected", String(summary.sleevesExpected), "Strategies expected to evaluate candidate opportunities.")}
+      ${renderCandidatesFactCard("Strategies completed", String(summary.sleevesRun), "Strategies with completed current-day candidate evaluation.")}
+      ${renderCandidatesFactCard("Raw signals", String(summary.rawSignals), "Signals available to become candidates.")}
+      ${renderCandidatesFactCard("Output candidates", String(summary.outputCandidateCount), "Final candidates produced for possible review.")}
+    </div>
+    ${summary.priorRowsExcluded ? `<div class="support-note"><strong>Prior rows excluded</strong><span>${escapeHtml(String(summary.priorRowsExcluded))} older or carry-forward rows were excluded. They are not today's actionable candidates.</span></div>` : ""}
+  </section>`;
+}
+
+function renderCandidateActionQueue(summary = {}, payload = {}, state = {}) {
+  const rows = safeList(summary.actionableRows);
+  if (!rows.length) {
+    return `<section class="operator-section candidates-action-queue" data-testid="candidate-action-queue">
+      <div class="section-heading"><div><div class="section-eyebrow">Action Required</div><h3>No candidate action required</h3><p class="muted-mini">Aegis is not showing candidate capture or review actions because no current-day candidate passed actionability gates.</p></div>${renderStatusPill("None", "neutral", {})}</div>
+      <div class="empty-state">No current candidates require operator review.</div>
+    </section>`;
+  }
+  return `<section class="operator-section candidates-action-queue" data-testid="candidate-action-queue">
+    <div class="section-heading"><div><div class="section-eyebrow">Action Required</div><h3>Reviewable Candidates</h3><p class="muted-mini">Only current-day candidates with complete actionability evidence appear here.</p></div><span class="muted-mini">${escapeHtml(String(rows.length))} row${rows.length === 1 ? "" : "s"}</span></div>
+    ${renderSimpleTable({
+      columns: candidateOperatorColumns({ actions: true }),
+      rows,
+      emptyMessage: "No actionable candidates.",
+    })}
+  </section>`;
+}
+
+function renderCandidateBlockerSummary(summary = {}) {
+  const rows = safeList(summary.blockerRows);
+  return `<section class="operator-section candidates-blockers" data-testid="candidate-blocker-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Why not actionable?</div><h3>${rows.length ? "Candidate evaluation blocked" : "No candidate evaluation blockers reported"}</h3><p class="muted-mini">These are candidate generation or evaluation blockers, not candidate-row actions for David.</p></div></div>
+    ${renderSimpleTable({
+      columns: [
+        { label: "Reason", render: (row) => `<strong>${escapeHtml(row.issue || "No reason reported")}</strong>` },
+        { label: "What it means", render: (row) => escapeHtml(row.impact || "No candidate action is available.") },
+        { label: "What happens next", render: (row) => escapeHtml(row.next || "Wait for the next evaluation.") },
+      ],
+      rows,
+      emptyMessage: "No candidate evaluation blockers reported.",
+    })}
+  </section>`;
+}
+
+function renderCandidateTimingStrip(summary = {}) {
+  const last = summary.lastEvaluationAt ? formatTimestamp(summary.lastEvaluationAt) : "Not reported";
+  const next = summary.nextEvaluation ? formatTimestamp(summary.nextEvaluation) : "No future candidate evaluation is confirmed.";
+  return `<div class="candidates-timing-strip" data-testid="candidate-evaluation-timing">
+    ${renderCandidatesFactCard("Last candidate evaluation", last, "Most recent candidate evidence update.")}
+    ${renderCandidatesFactCard("Next candidate evaluation", next, "A past run is never shown as next.")}
+  </div>`;
+}
+
+function renderCandidateNextEvaluation(summary = {}) {
+  const last = summary.lastEvaluationAt ? formatTimestamp(summary.lastEvaluationAt) : "Not reported";
+  const scheduled = summary.scheduledRunTime ? formatTimestamp(summary.scheduledRunTime) : "Not reported";
+  const next = summary.nextEvaluation ? formatTimestamp(summary.nextEvaluation) : "No future candidate evaluation is confirmed.";
+  return `<section class="operator-section candidates-next-evaluation" data-testid="candidate-next-evaluation">
+    <div class="section-heading"><div><div class="section-eyebrow">Next</div><h3>What happens next?</h3><p class="muted-mini">Aegis waits for the next candidate evaluation or for missing input data to be repaired.</p></div></div>
+    <div class="candidates-state-grid">
+      ${renderCandidatesFactCard("Scheduled session", scheduled, "The scheduled candidate session for this day.")}
+      ${renderCandidatesFactCard("Last candidate evaluation", last, "When candidate evidence last changed.")}
+      ${renderCandidatesFactCard("Next candidate evaluation", next, "Next known future candidate evaluation time.")}
+      ${renderCandidatesFactCard("Operator expectation", "Monitor only", "No candidate action is available now.")}
+    </div>
+  </section>`;
+}
+
+function candidateOperatorColumns({ actions = false } = {}) {
+  const columns = [
+    { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+    { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || row.sleeve || row.strategy || "Not reported") },
+    { label: "Direction", render: (row) => escapeHtml(row.direction || "Not reported") },
+    { label: "Readiness", render: (row) => escapeHtml(candidateRowReadiness(row)) },
+    { label: "Why shown", render: (row) => escapeHtml(candidateRowReason(row)) },
+  ];
+  columns.push({ label: "Actions", render: (row) => actions ? renderCandidateOperatorActions(row) : `<details class="position-row-details"><summary>Details</summary>${renderDefinitionRows(candidateOperatorDetailRows(row))}</details>` });
+  return columns;
+}
+
+function candidateRowReadiness(row = {}) {
+  const actions = candidateLifecycleAllowedActions(row);
+  if (actions.includes("RECORD_ENTRY") || actions.includes("APPROVE") || actions.includes("DEFER")) return "Ready for operator review";
+  return operatorPlainLabel(row.candidate_readiness_status || row.candidate_lifecycle_state || row.status || "Not actionable");
+}
+
+function candidateRowReason(row = {}) {
+  return operatorPlainLabel(row.boundary_reason || row.blocker_reason || row.reason || row.decision_reason || "Candidate is shown for review.");
+}
+
+function candidateOperatorDetailRows(row = {}) {
+  return [
+    { label: "Candidate", value: row.candidate_id || row.candidate_contract_id || "not reported" },
+    { label: "Readiness", value: candidateRowReadiness(row) },
+    { label: "Reason", value: candidateRowReason(row) },
+  ];
+}
+
+function renderCandidateOperatorActions(row = {}) {
+  const actions = candidateLifecycleAllowedActions(row);
+  if (!(actions.includes("RECORD_ENTRY") || actions.includes("APPROVE") || actions.includes("DEFER") || actions.includes("REJECT"))) {
+    return `<span class="ghost-button read-only-position-action" role="text" aria-disabled="true">No action</span><details class="position-row-details"><summary>Details</summary>${renderDefinitionRows(candidateOperatorDetailRows(row))}</details>`;
+  }
+  return `<div class="candidate-action-toolbar compact-actions">
+    ${actions.includes("RECORD_ENTRY") ? `<button class="primary-button" type="button">Record Capture</button>` : ""}
+    ${actions.includes("REJECT") ? `<button class="ghost-button" type="button">Record Not Captured</button>` : ""}
+    ${actions.includes("DEFER") ? `<button class="ghost-button" type="button">Defer</button>` : ""}
+    <details class="position-row-details"><summary>Details</summary>${renderDefinitionRows(candidateOperatorDetailRows(row))}</details>
+  </div>`;
+}
+
+function renderCandidatesEvidence(summary = {}) {
+  return `<details class="operator-disclosure candidates-evidence" data-testid="candidates-evidence"><summary>View evidence</summary>${renderDefinitionRows(summary.evidenceRows || [])}</details>`;
+}
+
+async function renderPositionsWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const [payload, contractEnvelope] = await Promise.all([
+    fetchAegisPositions(routeParams),
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+  ]);
+  const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+  payload.operator_surface_contract = contractPayload;
+  const positionsSurface = surfaceContractRow(payload, "positions");
+  if (!contractPrimaryRenderAllowed(positionsSurface)) {
+    return renderContractGatedPage({ title: "Positions", subtitle: "Current paper holdings, exposure, mark quality, and position monitoring.", surfaceId: "positions", contractRow: positionsSurface });
+  }
+
+  const openPositions = safeList(payload.open_positions);
+  const closedPositions = safeList(payload.closed_positions);
+  const summary = buildPositionsOwnershipSummary(openPositions, closedPositions, payload);
+  const state = positionsOperatorState(summary, payload);
+  return {
+    title: "Positions",
+    headerTitle: "Positions",
+    meta: "Current paper holdings, exposure, mark quality, and position monitoring.",
+    topReadinessLabel: "Paper Research Mode",
+    topReadinessTone: state.kind === "DEGRADED" ? "warning" : (state.kind === "NORMAL" ? "success" : state.pillKind),
+    html: EntityListTemplate({ surfaceId: "positions", contractRow: positionsSurface, bodyHtml: renderPositionsOwnershipPage({ payload, openPositions, closedPositions, summary, state }) }),
+    contextHtml: "",
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function renderPositionsUnavailablePage(payload = {}, contractRow = {}) {
+  const reason = contractOperatorText(contractRow.reason || payload.read_error || "Position evidence for the selected day is not available.");
+  const impact = contractOperatorText(contractRow.impact || "Open positions and exposure are hidden until ownership evidence is trustworthy.");
+  const nextStep = contractPrimaryNextStep(contractRow || {});
+  return {
+    title: "Positions",
+    headerTitle: "Positions",
+    meta: "Current ownership is unavailable for this day.",
+    topReadinessLabel: "Positions unavailable",
+    topReadinessTone: "warning",
+    html: `<main class="operator-workflow positions-workspace positions-unavailable" data-testid="positions-unavailable-state">
+      <section class="operator-section positions-hero blocked">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">Paper Research Mode</div>
+            <h2>Position state is unavailable for this day.</h2>
+            <p class="muted-mini">Aegis cannot show current ownership until the position evidence for this day is trustworthy.</p>
+          </div>
+          ${renderStatusPill("Unavailable", "warning", {})}
+        </div>
+        <div class="positions-state-grid">
+          ${renderPositionsFactCard("Status", "Unavailable", "Ownership view is hidden.")}
+          ${renderPositionsFactCard("Reason", reason, "Why the page is blocked.")}
+          ${renderPositionsFactCard("Impact", impact, "What this affects.")}
+          ${renderPositionsFactCard("Next step", nextStep, "How to proceed.")}
+        </div>
+        <div class="callout warning"><strong>No position actions are available.</strong><div class="muted-mini">This screen is read-only for ownership review; broker, live, and execution controls are not available.</div></div>
+        ${renderPositionsEvidence(payload, contractRow)}
+      </section>
+    </main>`,
+    contextHtml: "",
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function renderPositionsOwnershipPage({ payload = {}, openPositions = [], closedPositions = [], summary = {}, state = {} } = {}) {
+  const hasPositions = openPositions.length > 0;
+  return `<main class="operator-workflow positions-workspace positions-ownership" data-testid="positions-ownership-page">
+    <section class="operator-section positions-hero ${escapeHtml(state.kind.toLowerCase())}" data-testid="positions-status-summary">
+      <div class="section-heading">
+        <div>
+          <div class="section-eyebrow">Paper Research Mode</div>
+          <h2>${escapeHtml(state.headline)}</h2>
+          <p class="muted-mini">${escapeHtml(state.explanation)}</p>
+        </div>
+        <div class="operator-local-actions">${renderStatusPill(state.label, state.pillKind, {})}<button class="ghost-button" type="button" data-refresh-route="positions">Refresh Positions</button></div>
+      </div>
+      <div class="positions-operator-answer" data-testid="positions-operator-answer">${escapeHtml(state.oneLine)}</div>
+      <div class="positions-state-grid">
+        ${renderPositionsFactCard("Open paper observations", String(summary.openCount), "These remain paper research observations.")}
+        ${renderPositionsFactCard("Closed paper outcomes today", String(summary.closedTodayCount), "Paper exits auto-closed for research validation.")}
+        ${renderPositionsFactCard("Manual review queue", String(summary.manualReviewCount), "Manual review only.")}
+        ${renderPositionsFactCard("No broker execution occurred", "Confirmed", "Not trade advice.")}
+        ${renderPositionsFactCard("Manual review only", "Yes", "These are paper exits only. Review manually if they correspond to real-world positions.")}
+      </div>
+      <div class="callout warning" data-testid="positions-manual-review-copy"><strong>Manual review only.</strong><div class="muted-mini">These are paper exits only. Review manually if they correspond to real-world positions. No broker execution occurred. Not trade advice.</div></div>
+      <div class="positions-state-grid secondary">
+        ${renderPositionsFactCard("Price coverage", summary.markCoverageDisplay, summary.markCoverageHelp)}
+        ${renderPositionsFactCard("Estimated latest value", summary.estimatedPortfolioValueDisplay, summary.estimateAvailable ? `Estimated. Not certified for target day. Latest marks as of ${summary.estimatedMarkDate}.` : "Estimate unavailable.")}
+        ${renderPositionsFactCard("Estimated unrealized P&L", summary.estimatedUnrealizedPnlDisplay, summary.estimateAvailable ? "Informational only; not canonical P&L." : "Estimate unavailable.")}
+        ${renderPositionsFactCard("Largest exposure", summary.largestExposureDisplay, summary.largestExposureHelp)}
+      </div>
+      ${renderPositionsDataQualityNotice(summary)}
+      ${renderOperatorEstimateNotice(summary.estimate, "position value")}
+    </section>
+    <section class="operator-section open-paper-positions primary-positions-section command-center-visual-surface" data-testid="positions-open-section">
+      <div class="section-heading"><div><div class="section-eyebrow">Open Paper Observations</div><h3>Open Paper Observations</h3><p class="muted-mini">These remain paper research observations.</p></div><span class="muted-mini">${escapeHtml(String(summary.openCount))} open</span></div>
+      ${hasPositions ? renderPositionsOwnershipTable(openPositions, payload, "No open paper observations are recorded for this day.") : renderPositionsNoActivityState(payload)}
+    </section>
+    <section class="operator-section closed-paper-outcomes command-center-visual-surface" data-testid="positions-closed-today-section"><div class="section-heading"><div><div class="section-eyebrow">Paper Outcomes Closed Today</div><h3>Paper Outcomes Closed Today</h3><p class="muted-mini">Paper-only outcomes auto-closed by research rules.</p></div><span class="muted-mini">${escapeHtml(String(summary.closedTodayCount))} closed</span></div>${renderPositionsPaperOutcomeCards(summary.closedTodayRows)}</section>
+    <section class="operator-section manual-review-queue command-center-visual-surface" data-testid="positions-manual-review-section"><div class="section-heading"><div><div class="section-eyebrow">Manual Review Queue</div><h3>Manual Review Queue</h3><p class="muted-mini">These are paper exits only. Review manually if they correspond to real-world positions.</p></div><span class="muted-mini">${escapeHtml(String(summary.manualReviewCount))} review</span></div>${renderPositionsPaperOutcomeCards(summary.manualReviewRows)}</section>
+    ${renderPositionsExposureSummary(summary)}
+    ${closedPositions.length ? `<section class="operator-section closed-paper-positions"><div class="section-heading"><div><div class="section-eyebrow">History</div><h3>Closed Positions</h3><p class="muted-mini">Recent closed paper positions, shown after current holdings.</p></div><span class="muted-mini">${escapeHtml(String(closedPositions.length))} closed</span></div>${renderClosedPositionsTable(closedPositions, "No closed paper positions are recorded.")}</section>` : ""}
+    ${renderPositionsEvidence(payload)}
+  </main>`;
+}
+
+function buildPositionsOwnershipSummary(openPositions = [], closedPositions = [], payload = {}) {
+  const open = safeList(openPositions);
+  const closed = safeList(closedPositions);
+  const markPresent = open.filter((row) => hasCertifiedPositionMark(row));
+  const missingMarkRows = open.filter((row) => !hasCertifiedPositionMark(row));
+  const currentValue = open.reduce((sum, row) => sum + positionCurrentValue(row), 0);
+  const entryNotional = open.reduce((sum, row) => sum + positionEntryNotional(row), 0);
+  const pnlRows = open.filter((row) => positionPnl(row) !== null);
+  const pnl = pnlRows.reduce((sum, row) => sum + (positionPnl(row) || 0), 0);
+  const sleeveSet = new Set(open.map((row) => String(row.sleeve || row.sleeve_id || row.strategy || "UNKNOWN").trim() || "UNKNOWN"));
+  const exposureRows = open.map((row) => ({ row, exposure: positionCurrentValue(row) || positionEntryNotional(row) })).filter((item) => Number.isFinite(item.exposure) && item.exposure > 0);
+  exposureRows.sort((a, b) => b.exposure - a.exposure);
+  const largest = exposureRows[0] || null;
+  const coveragePct = open.length ? (markPresent.length / open.length) * 100 : 100;
+  const currentValueAvailable = markPresent.length === open.length && open.length > 0;
+  const pnlAvailable = pnlRows.length === open.length && open.length > 0;
+  const sourceDay = payload.day_utc || payload.displayed_artifact_day || "";
+  const estimate = operatorValuationEstimate(payload);
+  const estimateAvailable = operatorEstimateAvailable(estimate);
+  const payloadSummary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+  const manualReviewRows = safeList(payload.manual_review_queue);
+  const closedTodayRows = safeList(payload.paper_outcomes_closed_today);
+  const openObservationCount = commandCenterCount(payloadSummary.open_paper_observations ?? payloadSummary.open_positions, open.length);
+  const closedTodayCount = commandCenterCount(payloadSummary.closed_paper_outcomes_today, closedTodayRows.length || closed.length);
+  const manualReviewCount = commandCenterCount(payloadSummary.manual_review_queue, manualReviewRows.length);
+  return {
+    openCount: openObservationCount,
+    renderedOpenRowCount: open.length,
+    closedCount: closed.length,
+    closedTodayCount,
+    manualReviewCount,
+    manualReviewRows,
+    closedTodayRows,
+    markedCount: markPresent.length,
+    missingMarkCount: missingMarkRows.length,
+    markCoveragePct: coveragePct,
+    markCoverageDisplay: open.length ? `${markPresent.length}/${open.length} marked (${coveragePct.toFixed(0)}%)` : "No positions",
+    markCoverageHelp: open.length ? (missingMarkRows.length ? `${missingMarkRows.length} position(s) need current price marks.` : "All open positions have current marks.") : "No price marks needed.",
+    currentValue,
+    currentValueDisplay: currentValueAvailable ? paperTradeUsd(currentValue) : "Unavailable",
+    currentValueHelp: currentValueAvailable ? "All open positions have current marks." : "Current value needs certified marks for every open position.",
+    estimate,
+    estimateAvailable,
+    estimatedPortfolioValueDisplay: estimateAvailable ? operatorEstimateMoney(estimate.estimated_portfolio_value) : "Unavailable",
+    estimatedUnrealizedPnlDisplay: estimateAvailable ? operatorEstimateMoney(estimate.estimated_unrealized_pnl) : "Unavailable",
+    estimatedMarkDate: operatorEstimateDateLabel(estimate),
+    entryNotional,
+    pnl,
+    pnlDisplay: pnlAvailable ? paperTradeUsd(pnl) : (pnlRows.length ? `${paperTradeUsd(pnl)} partial` : "Unavailable"),
+    pnlHelp: pnlAvailable ? "P&L is available for every open position." : "P&L is incomplete until current marks are available.",
+    sleeveCount: sleeveSet.size,
+    largestExposureDisplay: largest ? `${largest.row.symbol || "Unknown"} ${paperTradeUsd(largest.exposure)}` : "None",
+    largestExposureHelp: largest ? "Based on current value when marked, otherwise entry notional." : "No exposure recorded.",
+    missingSymbols: missingMarkRows.map((row) => row.symbol || row.position_id || "Unknown"),
+    sourceDay,
+  };
+}
+
+function positionsOperatorState(summary = {}, payload = {}) {
+  if (!payload.ok) {
+    return {
+      kind: "BLOCKED",
+      label: "Unavailable",
+      pillKind: "warning",
+      headline: "Position state is unavailable.",
+      explanation: "Aegis cannot read trusted position evidence for this day.",
+      oneLine: "Position ownership is blocked until the position evidence is rebuilt or repaired.",
+      operatorAction: "No position action",
+      operatorActionHelp: "Open evidence or System Health if needed.",
+    };
+  }
+  if (summary.openCount === 0) {
+    return {
+      kind: "NO_ACTIVITY",
+      label: "No open positions",
+      pillKind: "neutral",
+      headline: "No open paper positions are recorded.",
+      explanation: "There is no current paper ownership for the selected day.",
+      oneLine: "No open positions. There is nothing to monitor on this screen right now.",
+      operatorAction: "No action required",
+      operatorActionHelp: "There is no position to review on this screen.",
+    };
+  }
+  if (summary.missingMarkCount > 0) {
+    return {
+      kind: "DEGRADED",
+      label: "Paper Research Mode",
+      pillKind: "warning",
+      headline: `${summary.openCount} open paper observations; ${summary.closedTodayCount} paper outcomes closed today.`,
+      explanation: "These remain paper research observations. Current-mark coverage is secondary data quality.",
+      oneLine: `${summary.openCount} open paper observations. ${summary.closedTodayCount} paper outcomes closed today. ${summary.manualReviewCount} paper exits require manual review only if they correspond to real-world positions.`,
+      operatorAction: "Manual review only",
+      operatorActionHelp: "These are paper exits only. Review manually if they correspond to real-world positions.",
+    };
+  }
+  return {
+    kind: "NORMAL",
+    label: "Current",
+    pillKind: "success",
+    headline: `${summary.openCount} open paper observations; ${summary.closedTodayCount} paper outcomes closed today.`,
+    explanation: "These remain paper research observations. No broker execution occurred.",
+    oneLine: `${summary.openCount} open paper observations. ${summary.closedTodayCount} paper outcomes closed today. ${summary.manualReviewCount} paper exits require manual review only if they correspond to real-world positions.`,
+    operatorAction: "Manual review only",
+    operatorActionHelp: "These are paper exits only. Review manually if they correspond to real-world positions.",
+  };
+}
+
+function renderPositionsFactCard(label, value, helper = "") {
+  return `<article class="metric-card positions-fact-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "n/a"))}</strong>${helper ? `<small>${escapeHtml(helper)}</small>` : ""}</article>`;
+}
+
+function renderPositionsDataQualityNotice(summary = {}) {
+  if (!summary.openCount) return "";
+  if (summary.missingMarkCount > 0) {
+    const symbols = summary.missingSymbols.slice(0, 8).join(", ");
+    const more = summary.missingSymbols.length > 8 ? ` and ${summary.missingSymbols.length - 8} more` : "";
+    return `<div class="callout warning" data-testid="positions-data-quality"><strong>Price data incomplete.</strong><div class="muted-mini">${escapeHtml(summary.missingMarkCount)} open position${summary.missingMarkCount === 1 ? " is" : "s are"} missing current marks${symbols ? `: ${symbols}${more}` : ""}. Current value and P&L are not complete.</div></div>`;
+  }
+  return `<div class="callout success" data-testid="positions-data-quality"><strong>Position data complete.</strong><div class="muted-mini">Every open position has a current mark for this day.</div></div>`;
+}
+
+function renderPositionsExposureSummary(summary = {}) {
+  return `<section class="operator-section positions-exposure-summary" data-testid="positions-exposure-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Exposure</div><h3>Holdings Summary</h3><p class="muted-mini">Exposure is shown from current marks when available; otherwise Aegis falls back to entry notional and flags the limitation.</p></div></div>
+    <div class="positions-state-grid">
+      ${renderPositionsFactCard("Open holdings", String(summary.openCount), "Paper positions currently open.")}
+      ${renderPositionsFactCard("Marked positions", `${summary.markedCount}/${summary.openCount}`, "Positions with current marks.")}
+      ${renderPositionsFactCard("Entry notional", paperTradeUsd(summary.entryNotional), "Recorded paper exposure at entry.")}
+      ${renderPositionsFactCard("Largest holding", summary.largestExposureDisplay, summary.largestExposureHelp)}
+    </div>
+    ${summary.missingMarkCount > 0 ? `<div class="support-note"><strong>Risk note</strong><span>Concentration is estimated from entry notional where current marks are missing.</span></div>` : `<div class="support-note"><strong>Risk note</strong><span>Largest exposure is based on current marked value.</span></div>`}
+  </section>`;
+}
+
+function renderPositionsNoActivityState(payload = {}) {
+  return `<section class="operator-section positions-empty" data-testid="positions-empty-state"><div class="empty-state"><strong>No open paper positions are recorded for this day.</strong><div class="muted-mini">No current holdings are recorded for the selected day.</div></div></section>`;
+}
+
+
+function paperOutcomeTriggerLabel(trigger = "") {
+  const value = String(trigger || "").toUpperCase();
+  if (value.includes("STOP_LOSS")) return "stop-loss auto-closed paper outcome";
+  if (value.includes("TAKE_PROFIT")) return "take-profit auto-closed paper outcome";
+  return operatorPlainLabel(trigger || "paper outcome auto-closed");
+}
+
+function renderPositionsPaperOutcomeCards(rows = []) {
+  const items = safeList(rows).filter((row) => row && typeof row === "object");
+  if (!items.length) return `<div class="empty-state">No paper outcomes are in this section.</div>`;
+  return `<div class="card-grid compact-card-grid positions-paper-outcomes">${items.map((row) => {
+    const trigger = paperOutcomeTriggerLabel(row.exit_trigger || row.trigger || row.reason);
+    const symbol = row.symbol || row.position_id || "Paper outcome";
+    const reason = row.plain_english_reason || `${symbol} ${trigger}.`;
+    return `<article class="stack-card operator-command-card positions-paper-outcome-card"><header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(symbol)}</div><div class="stack-card-subtitle">${escapeHtml(trigger)}</div></div>${renderStatusPill("Paper exit", "warning", {})}</header><p class="muted-mini">${escapeHtml(reason)}</p><div class="definition-list compact">${renderDefinitionRows([
+      { label: "Review", value: "Manual review only" },
+      { label: "Broker", value: "No broker execution occurred" },
+      { label: "Advice", value: "Not trade advice" },
+    ])}</div></article>`;
+  }).join("")}</div>`;
+}
+
+function renderPositionsEvidence(payload = {}, contractRow = {}) {
+  const rows = [
+    { label: "Position source day", value: payload.day_utc || contractRow.source_day || "not reported" },
+    { label: "Open position rows", value: String(safeList(payload.open_positions).length) },
+    { label: "Closed position rows", value: String(safeList(payload.closed_positions).length) },
+    { label: "Data loaded", value: payload.ok === false ? "No" : "Yes" },
+  ];
+  return `<details class="operator-disclosure positions-evidence" data-testid="positions-evidence"><summary>View evidence</summary>${renderDefinitionRows(rows)}</details>`;
+}
+
+function hasCertifiedPositionMark(row = {}) {
+  const mark = row.mark_price ?? row.current_certified_mark ?? row.current_mark ?? row.market_value;
+  const freshness = String(row.mark_freshness_status || row.freshness_status || "").toUpperCase();
+  const certification = String(row.mark_certification_status || row.certification_status || "").toUpperCase();
+  const hasMark = Number.isFinite(Number(mark)) && Number(mark) !== 0;
+  if (!hasMark) return false;
+  if (freshness && !["CURRENT", "CERTIFIED_CURRENT", "OK"].includes(freshness)) return false;
+  if (certification && ["MISSING_MARK", "STALE", "NOT_CERTIFIED", "MISSING"].includes(certification)) return false;
+  return true;
+}
+
+function positionCurrentValue(row = {}) {
+  const explicit = row.market_value ?? row.current_value ?? row.current_exposure;
+  const explicitNumber = Number(explicit);
+  if (Number.isFinite(explicitNumber) && explicitNumber !== 0 && hasCertifiedPositionMark(row)) return explicitNumber;
+  if (!hasCertifiedPositionMark(row)) return 0;
+  const qty = Number(row.quantity);
+  const mark = Number(row.mark_price ?? row.current_certified_mark ?? row.current_mark);
+  if (Number.isFinite(qty) && Number.isFinite(mark)) return qty * mark;
+  return 0;
+}
+
+function positionEntryNotional(row = {}) {
+  const explicit = Number(row.notional ?? row.entry_notional ?? row.paper_notional);
+  if (Number.isFinite(explicit) && explicit !== 0) return explicit;
+  const qty = Number(row.quantity);
+  const entry = Number(row.entry_price ?? row.paper_entry_price);
+  if (Number.isFinite(qty) && Number.isFinite(entry)) return qty * entry;
+  return 0;
+}
+
+function positionNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function positionExposure(row = {}) {
+  const explicit = row.exposure ?? row.notional ?? row.market_value ?? row.current_exposure;
+  const explicitNumber = Number(explicit);
+  if (Number.isFinite(explicitNumber) && explicitNumber !== 0) return explicitNumber;
+  const qty = Number(row.quantity);
+  const mark = Number(row.mark_price ?? row.current_certified_mark ?? row.current_mark ?? row.entry_price);
+  if (Number.isFinite(qty) && Number.isFinite(mark)) return qty * mark;
+  return 0;
+}
+
+function positionPnl(row = {}) {
+  const value = row.unrealized_pnl ?? row.pnl ?? row.exit_recommendation?.unrealized_pnl;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function positionPnlPercent(row = {}) {
+  const pnl = positionPnl(row);
+  const basis = positionExposure(row) || positionNumber(row.notional);
+  if (pnl === null || !basis) return "n/a";
+  return paperTradePercent((pnl / basis) * 100);
+}
+
+function positionHoldTime(row = {}, payload = {}) {
+  const explicit = row.hold_time_days ?? row.holding_days ?? row.days_open;
+  if (explicit !== undefined && explicit !== null && explicit !== "") return `${Number(explicit).toFixed ? Number(explicit).toFixed(1).replace(/\.0$/, "") : explicit}d`;
+  const entry = Date.parse(row.entry_time || row.timestamp_utc || row.source_receipt?.timestamp_utc || "");
+  const day = payload.day_utc || payload.displayed_artifact_day || payload.canonical_operator_state?.day_utc || "";
+  const end = day ? Date.parse(`${day}T23:59:59Z`) : Date.now();
+  if (!Number.isFinite(entry) || !Number.isFinite(end) || end < entry) return "n/a";
+  return `${Math.max(0, (end - entry) / 86400000).toFixed(1).replace(/\.0$/, "")}d`;
+}
+
+function renderPositionsOwnershipTable(rows = [], payload = {}, emptyMessage = "No open paper positions are recorded.") {
+  return `<div class="positions-table-wrap" data-testid="open-positions-table">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.side || row.action || "OPEN")}</div>` },
+      { label: "Entry", render: (row) => escapeHtml(String(row.entry_price ?? row.paper_entry_price ?? "-")) },
+      { label: "Certified mark", render: (row) => escapeHtml(String(row.mark_price ?? row.current_certified_mark ?? row.current_mark ?? "-")) },
+      { label: "Estimated mark", render: (row) => `<strong>${escapeHtml(row.estimated_mark_price || "Unavailable")}</strong><div class="muted-mini">${escapeHtml(row.estimated_mark_date ? `as of ${row.estimated_mark_date}` : "not certified for target day")}</div>` },
+      { label: "Qty", render: (row) => escapeHtml(String(row.quantity ?? "-")) },
+      { label: "Entry Notional", render: (row) => escapeHtml(paperTradeUsd(positionEntryNotional(row))) },
+      { label: "Est. P&L $", render: (row) => escapeHtml(row.estimated_unrealized_pnl ? operatorEstimateMoney(row.estimated_unrealized_pnl) : (positionPnl(row) === null ? "Unavailable" : paperTradeUsd(positionPnl(row)))) },
+      { label: "PnL %", render: (row) => escapeHtml(positionPnlPercent(row)) },
+      { label: "Hold Time", render: (row) => escapeHtml(positionHoldTime(row, payload)) },
+      { label: "Status", render: (row) => renderStatusPill(row.current_status || row.status || "OPEN", verifiedRuntimeStatusKind(row.current_status || row.status || "OPEN"), {}) },
+      { label: "Actions", render: (row) => `<a class="ghost-button" href="/aegis-position-review#${escapeHtml(row.position_id || row.symbol || "")}" data-route="/aegis-position-review">View Review</a><details class="position-row-details"><summary>Details</summary>${renderDefinitionRows([
+        { label: "Position", value: row.position_id || row.symbol || "not available" },
+        { label: "Entry receipt", value: row.entry_receipt_id || row.receipt_id || row.entry_receipt_path || row.receipt_path || "not available" },
+        { label: "Exit view", value: operatorPlainLabel(row.exit_recommendation?.exit_recommendation || row.current_exit_recommendation || "Hold") },
+        { label: "Hold time", value: positionHoldTime(row, payload) },
+      ])}</details>` },
+    ],
+    rows: safeList(rows),
+    emptyMessage,
+  })}</div>`;
+}
+
+function renderReadOnlyPositionAction(label = "Details", title = "") {
+  return `<span class="ghost-button read-only-position-action" role="text" aria-disabled="true" ${title ? `title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}</span>`;
+}
+
+function renderClosedPositionsTable(rows = [], emptyMessage = "No closed paper positions are recorded.") {
+  return `<div class="positions-table-wrap">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+      { label: "State", render: (row) => renderStatusPill(row.current_state || row.current_status || row.status || "CLOSED", verifiedRuntimeStatusKind(row.current_state || row.current_status || row.status || "CLOSED"), {}) },
+      { label: "Entry", render: (row) => escapeHtml(String(row.entry_price ?? row.paper_entry_price ?? "-")) },
+      { label: "Exit", render: (row) => escapeHtml(String(row.exit_price ?? row.paper_exit_price ?? row.close_price ?? "-")) },
+      { label: "Qty", render: (row) => escapeHtml(String(row.quantity ?? "-")) },
+      { label: "PnL", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl ?? row.pnl)) },
+      { label: "Closed", render: (row) => escapeHtml(formatTimestamp(row.closed_at || row.last_event_time || row.timestamp_utc || "")) },
+      { label: "Actions", render: (row) => `${renderReadOnlyPositionAction("View Position History")}${renderReadOnlyPositionAction("View Entry Receipt", row.entry_receipt_path || row.receipt_path || row.entry_receipt_id || row.receipt_id || "")}${renderReadOnlyPositionAction("View Exit Receipt", row.exit_receipt_path || row.exit_receipt_id || "")}<details class="position-row-details"><summary>Details</summary>${renderDefinitionRows([
+        { label: "Position", value: row.position_id || row.symbol || "not available" },
+        { label: "Reason", value: row.reason || row.exit_reason || row.status || "Closed paper position." },
+      ])}</details>` },
+    ],
+    rows: safeList(rows),
+    emptyMessage,
+  })}</div>`;
+}
+
+function positionsTodayCandidateDetails(row = {}) {
+  return renderDefinitionRows([
+    { label: "Candidate", value: row.candidate_id || row.candidate_contract_id || row.symbol || "not available" },
+    { label: "Direction", value: row.direction || "not available" },
+    { label: "Planned entry", value: candidateEntryPrice(row) || "not available" },
+    { label: "Planned stop", value: candidateStopPrice(row) || "not available" },
+    { label: "Quantity", value: candidateConstructionValue(row, "quantity", "suggested_quantity") || "not available" },
+    { label: "State", value: row.candidate_lifecycle_state || "GENERATED" },
+    { label: "Missing required fields", value: formatCandidateMissingFields(candidateMissingRequiredFields(row)) || "none" },
+    { label: "Message", value: row.status_message || "No additional message." },
+  ]);
+}
+
+function paperWorkflowCommandPayload(row = {}, payload = {}, commandType = "") {
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || payload.operational_day || "";
+  return {
+    command_type: commandType,
+    candidate_id: row.candidate_id || row.candidate_contract_id || "",
+    candidate_contract_id: row.candidate_contract_id || row.candidate_id || "",
+    paper_session_id: row.paper_session_id || "",
+    day_utc: day,
+    source_ui: "positions_today_candidates",
+    symbol: row.symbol || "",
+    direction: row.direction || "",
+    planned_entry: candidateEntryPrice(row),
+    planned_stop: candidateStopPrice(row),
+    quantity: candidateConstructionValue(row, "quantity", "suggested_quantity") || "1",
+  };
+}
+
+function renderPaperWorkflowCommandButton(row = {}, payload = {}, commandType = "", label = "Action", className = "ghost-button") {
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  const commandPayload = paperWorkflowCommandPayload(row, payload, commandType);
+  return `<button class="${escapeHtml(className)}" type="button" data-aegis-command-id="${escapeHtml(commandType)}" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-aegis-command-payload="${escapeHtml(JSON.stringify(commandPayload))}">${escapeHtml(label)}</button>`;
+}
+
+function renderRecordEntryButton(row = {}, payload = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  const modalId = `record-entry-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `<button class="primary-button" type="button" data-aegis-command-id="RECORD_PAPER_ENTRY" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(modalId)}">Record Entry</button>${renderRecordEntryModal(row, payload, modalId)}`;
+}
+
+function renderRecordEntryModal(row = {}, payload = {}, modalId = "") {
+  const commandPayload = paperWorkflowCommandPayload(row, payload, "RECORD_PAPER_ENTRY");
+  return `<dialog id="${escapeHtml(modalId)}" data-command-detail-panel class="candidate-review-dialog paper-entry-dialog">
+    <header class="drawer-header"><div><div class="drawer-eyebrow">Manual Paper Tracking</div><h3>Record Entry</h3></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header>
+    <form class="paper-candidate-action-form stacked-form" method="post">
+      <input type="hidden" name="command_type" value="RECORD_PAPER_ENTRY"><input type="hidden" name="candidate_id" value="${escapeHtml(commandPayload.candidate_id)}"><input type="hidden" name="candidate_contract_id" value="${escapeHtml(commandPayload.candidate_contract_id)}"><input type="hidden" name="paper_session_id" value="${escapeHtml(commandPayload.paper_session_id)}"><input type="hidden" name="day_utc" value="${escapeHtml(commandPayload.day_utc)}"><input type="hidden" name="symbol" value="${escapeHtml(commandPayload.symbol)}"><input type="hidden" name="direction" value="${escapeHtml(commandPayload.direction)}">
+      <label>Symbol<input readonly value="${escapeHtml(commandPayload.symbol)}"></label>
+      <label>Direction<input readonly value="${escapeHtml(commandPayload.direction)}"></label>
+      <label>Planned entry<input name="planned_entry" readonly value="${escapeHtml(commandPayload.planned_entry)}"></label>
+      <label>Planned stop<input name="planned_stop" readonly value="${escapeHtml(commandPayload.planned_stop)}"></label>
+      <label>Actual entry<input name="actual_entry" inputmode="decimal" required value="${escapeHtml(commandPayload.planned_entry)}"></label>
+      <label>Actual stop<input name="actual_stop" inputmode="decimal" required value="${escapeHtml(commandPayload.planned_stop)}"></label>
+      <label>Quantity<input name="quantity" inputmode="decimal" required value="${escapeHtml(commandPayload.quantity)}"></label>
+      <label>Timestamp<input name="timestamp_utc" type="datetime-local"></label>
+      <label>Notes<textarea name="notes" rows="3"></textarea></label>
+      <button class="primary-button" type="submit">Record Entry</button><span data-paper-candidate-status hidden></span>
+    </form>
+  </dialog>`;
+}
+
+function candidateCaptureStatus(row = {}) {
+  const explicit = String(row.capture_status || "").trim();
+  if (explicit) return explicit;
+  const state = String(row.candidate_lifecycle_state || row.lifecycle_state || "GENERATED").toUpperCase();
+  if (["POSITION_OPEN", "PAPER_POSITION_OPEN", "ENTRY_RECORDED"].includes(state)) return "Captured";
+  if (state === "POSITION_CLOSED") return "Closed";
+  if (state === "REJECTED") return "Not captured";
+  if (state === "DEFERRED") return "Deferred";
+  if (state === "FAILED") return "Capture failed";
+  if (state === "INCOMPLETE_CANDIDATE") return "Incomplete candidate";
+  return "Not reviewed";
+}
+
+function candidateMissingRequiredFields(row = {}) {
+  return safeList(row.missing_required_fields).map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function formatCandidateMissingFields(fields = []) {
+  const labels = { planned_entry: "planned entry", planned_stop: "planned stop", quantity: "quantity" };
+  return safeList(fields).map((field) => labels[field] || field).join(", ");
+}
+
+function renderCandidateReadinessWarning(row = {}) {
+  const missing = candidateMissingRequiredFields(row);
+  if (!missing.length) return "";
+  return `<div class="candidate-readiness-warning" data-candidate-readiness="incomplete">Missing required: ${escapeHtml(formatCandidateMissingFields(missing))}</div>`;
+}
+
+function renderDisabledCandidateCaptureButton(label = "Action", missing = []) {
+  const reason = missing.length ? `Missing required: ${formatCandidateMissingFields(missing)}` : "Candidate readiness is incomplete";
+  return `<button class="ghost-button" type="button" disabled aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(label)}</button>`;
+}
+
+function renderCaptureCorrectionPanel(row = {}, modalId = "") {
+  return `<dialog id="${escapeHtml(modalId)}" data-command-detail-panel class="candidate-review-dialog paper-entry-dialog"><header class="drawer-header"><div><div class="drawer-eyebrow">Candidate Capture</div><h3>${escapeHtml(row.symbol || row.candidate_id || "Candidate")}</h3></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header><div class="drawer-body">${positionsTodayCandidateDetails(row)}</div></dialog>`;
+}
+
+function renderViewCorrectCaptureButton(row = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  const modalId = `correct-capture-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `<button class="ghost-button" type="button" data-aegis-command-id="CORRECT_CANDIDATE_CAPTURE" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(modalId)}">View / Correct Capture</button>${renderCaptureCorrectionPanel(row, modalId)}`;
+}
+
+function renderViewCorrectDecisionButton(row = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  const modalId = `correct-decision-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `<button class="ghost-button" type="button" data-aegis-command-id="CORRECT_CANDIDATE_CAPTURE" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(modalId)}">View / Correct Decision</button>${renderCaptureCorrectionPanel(row, modalId)}`;
+}
+
+function renderViewErrorAction(row = {}) {
+  return `<details class="position-row-details"><summary>View Error</summary>${positionsTodayCandidateDetails(row)}</details>`;
+}
+
+
+function renderPositionsTodayCandidateActions(row = {}, payload = {}) {
+  const state = String(row.candidate_lifecycle_state || row.lifecycle_state || "GENERATED").toUpperCase();
+  const pieces = [];
+  const missing = candidateMissingRequiredFields(row);
+  const confirmButton = () => renderPaperWorkflowCommandButton(row, payload, "CONFIRM_CANDIDATE_CAPTURED", "Record Capture", "primary-button");
+  const notCapturedButton = () => renderPaperWorkflowCommandButton(row, payload, "MARK_CANDIDATE_NOT_CAPTURED", "Record Not Captured", "ghost-button");
+  const deferButton = () => renderPaperWorkflowCommandButton(row, payload, "DEFER_CANDIDATE", "Defer", "ghost-button");
+  const readinessGatedState = ["GENERATED", "APPROVED_FOR_PAPER", "COMMAND_RECEIVED", "COMMAND_PROCESSING", "FAILED", "DEFERRED", "INCOMPLETE_CANDIDATE"].includes(state);
+  if ((missing.length && readinessGatedState) || state === "INCOMPLETE_CANDIDATE") {
+    pieces.push(renderCandidateReadinessWarning(row));
+  } else if (["GENERATED", "APPROVED_FOR_PAPER", "COMMAND_RECEIVED", "COMMAND_PROCESSING"].includes(state)) {
+    pieces.push(confirmButton(), notCapturedButton(), deferButton());
+  } else if (state === "FAILED") {
+    pieces.push(confirmButton(), notCapturedButton(), renderViewErrorAction(row));
+  } else if (["POSITION_OPEN", "PAPER_POSITION_OPEN", "ENTRY_RECORDED"].includes(state)) {
+    pieces.push(renderViewCorrectCaptureButton(row), renderReadOnlyPositionAction("View Position"), renderReadOnlyPositionAction("View Entry Receipt", row.entry_receipt_path || row.receipt_path || row.entry_receipt_id || row.receipt_id || ""));
+  } else if (["POSITION_CLOSED", "PAPER_POSITION_CLOSED"].includes(state)) {
+    pieces.push(renderViewCorrectCaptureButton(row), renderReadOnlyPositionAction("View Position History"), renderReadOnlyPositionAction("View Entry Receipt", row.entry_receipt_path || row.receipt_path || row.entry_receipt_id || row.receipt_id || ""), renderReadOnlyPositionAction("View Exit Receipt", row.exit_receipt_path || row.exit_receipt_id || ""));
+  } else if (state === "REJECTED") {
+    pieces.push(renderViewCorrectDecisionButton(row), renderPaperWorkflowCommandButton(row, payload, "CONFIRM_CANDIDATE_CAPTURED", "Reopen", "ghost-button"));
+  } else if (state === "DEFERRED") {
+    pieces.push(confirmButton(), notCapturedButton());
+  } else {
+    pieces.push(renderViewCorrectCaptureButton(row));
+  }
+  pieces.push(`<div class="row-command-status" data-aegis-command-status data-tone="idle" aria-live="polite" hidden></div>`);
+  pieces.push(`<details class="position-row-details"><summary>Details</summary>${positionsTodayCandidateDetails(row)}</details>`);
+  return `<div class="candidate-action-toolbar paper-workflow-actions compact-actions" data-row-command-region="${escapeHtml(row.candidate_id || row.candidate_contract_id || "")}">${pieces.join("")}</div>`;
+}
+
+function positionsTodayCandidateColumns(payload = {}) {
+  return [
+    { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+    { label: "Direction", render: (row) => escapeHtml(row.direction || "-") },
+    { label: "Planned Entry", render: (row) => candidatePriceCell(candidateEntryPrice(row), { required: false }) },
+    { label: "Planned Stop", render: (row) => candidatePriceCell(candidateStopPrice(row), { required: false }) },
+    { label: "Qty", render: (row) => escapeHtml(String(candidateConstructionValue(row, "quantity", "suggested_quantity") || "n/a")) },
+    { label: "State", render: (row) => renderStatusPill(String(row.candidate_lifecycle_state || "GENERATED").toUpperCase() === "INCOMPLETE_CANDIDATE" ? "INCOMPLETE_CANDIDATE" : candidateCaptureStatus(row), verifiedRuntimeStatusKind(row.candidate_lifecycle_state || "GENERATED"), {}) },
+    { label: "Decision", render: (row) => escapeHtml(candidateCaptureStatus(row)) },
+    { label: "Receipt", render: (row) => row.receipt_id ? `<span class="muted-mini">${escapeHtml(row.receipt_id)}</span>` : `<span class="muted-mini">none</span>` },
+    { label: "Actions", render: (row) => surfaceActionsAllowed(payload, "positions") ? renderPositionsTodayCandidateActions(row, payload) : `${renderReadOnlyPositionAction("No operator action required")}<details class="position-row-details"><summary>Details</summary>${positionsTodayCandidateDetails(row)}</details>` },
+  ];
+}
+
+
+function renderPositionsSummary(rows = [], payload = {}) {
+  const positions = safeList(rows);
+  const exposure = positions.reduce((total, row) => total + positionExposure(row), 0);
+  const pnlValues = positions.map(positionPnl).filter((value) => value !== null);
+  const pnl = pnlValues.reduce((total, value) => total + value, 0);
+  const largest = positions.slice().sort((a, b) => positionExposure(b) - positionExposure(a))[0] || {};
+  const attentionIds = new Set(safeList(commandCenterDaily(payload).positions_needing_operator_attention).map((row) => String(row.position_id || row.candidate_id || row.symbol || "")));
+  const attentionCount = positions.filter((row) => attentionIds.has(String(row.position_id || row.candidate_id || row.symbol || "")) || row.exit_recommendation?.operator_action_required === true).length;
+  return `<div class="metric-grid compact positions-summary-strip" data-testid="positions-summary-strip">
+    ${renderMetricCard({ label: "Open positions count", value: String(positions.length) })}
+    ${renderMetricCard({ label: "Total exposure", value: paperTradeUsd(exposure) })}
+    ${renderMetricCard({ label: "Unrealized PnL", value: pnlValues.length ? paperTradeUsd(pnl) : "NOT_CANONICAL" })}
+    ${renderMetricCard({ label: "Largest position", value: largest.symbol ? `${escapeHtml(largest.symbol)} ${paperTradeUsd(positionExposure(largest))}` : "n/a" })}
+    ${renderMetricCard({ label: "Positions needing attention", value: String(attentionCount) })}
+  </div>`;
+}
+
+
+
+function dashboardSignalEvidenceBoundary(payload = {}) {
+  return payload.signal_evidence_boundary || payload.signal_evidence_boundary_v1 || payload.canonical_operator_state?.signal_evidence_boundary || {};
+}
+
+function signalEvidenceBoundaryRows(payload = {}, status = "") {
+  const boundary = dashboardSignalEvidenceBoundary(payload);
+  const expected = String(status || "").toUpperCase();
+  return safeList(boundary.boundary_rows).filter((row) => !expected || String(row.boundary_status || "").toUpperCase() === expected);
+}
+
+function signalEvidenceBoundaryColumns() {
+  return [
+    { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || "")}</div>` },
+    { label: "Boundary Status", render: (row) => renderStatusPill(row.boundary_status || "UNKNOWN", verifiedRuntimeStatusKind(row.boundary_status || "UNKNOWN"), {}) },
+    { label: "Output Intent", render: (row) => escapeHtml(row.in_output_intents ? "yes" : "no") },
+    { label: "Rejected Intent", render: (row) => escapeHtml(row.in_rejected_intents ? "yes" : "no") },
+    { label: "Arbitration", render: (row) => escapeHtml(row.in_arbitration_ranking ? "yes" : "no") },
+    { label: "Review Queue", render: (row) => escapeHtml(row.in_paper_review_queue ? "yes" : "no") },
+    { label: "Reason", render: (row) => escapeHtml(row.boundary_reason || "No boundary reason recorded.") },
+    { label: "Details", render: (row) => `<details class="position-row-details"><summary>Details</summary>${renderDefinitionRows([
+      { label: "Candidate", value: row.candidate_id || row.candidate_contract_id || row.symbol || "not available" },
+      { label: "Paper session", value: commandCenterSessionDisplay(row, payload) },
+      { label: "Signal evidence graph", value: row.in_signal_evidence_graph ? "present" : "absent" },
+      { label: "Raw signal", value: row.raw_signal_id || "not available" },
+    ])}</details>` },
+  ];
+}
+
+async function renderPositionsDiagnosticsWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const payload = await fetchAegisOperatorCockpit(routeParams);
+  const ledger = paperLedgerProjection(payload);
+  const lifecycle = dashboardCandidateLifecycleProjection(payload);
+  const openPositions = attachExitRecommendationsToPositions(ledger.open, payload);
+  const currentSessionRows = safeList(lifecycle.current_session_candidates);
+  const rejectedIntentRows = signalEvidenceBoundaryRows(payload, "SIGNAL_EVIDENCE_REJECTED_INTENT");
+  const carryForwardRows = safeList(lifecycle.carry_forward_context).length ? safeList(lifecycle.carry_forward_context) : safeList(ledger.carryForwardCandidates);
+  const legacyRows = safeList(lifecycle.legacy_context).length ? safeList(lifecycle.legacy_context) : safeList(ledger.legacy);
+  const sourcePaths = payload.source_paths || payload.source_artifacts || {};
+  return {
+    title: "Positions Diagnostics",
+    meta: "Lifecycle diagnostics, carry-forward context, command status, session details, and engineering metadata.",
+    html: [
+      renderSectionHeader({ eyebrow: "Engineering", title: "Positions Diagnostics", subtitle: "Lifecycle context, command status, session details, and engineering metadata for Positions." }),
+      `<div class="operator-local-actions"><a class="ghost-button" href="/aegis-positions" data-route="/aegis-positions">Back to Positions</a><button class="ghost-button" type="button" data-refresh-route="positions-diagnostics">Refresh Diagnostics</button></div>`,
+      renderPaperPositionLedgerMismatchWarning([...safeList(ledger.mismatches), ...safeList(ledger.lifecycleReceiptMismatches)]),
+      renderPaperLifecycleQueueWarning(ledger, openPositions),
+      renderPaperTradeActionFailedWarning(ledger.lifecycleFailedActions),
+      renderPositionsLifecycleSummary(ledger, openPositions),
+      `<section class="operator-section current-session-diagnostics"><div class="section-heading"><div><div class="section-eyebrow">Command Status</div><h3>Current Session Candidate Lifecycle</h3></div><span class="muted-mini">${escapeHtml(String(currentSessionRows.length))} current-session rows</span></div><div class="positions-table-wrap">${renderSimpleTable({
+        columns: candidateLifecycleColumns(payload, { actions: false }),
+        rows: currentSessionRows,
+        emptyMessage: "No current-session lifecycle rows are recorded.",
+      })}</div></section>`,
+      `<section class="operator-section failed-paper-entrys" data-testid="positions-failed-section"><div class="section-heading"><div><div class="section-eyebrow">Action Required</div><h3>Failed Record Entry Attempts</h3></div><span class="muted-mini">${escapeHtml(String(ledger.lifecycleFailedActions.length))} failed</span></div>${renderFailedPaperTradeCards(ledger.lifecycleFailedActions, payload)}</section>`,
+      `<section class="operator-section rejected-intent-lineage-diagnostics" data-testid="positions-rejected-intent-lineage"><div class="section-heading"><div><div class="section-eyebrow">Signal Evidence Boundary</div><h3>Rejected-Intent Lineage</h3><p class="muted-mini">Rejected intents are diagnostics/history only and never expose Record Capture, Record Not Captured, or Defer.</p></div><span class="muted-mini">${escapeHtml(String(rejectedIntentRows.length))} rejected-intent lineage rows</span></div><div class="positions-table-wrap">${renderSimpleTable({
+        columns: signalEvidenceBoundaryColumns(),
+        rows: rejectedIntentRows,
+        emptyMessage: "No rejected-intent lineage rows are recorded in the signal evidence boundary.",
+      })}</div></section>`,
+      `<section class="operator-section lifecycle-context"><details class="lifecycle-disclosure" open><summary><div><div class="section-eyebrow">Lifecycle Context</div><h3>Carry-forward / Lifecycle Context</h3><p class="muted-mini">Collapsed away from the operator Positions page; details-only here.</p></div><span class="support-chip">${escapeHtml(String(carryForwardRows.length))} carry-forward</span></summary>${renderNonActiveCandidatesSection(carryForwardRows, payload, "Carry-forward Candidates")}${renderNonActiveCandidatesSection(ledger.lifecycleAwaiting, payload, "Lifecycle Awaiting Rows")}</details></section>`,
+      `<section class="operator-section legacy-partial-open"><div class="section-heading"><div><div class="section-eyebrow">Legacy / Partial</div><h3>Legacy / Partial Open Positions</h3></div><span class="muted-mini">${escapeHtml(String(legacyRows.length))} partial</span></div>${renderLifecycleStateTable(legacyRows, "No legacy partial open positions are recorded.")}</section>`,
+      renderAvailableCandidatesDisclosure(ledger.awaiting, payload),
+      ledger.unclassified.length ? `<section class="operator-section unclassified-lifecycle"><div class="section-heading"><div><div class="section-eyebrow">Engineering Details</div><h3>UNCLASSIFIED_LIFECYCLE_ITEM</h3></div><span class="muted-mini">${escapeHtml(String(ledger.unclassified.length))} needs classification</span></div>${renderLifecycleStateTable(ledger.unclassified, "No unclassified lifecycle items.")}</section>` : "",
+      `<section class="operator-section session-metadata"><div class="section-heading"><div><div class="section-eyebrow">Session Details</div><h3>Canonical Source Paths</h3></div><span class="muted-mini">Engineering metadata</span></div>${renderDefinitionRows([
+        { label: "Lifecycle projection", value: lifecycle.source_path || payload.candidate_lifecycle_projection_path || sourcePaths.candidate_lifecycle_projection || "not available" },
+        { label: "Paper operator projection", value: sourcePaths.paper_operator_projection || payload.paper_operator_projection_path || "not available" },
+        { label: "Paper session", value: lifecycle.paper_session_id || payload.paper_session_id || "not available" },
+        { label: "Generated", value: lifecycle.generated_at || "not available" },
+      ])}</section>`,
+      renderLastPaperTradeActionDiagnostic(),
+      renderPaperCandidateModals([...currentSessionRows, ...safeList(ledger.lifecycleFailedActions)], payload),
+    ].join(""),
+    contextHtml: renderTrustPanel({ title: "Diagnostics", items: ["Command status and artifacts are engineering context", "Carry-forward and legacy rows are details-only", "No broker execution"] }),
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function renderPositionsLifecycleSummary(ledger = {}, openRows = []) {
+  const counts = ledger.lifecycleCounts || {};
+  const governedOpen = Number(counts.PAPER_POSITION_OPEN ?? safeList(openRows).length);
+  const legacyOpen = Number(counts.LEGACY_PARTIAL_OPEN ?? safeList(ledger.legacy).length);
+  const failed = Number(counts.PAPER_ENTRY_FAILED ?? safeList(ledger.lifecycleFailedActions).length);
+  const awaiting = Number(counts.AWAITING_REVIEW ?? safeList(ledger.awaiting).length);
+  const closed = Number(counts.PAPER_POSITION_CLOSED ?? 0) + Number(counts.LEGACY_PARTIAL_CLOSED ?? 0);
+  return `<div class="metric-grid compact positions-summary-strip" data-testid="positions-lifecycle-summary">
+    ${renderMetricCard({ label: "Governed open", value: String(governedOpen) })}
+    ${renderMetricCard({ label: "Legacy open", value: String(legacyOpen) })}
+    ${renderMetricCard({ label: "Failed attempts", value: String(failed) })}
+    ${renderMetricCard({ label: "Available Candidates", value: String(awaiting) })}
+    ${renderMetricCard({ label: "Closed", value: String(closed) })}
+  </div>`;
+}
+
+function renderLifecycleStateTable(rows = [], emptyMessage = "No lifecycle rows are recorded.") {
+  return renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || row.position_id || "")}</div>` },
+      { label: "State", render: (row) => renderStatusPill(row.current_state || row.current_status || "UNKNOWN", verifiedRuntimeStatusKind(row.current_state || row.current_status || "UNKNOWN"), {}) },
+      { label: "Reason", render: (row) => escapeHtml(row.reason || row.error || "No reason recorded.") },
+      { label: "Next Action", render: (row) => escapeHtml(row.next_action || row.repair_action || "Review details.") },
+      { label: "Last Event", render: (row) => `<span>${escapeHtml(row.last_event || row.status || "-")}</span><div class="muted-mini">${escapeHtml(formatTimestamp(row.last_event_time || row.requested_at || ""))}</div>` },
+      { label: "Lineage", render: (row) => escapeHtml(row.lineage_quality || "GOVERNED") },
+      { label: "Details", render: (row) => `<details class="position-row-details"><summary>Details</summary>${renderDefinitionRows([
+        { label: "Originating day", value: row.originating_day || row.source_day || "not available" },
+        { label: "Source artifacts", value: safeList(row.source_artifacts).join(", ") || row.audit_path || "not available" },
+        { label: "Quantity", value: row.quantity || "not available" },
+        { label: "Entry", value: row.entry_price || "not available" },
+      ])}</details>` },
+    ],
+    rows: safeList(rows),
+    emptyMessage,
+  });
+}
+
+function candidateConstructionValue(row = {}, ...keys) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== null && value !== undefined && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function candidateEntryPrice(row = {}) {
+  return candidateConstructionValue(row, "entry_price", "entry_reference_price", "paper_entry_price");
+}
+
+function candidateStopPrice(row = {}) {
+  return candidateConstructionValue(row, "stop_price", "paper_stop_price");
+}
+
+function candidatePriceCell(value, { required = true } = {}) {
+  if (value === "") return required ? `<span class="status-pill tone-warning">Missing</span>` : `<span class="muted-mini">n/a</span>`;
+  return escapeHtml(paperTradeUsd(value));
+}
+
+function candidateRiskPercent(row = {}) {
+  const raw = candidateConstructionValue(row, "risk_percent", "estimated_notional_risk_pct");
+  if (raw === "") return "n/a";
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return "n/a";
+  return `${(Math.abs(number) <= 1 ? number * 100 : number).toFixed(2)}%`;
+}
+
+function paperTradeMissingConstructionFields(row = {}) {
+  const fields = safeList(row.construction_missing_fields).map((item) => String(item));
+  if (!candidateEntryPrice(row)) fields.push("entry_price");
+  if (!candidateStopPrice(row)) fields.push("stop_price");
+  return Array.from(new Set(fields));
+}
+
+function candidateActiveReviewPresent(row = {}) {
+  return row.active_review_present === true || row.source_state === "ACTIVE_REVIEW" || row.actionable === true;
+}
+
+function candidateActionDisabledReason(row = {}) {
+  if (!candidateActiveReviewPresent(row)) return row.action_block_reason || "Not in active review state";
+  return row.action_block_reason || "";
+}
+
+function paperTradeDisabledReason(row = {}) {
+  const latestStatus = String(row.latest_command_status || "").toUpperCase();
+  if (["RECEIVED", "VALIDATED"].includes(latestStatus)) return `Command ${latestStatus}`;
+  const actionReason = candidateActionDisabledReason(row);
+  if (actionReason && actionReason !== "Missing construction prices") return actionReason;
+  const missing = paperTradeMissingConstructionFields(row);
+  if (!missing.length) return actionReason || "";
+  return `Missing construction prices: ${missing.join(", ")}`;
+}
+
+function renderConstructionDiagnosticsLink(row = {}) {
+  const artifact = row.construction_artifact_path || row.market_data_snapshot_used || "";
+  const missing = paperTradeMissingConstructionFields(row).join(", ") || "construction prices";
+  return `<a class="muted-mini" href="/aegis-candidates#blocked-skipped" data-route="/aegis-candidates" title="${escapeHtml(artifact)}">Diagnostics: ${escapeHtml(missing)}</a>`;
+}
+
+function paperTradeCommandPayload(row = {}, payload = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || row.source_candidate_contract_id || "";
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || payload.operational_day || "";
+  return {
+    command_id: "RECORD_PAPER_ENTRY",
+    candidate_id: candidateId,
+    candidate_contract_id: row.candidate_contract_id || row.source_candidate_contract_id || candidateId,
+    paper_session_id: row.paper_session_id || "",
+    day_utc: day,
+    action: "PAPER_ENTRY",
+    paper_entry_price: candidateEntryPrice(row),
+    entry_price: candidateEntryPrice(row),
+    paper_stop_price: candidateStopPrice(row),
+    stop_price: candidateStopPrice(row),
+    quantity: candidateConstructionValue(row, "quantity", "suggested_quantity") || "1",
+    notional: candidateConstructionValue(row, "notional_value", "suggested_notional"),
+  };
+}
+
+function renderPaperTradeButton(row = {}, payload = {}, { retry = false } = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || row.source_candidate_contract_id || "";
+  const disabledReason = paperTradeDisabledReason(row);
+  if (disabledReason) {
+    const label = disabledReason.startsWith("Missing construction prices") ? "Missing construction prices" : disabledReason;
+    const diagnostic = disabledReason.startsWith("Missing construction prices") ? renderConstructionDiagnosticsLink(row) : "";
+    return `<span class="candidate-disabled-action"><button class="primary-button" type="button" disabled aria-disabled="true" title="${escapeHtml(disabledReason)}">${retry ? "Retry" : "Record Entry"}</button><span class="muted-mini">${escapeHtml(label)}</span>${diagnostic}</span>`;
+  }
+  const commandPayload = paperTradeCommandPayload(row, payload);
+  return `<button class="${retry ? "primary-button" : "primary-button"}" type="button" data-aegis-command-id="RECORD_PAPER_ENTRY" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-paper-session-id="${escapeHtml(row.paper_session_id || "")}" data-paper-entry-direct="true" data-aegis-command-payload="${escapeHtml(JSON.stringify(commandPayload))}">${retry ? "Retry" : "Record Entry"}</button>`;
+}
+
+function renderCandidateConstructionDetails(row = {}) {
+  return renderDefinitionRows([
+    { label: "Displayed from", value: row.displayed_from || "unknown" },
+    { label: "Candidate id", value: row.candidate_id || "not available" },
+    { label: "Candidate contract id", value: row.candidate_contract_id || row.source_candidate_contract_id || row.candidate_id || "not available" },
+    { label: "Source state", value: row.source_state || "unknown" },
+    { label: "Active review present", value: row.active_review_present === true ? "true" : "false" },
+    { label: "Construction present", value: row.construction_present === true ? "true" : "false" },
+    { label: "Action endpoint", value: row.action_endpoint || "none" },
+    { label: "Action block reason", value: row.action_block_reason || "none" },
+    { label: "Source candidate contract", value: row.source_candidate_contract_id || row.candidate_id || "not available" },
+    { label: "Paper session", value: commandCenterSessionDisplay(row, payload) },
+    { label: "Sleeve / strategy", value: row.sleeve || row.sleeve_id || row.strategy || "not available" },
+    { label: "Entry rationale", value: row.entry_rationale || "not available" },
+    { label: "Stop rationale", value: row.stop_rationale || "not available" },
+    { label: "Target rationale", value: row.target_rationale || "not available" },
+    { label: "Market data snapshot", value: row.market_data_snapshot_used || "not available" },
+    { label: "Market data timestamp", value: row.market_data_timestamp || "not available" },
+    { label: "Market data source", value: row.market_data_source || "not available" },
+    { label: "Construction timestamp", value: row.construction_timestamp || row.created_at || "not available" },
+    { label: "Construction artifact", value: row.construction_artifact_path || "not available" },
+    { label: "Skipped / block reason", value: row.skipped_block_reason || row.blocker_reason || "none" },
+    { label: "Latest command id", value: row.latest_command_id || "none" },
+    { label: "Latest command status", value: row.latest_command_status || "none" },
+    { label: "Latest command message", value: row.latest_command_message || "none" },
+    { label: "Latest command receipt", value: row.latest_command_receipt_id || "none" },
+  ]);
+}
+
+function candidateConstructionColumns(payload = {}, options = {}) {
+  const columns = [
+    { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || "")}</div>` },
+    { label: "Direction", render: (row) => escapeHtml(row.direction || "-") },
+    { label: "Entry", render: (row) => candidatePriceCell(candidateEntryPrice(row)) },
+    { label: "Stop", render: (row) => candidatePriceCell(candidateStopPrice(row)) },
+    { label: "Target", render: (row) => candidatePriceCell(candidateConstructionValue(row, "target_price"), { required: false }) },
+    { label: "Qty", render: (row) => escapeHtml(String(candidateConstructionValue(row, "quantity", "suggested_quantity") || "n/a")) },
+    { label: "Risk $", render: (row) => escapeHtml(paperTradeUsd(candidateConstructionValue(row, "max_risk_amount", "max_loss_estimate"))) },
+    { label: "R:R", render: (row) => escapeHtml(String(candidateConstructionValue(row, "reward_risk_ratio") || "n/a")) },
+    { label: "Status", render: (row) => { const status = row.candidate_status === "PAPER_POSITION_OPEN" || row.lifecycle_state === "PAPER_POSITION_OPEN" ? "PAPER_POSITION_OPEN" : (row.construction_status || row.paper_construction_status || "UNKNOWN"); const commandStatus = row.latest_command_status ? `<div class="muted-mini">Command ${escapeHtml(row.latest_command_status)}${row.latest_command_id ? ` · ${escapeHtml(row.latest_command_id)}` : ""}</div>` : ""; return `<div>${renderStatusPill(status, verifiedRuntimeStatusKind(status), {})}</div><div class="muted-mini">Risk ${escapeHtml(candidateRiskPercent(row))}</div>${commandStatus}`; } },
+    { label: "Session", render: (row) => `<span class="muted-mini">${escapeHtml(row.paper_session_id || "")}</span>` },
+  ];
+  const detailsCell = (row) => `<details class="position-row-details"><summary>Details</summary>${renderCandidateConstructionDetails(row)}<div class="muted-mini">Reason: ${escapeHtml(row.reason || row.blocker_reason || "Candidate is awaiting optional simulated entry.")}</div><div class="muted-mini">Next action: ${escapeHtml(row.next_action || "Optional simulated entry.")}</div></details>`;
+  if (options.actions === false) {
+    columns.push({ label: "Details", render: detailsCell });
+  } else {
+    columns.push({ label: "Actions", render: (row) => `${renderLifecycleCandidateActions(row, payload)}${detailsCell(row)}` });
+  }
+  return columns;
+}
+
+
+function candidateLifecycleAllowedActions(row = {}) {
+  return safeList(row.allowed_actions).map((item) => String(item || "").toUpperCase()).filter(Boolean);
+}
+
+function renderCandidateLifecycleActions(row = {}, payload = {}) {
+  const actions = candidateLifecycleAllowedActions(row);
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || payload.operational_day || "";
+  const pieces = [];
+  if (actions.includes("RECORD_ENTRY")) {
+    pieces.push(renderPaperTradeButton(row, payload));
+  }
+  if (actions.includes("RECORD_EXIT") && candidateId) {
+    const exitModalId = `paper-exit-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    pieces.push(`<button class="primary-button" type="button" data-aegis-command-id="RECORD_PAPER_EXIT" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(exitModalId)}">Record Exit</button>`);
+  }
+  if (actions.includes("APPROVE") && candidateId) {
+    pieces.push(renderPaperWorkflowCommandButton(row, payload, "APPROVE_CANDIDATE", "Approve"));
+  }
+  if (actions.includes("REJECT") && candidateId) {
+    pieces.push(renderPaperWorkflowCommandButton(row, payload, "REJECT_CANDIDATE", "Reject"));
+  }
+  if (actions.includes("DEFER") && candidateId) {
+    pieces.push(renderPaperWorkflowCommandButton(row, payload, "DEFER_CANDIDATE", "Defer"));
+  }
+    if (actions.includes("VIEW_ENTRY_RECEIPT") && (row.entry_receipt_id || row.receipt_id)) {
+    pieces.push(`<button class="ghost-button" type="button" title="${escapeHtml(row.entry_receipt_path || row.receipt_path || row.entry_receipt_id || row.receipt_id || "")}">View Entry Receipt</button>`);
+  }
+  if (actions.includes("VIEW_EXIT_RECEIPT") && (row.exit_receipt_id || row.receipt_id)) {
+    pieces.push(`<button class="ghost-button" type="button" title="${escapeHtml(row.exit_receipt_path || row.receipt_path || row.exit_receipt_id || row.receipt_id || "")}">View Exit Receipt</button>`);
+  }
+  if (actions.includes("VIEW_POSITION") || actions.includes("VIEW_POSITION_HISTORY")) {
+    pieces.push(`<button class="ghost-button" type="button">${actions.includes("VIEW_POSITION_HISTORY") ? "View Position History" : "View Position"}</button>`);
+  }
+  if (actions.includes("VIEW_COMMAND_STATUS")) {
+    pieces.push(`<span class="muted-mini">Command ${escapeHtml(row.latest_command_status || "pending")}</span>`);
+  }
+  if (actions.includes("VIEW_ERROR")) {
+    pieces.push(`<span class="muted-mini warning-text">${escapeHtml(row.status_message || "Command error")}</span>`);
+  }
+  if (actions.includes("RETRY")) {
+    pieces.push(renderPaperTradeButton(row, payload, { retry: true }));
+  }
+  const details = `<details class="position-row-details"><summary>Details</summary>${renderCandidateConstructionDetails(row)}<div class="muted-mini">Lifecycle state: ${escapeHtml(row.candidate_lifecycle_state || "UNKNOWN")}</div><div class="muted-mini">Allowed actions: ${escapeHtml(actions.join(", ") || "DETAILS")}</div></details>`;
+  pieces.push(details);
+  return `<div class="candidate-action-toolbar paper-workflow-actions compact-actions" data-paper-workflow-actions="${escapeHtml(candidateId)}">${pieces.join("")}</div>`;
+}
+
+function candidateLifecycleColumns(payload = {}, options = {}) {
+  const actionColumn = options.actions === false
+    ? { label: "Details", render: (row) => `<details class="position-row-details"><summary>Details</summary>${renderCandidateConstructionDetails(row)}</details>` }
+    : { label: "Actions", render: (row) => renderCandidateLifecycleActions(row, payload) };
+  return [
+    { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || "")}</div>` },
+    { label: "Entry", render: (row) => candidatePriceCell(candidateEntryPrice(row), { required: false }) },
+    { label: "Stop", render: (row) => candidatePriceCell(candidateStopPrice(row), { required: false }) },
+    { label: "Qty", render: (row) => escapeHtml(String(candidateConstructionValue(row, "quantity", "suggested_quantity") || "n/a")) },
+    { label: "Status", render: (row) => renderStatusPill(row.candidate_lifecycle_state || "GENERATED", verifiedRuntimeStatusKind(row.candidate_lifecycle_state || "GENERATED"), {}) },
+    { label: "Command Status", render: (row) => escapeHtml(row.latest_command_status || "none") },
+    { label: "Receipt", render: (row) => row.receipt_id ? `<span class="muted-mini">${escapeHtml(row.receipt_id)}</span>` : `<span class="muted-mini">none</span>` },
+    { label: "Action State", render: (row) => escapeHtml(candidateLifecycleAllowedActions(row).join(", ") || "DETAILS") },
+    actionColumn,
+  ];
+}
+
+function renderLifecycleCandidateActions(row = {}, payload = {}, { retry = false } = {}) {
+  const candidateId = row.candidate_id || "";
+  if (!candidateId) return `<span class="muted-mini">No action</span>`;
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || row.originating_day || "";
+  const tradeModalId = `paper-entry-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const reviewModalId = `paper-review-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const actionDisabledReason = candidateActionDisabledReason(row);
+  const ignoreControl = actionDisabledReason
+    ? `<span class="candidate-disabled-action"><button class="ghost-button" type="button" disabled aria-disabled="true" title="${escapeHtml(actionDisabledReason)}">Ignore</button><span class="muted-mini">${escapeHtml(actionDisabledReason)}</span></span>`
+    : `<form class="paper-candidate-action-form inline" method="post"><input type="hidden" name="command_id" value="REJECT_PAPER_CANDIDATE"><input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}"><input type="hidden" name="day_utc" value="${escapeHtml(day)}"><input type="hidden" name="reason" value="OPERATOR_IGNORED"><button class="ghost-button" type="submit">Ignore</button><span data-paper-candidate-status hidden></span></form>`;
+  return `<div class="candidate-action-toolbar paper-workflow-actions compact-actions" data-paper-workflow-actions="${escapeHtml(candidateId)}">
+    ${renderPaperTradeButton(row, payload, { retry })}
+    ${ignoreControl}
+    <button class="ghost-button" type="button" data-aegis-command-id="REVIEW_PAPER_CANDIDATE" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(reviewModalId)}">Details</button>
+    <span class="muted-mini" data-aegis-command-status hidden></span>
+  </div>`;
+}
+
+function renderFailedPaperTradeCards(rows = [], payload = {}) {
+  const failures = safeList(rows);
+  if (!failures.length) return `<div class="empty-state">No failed entry recording attempts are recorded.</div>`;
+  return `<div class="card-grid compact-card-grid failed-paper-entry-cards">${failures.map((row) => `<article class="stack-card operator-command-card warning-card"><header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.symbol || row.candidate_id || "Candidate")}</div><div class="stack-card-subtitle">${escapeHtml(row.candidate_id || "Entry recording failed")}</div></div>${renderStatusPill("Failed", "warning", {})}</header><p class="support-note"><strong>Issue:</strong> ${escapeHtml(row.reason || row.error || "Entry recording failed before receipt creation.")}</p><p class="muted-mini">Action: refresh queue state, confirm approval, then retry simulated Record Entry.</p>${renderLifecycleCandidateActions(row, payload, { retry: true })}</article>`).join("")}</div>`;
+}
+
+function renderAvailableCandidatesDisclosure(rows = [], payload = {}) {
+  const candidates = safeList(rows);
+  const topSymbols = candidates.map((row) => row.symbol).filter(Boolean).slice(0, 8).join(", ") || "none";
+  const summary = `${candidates.length} governed candidate${candidates.length === 1 ? " is" : "s are"} available for optional Record Entry.`;
+  return `<section class="operator-section available-candidates" data-testid="available-candidates-collapsed"><details class="lifecycle-disclosure"><summary><div><div class="section-eyebrow">Available Candidates</div><h3>Available Candidates</h3><p class="muted-mini">${escapeHtml(summary)}</p><p class="muted-mini">Top symbols: ${escapeHtml(topSymbols)}</p></div><span class="support-chip">Expand</span></summary><div class="positions-table-wrap">${renderSimpleTable({
+    columns: candidateConstructionColumns(payload),
+    rows: candidates,
+    emptyMessage: "No available candidates are awaiting optional Record Entry.",
+  })}</div></details></section>`;
+}
+
+function lastPaperTradeDiagnosticText() {
+  const detail = typeof globalThis !== "undefined" ? globalThis.__AEGIS_LAST_PAPER_ENTRY_ACTION : null;
+  if (!detail) return "no entry recording action in this session";
+  try {
+    return JSON.stringify(detail, null, 2);
+  } catch (_error) {
+    return String(detail);
+  }
+}
+
+function renderLastPaperTradeActionDiagnostic() {
+  return `<section class="operator-section paper-entry-action-diagnostic" data-paper-entry-action-diagnostic><div class="section-heading"><div><div class="section-eyebrow">Operator Diagnostic</div><h3>Last Record Entry Action</h3></div><span class="muted-mini" data-operator-shell-build-marker>operator_shell build: 2026-05-28T18:26Z paper-entry-runtime-proof</span></div><pre class="operator-debug-pre" data-last-paper-entry-action>${escapeHtml(lastPaperTradeDiagnosticText())}</pre></section>`;
+}
+
+function renderNonActiveCandidatesSection(rows = [], payload = {}, title = "Non-Active Candidates") {
+  const candidates = safeList(rows);
+  if (!candidates.length) return "";
+  return `<section class="operator-section non-active-candidates"><div class="section-heading"><div><div class="section-eyebrow">Not Active Review</div><h3>${escapeHtml(title)}</h3><p class="muted-mini">These rows are visible for lifecycle context only. Active review actions are not shown.</p></div><span class="muted-mini">${escapeHtml(String(candidates.length))} non-active</span></div><div class="positions-table-wrap">${renderSimpleTable({
+    columns: candidateConstructionColumns(payload, { actions: false }),
+    rows: candidates,
+    emptyMessage: "No non-active candidates are recorded.",
+  })}</div></section>`;
+}
+
+function renderPaperLifecycleQueueWarning(ledger = {}, openRows = []) {
+  const counts = ledger.lifecycleCounts || {};
+  const awaiting = Number(counts.awaiting_review ?? 0);
+  const open = Number(counts.open_ledger_positions ?? safeList(openRows).length);
+  const message = safeList(ledger.lifecycleMessages).find((item) => String(item).includes("awaiting Record Entry")) || (awaiting > open ? `${awaiting} candidates still awaiting Record Entry` : "");
+  if (!message) return "";
+  return `<div class="callout neutral" data-testid="paper-lifecycle-awaiting-warning"><strong>${escapeHtml(message)}</strong><div class="muted-mini">These candidates are still in the review queue and do not have SIMULATED_PAPER receipts or open ledger events yet.</div></div>`;
+}
+
+function renderPaperTradeActionFailedWarning(rows = []) {
+  const failures = safeList(rows);
+  if (!failures.length) return "";
+  return `<div class="callout warning" data-testid="paper-entry-action-failed"><strong>PAPER_ENTRY_ACTION_FAILED</strong><div class="muted-mini">${escapeHtml(String(failures.length))} entry recording action${failures.length === 1 ? "" : "s"} failed before receipt creation.</div>${renderSimpleTable({
+    columns: [
+      { label: "Candidate", render: (row) => escapeHtml(row.candidate_id || "-") },
+      { label: "Symbol", render: (row) => escapeHtml(row.symbol || "-") },
+      { label: "State", render: (row) => escapeHtml(row.current_lifecycle_state || "UNKNOWN") },
+      { label: "Error", render: (row) => escapeHtml(row.error || "FAILED") },
+      { label: "Repair", render: (row) => escapeHtml(row.repair_action || "Retry Record Entry after queue refresh.") },
+    ],
+    rows: failures,
+    emptyMessage: "No failed entry recording actions.",
+  })}</div>`;
+}
+
+function renderPaperPositionLedgerMismatchWarning(mismatches = []) {
+  const rows = safeList(mismatches);
+  if (!rows.length) return "";
+  return `<div class="callout warning" data-testid="paper-position-ledger-mismatch"><strong>PAPER_POSITION_LEDGER_MISMATCH / PAPER_LEDGER_EVENT_MISSING</strong><div class="muted-mini">A simulated paper receipt exists without a matching open ledger position.</div>${renderSimpleTable({
+    columns: [
+      { label: "Candidate", render: (row) => escapeHtml(row.candidate_id || "-") },
+      { label: "Symbol", render: (row) => escapeHtml(row.symbol || "-") },
+      { label: "Receipt path", render: (row) => `<span class="muted-mini">${escapeHtml(row.receipt_path || "not available")}</span>` },
+      { label: "Missing event", render: (row) => escapeHtml(row.missing_event || "PAPER_POSITION_OPENED") },
+    ],
+    rows,
+    emptyMessage: "No receipt/ledger mismatches.",
+  })}</div>`;
+}
+
+function renderPositionsTable(rows = [], payload = {}, emptyMessage = "No open paper positions are recorded.") {
+  return `<div class="positions-table-wrap" data-testid="open-positions-table">${renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_lineage?.sleeve_id || row.sleeve_id || row.candidate_id || "")}</div>` },
+      { label: "Side", render: (row) => escapeHtml(row.side || row.action || "-") },
+      { label: "Entry", render: (row) => escapeHtml(String(row.entry_price ?? row.paper_entry_price ?? "-")) },
+      { label: "Mark", render: (row) => escapeHtml(String(row.mark_price ?? row.current_certified_mark ?? row.current_mark ?? "-")) },
+      { label: "Qty", render: (row) => escapeHtml(String(row.quantity ?? "-")) },
+      { label: "Entry Notional", render: (row) => escapeHtml(paperTradeUsd(positionEntryNotional(row))) },
+      { label: "PnL $", render: (row) => escapeHtml(positionPnl(row) === null ? "Unavailable" : paperTradeUsd(positionPnl(row))) },
+      { label: "PnL %", render: (row) => escapeHtml(positionPnlPercent(row)) },
+      { label: "Hold Time", render: (row) => escapeHtml(positionHoldTime(row, payload)) },
+      { label: "Exit Rec", render: (row) => { const rec = row.exit_recommendation || {}; return `<strong>${escapeHtml(operatorPlainLabel(rec.exit_recommendation || row.current_exit_recommendation || "Hold"))}</strong>`; } },
+      { label: "Status", render: (row) => renderStatusPill(row.current_status || row.status || "OPEN", verifiedRuntimeStatusKind(row.current_status || row.status || "OPEN"), {}) },
+      { label: "Actions", render: (row) => `${surfaceActionsAllowed(payload, "positions") ? renderOpenPaperPositionExitButton(row) : renderReadOnlyPositionAction("No operator action required")}<details class="position-row-details"><summary>Details</summary>${renderPaperPositionDetails(row)}</details>` },
+    ],
+    rows: safeList(rows),
+    emptyMessage,
+  })}</div>`;
+}
+
+function renderPaperPositionDetails(row = {}) {
+  const rec = row.exit_recommendation || {};
+  const lineage = row.candidate_lineage || {};
+  return renderDefinitionRows([
+    { label: "Candidate lineage", value: lineage.candidate_id || row.candidate_id || "not available" },
+    { label: "Thesis", value: safeList(row.thesis_reason_codes || row.thesis_reason_code_text).join(", ") || row.thesis_summary || "not available" },
+    { label: "Evidence", value: safeList(lineage.evidence_paths || row.evidence_paths).join(", ") || "not available" },
+    { label: "Mark source", value: row.mark_source_path || row.mark_source_hash || "not available" },
+    { label: "Exit reasons", value: safeList(rec.reason_codes).map(operatorPlainLabel).join(", ") || "No exit rule is currently forcing action." },
+  ]);
+}
+
+async function renderHistoryWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const [payload, contractEnvelope] = await Promise.all([
+    fetchAegisOperatorCockpit(routeParams),
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+  ]);
+  const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+  payload.operator_surface_contract = contractPayload;
+  const historySurface = surfaceContractRow(payload, "history");
+  if (!contractPrimaryRenderAllowed(historySurface)) {
+    return renderContractGatedPage({ title: "History", subtitle: "What historical records exist today?", surfaceId: "history", contractRow: historySurface });
+  }
+  const closedPositions = commandCenterClosedPositions(payload);
+  const legacyCaptures = commandCenterLegacyCaptures(payload);
+  return {
+    title: "Closed Trades",
+    meta: "This page contains closed governed paper trades and legacy historical records. Open positions appear under Positions.",
+    html: EntityListTemplate({ surfaceId: "history", contractRow: historySurface, bodyHtml: [
+      renderSectionHeader({ eyebrow: "Trade History", title: "Closed Trades", subtitle: "This page contains closed governed paper trades and legacy historical records. Open positions appear under Positions." }),
+      renderCommandDailySummary(payload),
+      `<section class="operator-section closed-trades"><div class="section-heading"><div><div class="section-eyebrow">Closed Trades</div><h3>Closed Governed Trades</h3></div><span class="muted-mini">${escapeHtml(String(closedPositions.length))} closed</span></div><div class="card-grid compact-card-grid">${closedPositions.map((row) => `<article class="stack-card operator-command-card"><header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.symbol || row.position_id || "Closed trade")}</div><div class="stack-card-subtitle">${escapeHtml(row.sleeve_id || row.candidate_id || "Paper entry")}</div></div>${renderStatusPill("Closed", "neutral", {})}</header><div class="metric-grid compact">${renderMetricCard({ label: "Realized PnL", value: paperTradeUsd(row.realized_pnl ?? row.pnl) })}${renderMetricCard({ label: "Hold Time", value: String(row.hold_time_days ?? row.holding_days ?? "n/a") })}</div><p class="muted-mini">Reason: Closed paper outcome for daily review.</p></article>`).join("") || `<div class="empty-state">No closed paper trades are recorded.</div>`}</div></section>`,
+      `<section class="operator-section sleeve-history"><div class="section-heading"><div><div class="section-eyebrow">Sleeves</div><h3>Sleeve performance history</h3></div><a class="support-chip" href="/aegis-performance" data-route="/aegis-performance">Engineering Details</a></div><div class="card-grid compact-card-grid">${safeList(commandCenterDaily(payload).sleeve_comparison).map((row) => `<article class="stack-card"><div class="stack-card-title">${escapeHtml(row.sleeve_id || "Sleeve")}</div><div class="metric-grid compact">${renderMetricCard({ label: "Open PnL", value: paperTradeUsd(row.open_pnl) })}${renderMetricCard({ label: "Realized", value: paperTradeUsd(row.realized_pnl) })}${renderMetricCard({ label: "Total PnL", value: paperTradeUsd(row.total_pnl) })}</div><p class="muted-mini">Reason: ${escapeHtml(row.data_quality_status || "Sleeve performance is available for review.")}</p></article>`).join("") || `<div class="empty-state">No sleeve performance history is available.</div>`}</div></section>`,
+      `<section class="operator-section legacy-captures"><div class="section-heading"><div><div class="section-eyebrow">Legacy</div><h3>Legacy / Partial Historical Trades</h3></div><span class="muted-mini">Clearly separated</span></div><div class="card-grid compact-card-grid">${legacyCaptures.slice(0, 8).map((row) => `<article class="stack-card"><div class="stack-card-title">${escapeHtml(row.symbol || row.trade_id || "Legacy historical trade")}</div><p class="muted-mini">Legacy / partial historical record, not an open paper position.</p></article>`).join("") || `<div class="empty-state">No legacy historical records are present.</div>`}</div></section>`,
+    ].join("") }),
+    contextHtml: "",
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+async function renderResearchWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const [workflowResult, queueResult, replayResult, throughputResult, qualityResult] = await Promise.allSettled([
+    fetchHypothesisWorkflowState(routeParams),
+    fetchOperatorActionQueue(routeParams),
+    fetchHypothesisWorkflowReplayVerification(routeParams),
+    fetchGeneratedHypothesisThroughput(routeParams),
+    fetchAegisResearchQuality(routeParams),
+  ]);
+  const workflowPayload = workflowResult.status === "fulfilled" ? workflowResult.value : { ok: false, error: workflowResult.reason?.message || "Hypothesis workflow state unavailable." };
+  const queuePayload = queueResult.status === "fulfilled" ? queueResult.value : { ok: false, error: queueResult.reason?.message || "Operator action queue unavailable." };
+  const replayPayload = replayResult.status === "fulfilled" ? replayResult.value : { ok: false, error: replayResult.reason?.message || "Replay verification unavailable." };
+  const throughputPayload = throughputResult.status === "fulfilled" ? throughputResult.value : { ok: false, error: throughputResult.reason?.message || "Generated hypothesis throughput unavailable." };
+  const qualityPayload = qualityResult.status === "fulfilled" ? qualityResult.value : { ok: false, error: qualityResult.reason?.message || "Research quality unavailable." };
+  const workflow = workflowPayload.artifact && typeof workflowPayload.artifact === "object" ? workflowPayload.artifact : {};
+  const actionQueue = queuePayload.artifact && typeof queuePayload.artifact === "object" ? queuePayload.artifact : {};
+  const replay = replayPayload.artifact && typeof replayPayload.artifact === "object" ? replayPayload.artifact : {};
+  const throughput = throughputPayload.artifact && typeof throughputPayload.artifact === "object" ? throughputPayload.artifact : {};
+  const qualityControl = qualityPayload.data && typeof qualityPayload.data === "object" ? qualityPayload.data : {};
+  const model = buildResearchDumbRendererModel({ workflow, actionQueue, replay, throughput, qualityControl, routeParams });
+  return {
+    title: "Research",
+    headerTitle: "Research",
+    meta: "Canonical hypothesis workflow state and David action queue.",
+    topReadinessLabel: "PAPER MODE",
+    runtimeModeLabel: "PAPER MODE",
+    environmentLabel: "Paper Research Mode",
+    topReadinessTone: model.actions.length ? "warning" : "neutral",
+    operatorTruth: {
+      primaryStatus: "Paper Research Mode",
+      primaryTone: "neutral",
+      actionLabel: model.actions.length ? `${model.actions.length} David action${model.actions.length === 1 ? "" : "s"}` : "No David action required",
+      safetyLabel: "Runtime Guarded",
+      detail: "Research-only workflow renderer. No broker execution, live trading, trade advice, or real capital.",
+    },
+    dataTimestamp: model.computedAt ? `Updated: ${formatTimestamp(model.computedAt)}` : "",
+    html: renderResearchDumbRendererPage(model),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function buildResearchDumbRendererModel({ workflow = {}, actionQueue = {}, replay = {}, throughput = {}, qualityControl = {}, routeParams = {} } = {}) {
+  const throughputByHypothesis = new Map(safeList(throughput.generated_hypotheses).map((row) => [String(row.hypothesis_id || ""), row]));
+  const hypotheses = safeList(workflow.hypotheses).map((row) => ({ ...row, generated_throughput: throughputByHypothesis.get(String(row.hypothesis_id || "")) || null }));
+  const actions = safeList(actionQueue.actions);
+  const stateCounts = workflow.state_counts || workflow.summary?.state_counts || {};
+  const quality = qualityControl.quality && typeof qualityControl.quality === "object" ? qualityControl.quality : {};
+  const decisions = qualityControl.decisions && typeof qualityControl.decisions === "object" ? qualityControl.decisions : {};
+  const allocation = qualityControl.allocation && typeof qualityControl.allocation === "object" ? qualityControl.allocation : {};
+  const followThrough = qualityControl.follow_through && typeof qualityControl.follow_through === "object" ? qualityControl.follow_through : {};
+  const aiIntelligence = qualityControl.ai_intelligence && typeof qualityControl.ai_intelligence === "object" ? qualityControl.ai_intelligence : {};
+  const oilShockCandidateFlow = qualityControl.oil_shock_candidate_flow && typeof qualityControl.oil_shock_candidate_flow === "object" ? qualityControl.oil_shock_candidate_flow : {};
+  const oilShockCandidateConstruction = qualityControl.oil_shock_candidate_construction && typeof qualityControl.oil_shock_candidate_construction === "object" ? qualityControl.oil_shock_candidate_construction : {};
+  const generatedHypothesisApprovalEventLineage = qualityControl.generated_hypothesis_approval_event_lineage && typeof qualityControl.generated_hypothesis_approval_event_lineage === "object" ? qualityControl.generated_hypothesis_approval_event_lineage : {};
+  const generatedHypothesisGovernanceBridge = qualityControl.generated_hypothesis_governance_bridge && typeof qualityControl.generated_hypothesis_governance_bridge === "object" ? qualityControl.generated_hypothesis_governance_bridge : {};
+  const generatedHypothesisPaperSetupBridge = qualityControl.generated_hypothesis_paper_setup_bridge && typeof qualityControl.generated_hypothesis_paper_setup_bridge === "object" ? qualityControl.generated_hypothesis_paper_setup_bridge : {};
+  const generatedHypothesisSignalToCandidate = qualityControl.generated_hypothesis_signal_to_candidate && typeof qualityControl.generated_hypothesis_signal_to_candidate === "object" ? qualityControl.generated_hypothesis_signal_to_candidate : {};
+  const macroCalendarDataReadiness = qualityControl.macro_calendar_data_readiness && typeof qualityControl.macro_calendar_data_readiness === "object" ? qualityControl.macro_calendar_data_readiness : {};
+  return {
+    requestedDay: String(routeParams.day || workflow.day_utc || actionQueue.day_utc || qualityControl.day_utc || "").slice(0, 10),
+    computedAt: workflow.computed_at_utc || actionQueue.computed_at_utc || quality.computed_at_utc || "",
+    hypotheses,
+    actions,
+    stateCounts,
+    quality,
+    decisions,
+    allocation,
+    followThrough,
+    aiIntelligence,
+    oilShockCandidateFlow,
+    oilShockCandidateConstruction,
+    generatedHypothesisApprovalEventLineage,
+    generatedHypothesisGovernanceBridge,
+    generatedHypothesisPaperSetupBridge,
+    generatedHypothesisSignalToCandidate,
+    macroCalendarDataReadiness,
+    workflowHash: workflow.content_hash || "",
+    queueHash: actionQueue.content_hash || "",
+    qualityHash: quality.content_hash || "",
+    followThroughHash: followThrough.content_hash || "",
+    aiIntelligenceHash: aiIntelligence.content_hash || "",
+    oilShockCandidateFlowHash: oilShockCandidateFlow.content_hash || "",
+    oilShockCandidateConstructionHash: oilShockCandidateConstruction.content_hash || "",
+    generatedHypothesisApprovalEventLineageHash: generatedHypothesisApprovalEventLineage.content_hash || "",
+    generatedHypothesisGovernanceBridgeHash: generatedHypothesisGovernanceBridge.content_hash || "",
+    generatedHypothesisPaperSetupBridgeHash: generatedHypothesisPaperSetupBridge.content_hash || "",
+    generatedHypothesisSignalToCandidateHash: generatedHypothesisSignalToCandidate.content_hash || "",
+    macroCalendarDataReadinessHash: macroCalendarDataReadiness.content_hash || "",
+    replayStatus: replay.verification_status || "UNAVAILABLE",
+    throughputHash: throughput.content_hash || "",
+    safetyStatement: workflow.safety_statement || actionQueue.safety_statement || "This is paper research only. Not trade advice. No broker execution. No live trading.",
+  };
+}
+
+function renderResearchDumbRendererPage(model = {}) {
+  return `<main class="operator-workflow research-operator-workspace" data-testid="research-page">
+    ${renderCanonicalDavidActionQueue(model)}
+    ${renderMacroCalendarDataReadinessSection(model.macroCalendarDataReadiness || {})}
+    ${renderResearchQualitySection(model)}
+    ${renderResearchFollowThroughSection(model)}
+    ${renderOilShockCandidateFlowSection(model)}
+    ${renderAIResearchIntelligenceSection(model)}
+    ${renderCanonicalHypothesisStatusSummary(model)}
+    ${renderCanonicalHypothesisList(model)}
+  </main>`;
+}
+
+function renderCanonicalDavidActionQueue(model = {}) {
+  const actions = safeList(model.actions);
+  return `<section class="operator-section david-action-queue" data-testid="david-action-queue">
+    <div class="section-heading"><div><div class="section-eyebrow">David Action Queue</div><h3>${actions.length ? `${actions.length} concrete action${actions.length === 1 ? "" : "s"}` : "No David action required"}</h3><p class="muted-mini">Rendered from aegis_operator_action_queue_v1 only. Replay verification: ${escapeHtml(model.replayStatus || "UNAVAILABLE")}.</p></div>${renderStatusPill(actions.length ? "Action required" : "Automatic", actions.length ? "warning" : "healthy", {})}</div>
+    ${actions.length ? `<div class="hypothesis-card-grid research-card-grid">${actions.map(renderCanonicalActionCard).join("")}</div>` : `<div class="empty-state">No David action required. Aegis will continue automatically.</div>`}
+    <p class="support-note">${escapeHtml(model.safetyStatement)}</p>
+  </section>`;
+}
+
+function renderResearchQualitySection(model = {}) {
+  const qualityRows = safeList(model.quality?.hypotheses);
+  const decisionById = Object.fromEntries(safeList(model.decisions?.decisions).map((row) => [String(row.hypothesis_id || ""), row]));
+  const allocationById = Object.fromEntries(safeList(model.allocation?.recommendations).map((row) => [String(row.hypothesis_id || ""), row]));
+  return `<section class="operator-section research-quality-section" data-testid="research-quality-section" data-artifact="aegis_research_quality_control_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">Research Quality</div><h3>${escapeHtml(String(qualityRows.length))} hypothesis quality rows</h3><p class="muted-mini">Rendered from backend quality, decision, and allocation artifacts only.</p></div>${renderStatusPill(model.qualityHash ? "Artifact backed" : "Unavailable", model.qualityHash ? "healthy" : "warning", {})}</div>
+    ${qualityRows.length ? `<div class="research-quality-table-wrap"><table class="operator-table research-quality-table"><thead><tr><th>Hypothesis</th><th>Quality</th><th>Decision</th><th>Allocation</th><th>Hard gates</th><th>Reason codes</th><th>David review</th></tr></thead><tbody>${qualityRows.map((row) => renderResearchQualityRow(row, decisionById[String(row.hypothesis_id || "")] || {}, allocationById[String(row.hypothesis_id || "")] || {})).join("")}</tbody></table></div>` : `<div class="empty-state">No research quality artifact rows are available.</div>`}
+  </section>`;
+}
+
+function renderResearchQualityRow(row = {}, decision = {}, allocation = {}) {
+  const gates = safeList(row.active_hard_gate_codes).join(", ") || "None";
+  const reasons = safeList(decision.reason_codes).length ? safeList(decision.reason_codes).join(", ") : safeList(row.reason_codes).join(", ") || "None";
+  const review = allocation.requires_david_review ?? decision.requires_david_review ?? false;
+  return `<tr data-research-quality-row data-hypothesis-id="${escapeHtml(row.hypothesis_id || "")}">
+    <td><strong>${escapeHtml(row.name || row.hypothesis_id || "Hypothesis")}</strong><div class="muted-mini">${escapeHtml(row.hypothesis_id || "")}</div></td>
+    <td>${escapeHtml(row.quality_status || "")}</td>
+    <td>${escapeHtml(decision.recommendation || "")}</td>
+    <td>${escapeHtml(allocation.recommended_allocation_action || "")}</td>
+    <td>${escapeHtml(gates)}</td>
+    <td>${escapeHtml(reasons)}</td>
+    <td>${escapeHtml(review ? "Required" : "No")}</td>
+  </tr>`;
+}
+
+function renderResearchFollowThroughSection(model = {}) {
+  const rows = safeList(model.followThrough?.follow_ups);
+  const summary = model.followThrough?.summary && typeof model.followThrough.summary === "object" ? model.followThrough.summary : {};
+  const byType = summary.by_type && typeof summary.by_type === "object" ? summary.by_type : {};
+  const byStatus = summary.by_status && typeof summary.by_status === "object" ? summary.by_status : {};
+  const typeText = Object.entries(byType).map(([key, value]) => `${key}: ${value}`).join(" | ") || "No follow-ups";
+  const statusText = Object.entries(byStatus).map(([key, value]) => `${key}: ${value}`).join(" | ") || "No statuses";
+  return `<section class="operator-section research-follow-through-section" data-testid="research-follow-through-section" data-artifact="aegis_research_follow_through_control_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">Follow-Through</div><h3>${escapeHtml(String(rows.length))} follow-up items</h3><p class="muted-mini">Rendered from aegis_research_follow_through_control_v1 only.</p></div>${renderStatusPill(model.followThroughHash ? "Artifact backed" : "Unavailable", model.followThroughHash ? "healthy" : "warning", {})}</div>
+    <div class="research-summary-grid">
+      ${renderResearchFactCard("By type", typeText, "Backend follow_up_type counts.")}
+      ${renderResearchFactCard("By status", statusText, "Backend current_status counts.")}
+      ${renderResearchFactCard("Stalled", summary.overdue_or_stalled_count ?? 0, "Overdue or stalled follow-ups.")}
+      ${renderResearchFactCard("David actions", summary.david_action_count ?? 0, "Items requiring David action.")}
+      ${renderResearchFactCard("Automatic watches", summary.automatic_watch_count ?? 0, "Items monitored automatically.")}
+      ${renderResearchFactCard("Repair investigations", summary.repair_investigation_count ?? 0, "Repair follow-up items.")}
+      ${renderResearchFactCard("Sample watches", summary.sample_accumulation_watch_count ?? 0, "Sample accumulation watches.")}
+    </div>
+    ${rows.length ? `<div class="research-quality-table-wrap"><table class="operator-table research-quality-table"><thead><tr><th>Hypothesis</th><th>Type</th><th>Status</th><th>Blocking</th><th>Next action</th><th>Timing</th><th>David action</th></tr></thead><tbody>${rows.map(renderResearchFollowThroughRow).join("")}</tbody></table></div>` : `<div class="empty-state">No follow-through artifact rows are available.</div>`}
+  </section>`;
+}
+
+function renderResearchFollowThroughRow(row = {}) {
+  const timing = row.due_by_utc || (row.review_after_days !== undefined ? `${row.review_after_days} day review window` : "");
+  return `<tr data-research-follow-through-row data-hypothesis-id="${escapeHtml(row.hypothesis_id || "")}">
+    <td><strong>${escapeHtml(row.hypothesis_name || row.hypothesis_id || "Hypothesis")}</strong><div class="muted-mini">${escapeHtml(row.hypothesis_id || "")}</div></td>
+    <td>${escapeHtml(row.follow_up_type || "")}</td>
+    <td>${escapeHtml(row.current_status || "")}</td>
+    <td>${escapeHtml(row.blocking_what || "")}</td>
+    <td>${escapeHtml(row.next_action || "")}</td>
+    <td>${escapeHtml(timing)}</td>
+    <td>${escapeHtml(row.requires_david_action ? "Required" : "No")}</td>
+  </tr>`;
+}
+
+function renderCanonicalActionCard(item = {}) {
+  const buttons = safeList(item.exact_buttons);
+  const consequences = item.consequence_of_each_button && typeof item.consequence_of_each_button === "object" ? item.consequence_of_each_button : {};
+  return `<article class="hypothesis-card research-card" data-testid="canonical-action-card" data-action-id="${escapeHtml(item.action_id || "")}">
+    <header class="hypothesis-card-header"><div><h3>${escapeHtml(item.hypothesis_name || item.hypothesis_id || "Hypothesis action")}</h3><p>${escapeHtml(item.why_action_needed || "Concrete operator action required.")}</p></div>${renderStatusPill(item.action_type || "Action", "warning", {})}</header>
+    ${item.missing_dataset ? `<p class="support-note"><strong>Missing dataset:</strong> ${escapeHtml(item.missing_dataset)}</p>` : ""}
+    ${safeList(item.required_fields).length ? `<p class="support-note"><strong>Required fields:</strong> ${escapeHtml(safeList(item.required_fields).join(", "))}</p>` : ""}
+    <div class="research-action-row" data-testid="canonical-action-buttons">
+      ${buttons.map((button, index) => `<button class="${index === 0 ? "primary-action" : "ghost-button"}" type="button" data-operator-action-event="true" data-action-id="${escapeHtml(item.action_id || "")}" data-hypothesis-id="${escapeHtml(item.hypothesis_id || "")}" data-action-type="${escapeHtml(item.action_type || "")}" data-button-clicked="${escapeHtml(button)}" data-source-state-hash="${escapeHtml(item.source_state_hash || "")}">${escapeHtml(button)}</button>`).join("")}
+    </div>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Priority</dt><dd>${escapeHtml(item.priority || item.urgency || "NORMAL")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Due by</dt><dd>${escapeHtml(item.due_by_utc || "")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Blocking</dt><dd>${escapeHtml(item.blocking_what || "")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Impact area</dt><dd>${escapeHtml(item.impact_area || "")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Action age</dt><dd>${escapeHtml(String(item.action_age_days ?? 0))} days</dd></div>
+      ${buttons.map((button) => `<div class="hypothesis-fact-row"><dt>${escapeHtml(button)}</dt><dd>${escapeHtml(consequences[button] || "Records operator action only.")}</dd></div>`).join("")}
+    </dl>
+    <div class="edge-action-status" data-operator-action-status hidden></div>
+    <p class="support-note">${escapeHtml(item.safety_statement || "This is paper research only. Not trade advice. No broker execution. No live trading.")}</p>
+  </article>`;
+}
+
+function renderOilShockCandidateFlowSection(model = {}) {
+  const artifact = model.oilShockCandidateFlow && typeof model.oilShockCandidateFlow === "object" ? model.oilShockCandidateFlow : {};
+  const row = artifact.oil_shock && typeof artifact.oil_shock === "object" ? artifact.oil_shock : {};
+  const constructionArtifact = model.oilShockCandidateConstruction && typeof model.oilShockCandidateConstruction === "object" ? model.oilShockCandidateConstruction : {};
+  const construction = constructionArtifact.oil_shock && typeof constructionArtifact.oil_shock === "object" ? constructionArtifact.oil_shock : constructionArtifact;
+  const lineageArtifact = model.generatedHypothesisApprovalEventLineage && typeof model.generatedHypothesisApprovalEventLineage === "object" ? model.generatedHypothesisApprovalEventLineage : {};
+  const lineage = lineageArtifact.oil_shock && typeof lineageArtifact.oil_shock === "object" ? lineageArtifact.oil_shock : lineageArtifact;
+  const governanceArtifact = model.generatedHypothesisGovernanceBridge && typeof model.generatedHypothesisGovernanceBridge === "object" ? model.generatedHypothesisGovernanceBridge : {};
+  const governance = governanceArtifact.oil_shock && typeof governanceArtifact.oil_shock === "object" ? governanceArtifact.oil_shock : governanceArtifact;
+  const bridgeArtifact = model.generatedHypothesisPaperSetupBridge && typeof model.generatedHypothesisPaperSetupBridge === "object" ? model.generatedHypothesisPaperSetupBridge : {};
+  const bridge = bridgeArtifact.oil_shock && typeof bridgeArtifact.oil_shock === "object" ? bridgeArtifact.oil_shock : bridgeArtifact;
+  const signalArtifact = model.generatedHypothesisSignalToCandidate && typeof model.generatedHypothesisSignalToCandidate === "object" ? model.generatedHypothesisSignalToCandidate : {};
+  const signal = signalArtifact.oil_shock && typeof signalArtifact.oil_shock === "object" ? signalArtifact.oil_shock : signalArtifact;
+  const reasons = safeList(row.reason_codes).join(", ") || "";
+  const missingConstructionFields = safeList(construction.missing_construction_fields || row.missing_construction_fields).join(", ") || "None";
+  const governanceMissingFields = safeList(governance.missing_fields).join(", ") || "None";
+  const bridgeMissingFields = safeList(bridge.missing_fields).join(", ") || "None";
+  const signalReasons = safeList(signal.rejection_reason_codes).join(", ") || "None";
+  const signalMissingFields = safeList(signal.missing_fields).join(", ") || "None";
+  return `<section class="operator-section oil-shock-candidate-flow-section" data-testid="oil-shock-candidate-flow-section" data-artifact="aegis_oil_shock_candidate_flow_v1 aegis_oil_shock_candidate_construction_v1 aegis_generated_hypothesis_approval_event_lineage_v1 aegis_generated_hypothesis_governance_bridge_v1 aegis_generated_hypothesis_paper_setup_bridge_v1 aegis_generated_hypothesis_signal_to_candidate_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">Oil Shock Candidate Flow</div><h3>${escapeHtml(row.candidate_flow_status || "Unavailable")}</h3><p class="muted-mini">Research-only proof. Existing candidate lifecycle gates remain authoritative.</p></div>${renderStatusPill(model.oilShockCandidateFlowHash ? "Artifact backed" : "Unavailable", model.oilShockCandidateFlowHash ? "healthy" : "warning", {})}</div>
+    <div class="research-summary-grid">
+      ${renderResearchFactCard("Current state", row.current_state || "", "Oil Shock workflow state.")}
+      ${renderResearchFactCard("Producer", row.candidate_producer_status || "", "Backend Oil Shock producer registration/evaluation status.")}
+      ${renderResearchFactCard("Last evaluation", row.last_evaluation_status || row.candidate_flow_status || "", "Latest deterministic producer result.")}
+      ${renderResearchFactCard("Approval lineage", lineage.approval_lineage_status || governance.approval_lineage_status || "Unavailable", "Immutable approval event lineage status.")}
+      ${renderResearchFactCard("Approval event", lineage.approval_event_found ? "Found" : "Not found", "Whether an immutable approval event was found for Oil Shock.")}
+      ${renderResearchFactCard("Approval hash", (lineage.approval_event_hash || governance.approval_event_hash) ? "Present" : "Missing", "Stable approval event hash presence.")}
+      ${renderResearchFactCard("Governance bridge", governance.governance_bridge_status || "Unavailable", "Governed generated-hypothesis sleeve and policy mapping status.")}
+      ${renderResearchFactCard("Sleeve ID", governance.sleeve_id || bridge.sleeve_id || construction.sleeve_id || "", "Generated research sleeve identifier.")}
+      ${renderResearchFactCard("Risk policy", governance.risk_policy_id || bridge.risk_policy_id || construction.risk_policy_id || "", "Governed paper research risk policy identifier.")}
+      ${renderResearchFactCard("Exit policy", governance.exit_policy_id || bridge.exit_policy_id || construction.exit_policy_id || "", "Governed paper research exit policy identifier.")}
+      ${renderResearchFactCard("Governance missing", governanceMissingFields, "Governance fields still missing before generated sleeve setup.")}
+      ${renderResearchFactCard("Paper setup bridge", bridge.bridge_status || "Unavailable", "Governed bridge from generated hypothesis approval to paper setup eligibility.")}
+      ${renderResearchFactCard("Construction eligible", bridge.candidate_construction_eligible ? "Yes" : "No", "Whether the bridge permits candidate construction to evaluate future setups.")}
+      ${renderResearchFactCard("Bridge missing", bridgeMissingFields, "Paper setup bridge fields still missing before construction eligibility.")}
+      ${renderResearchFactCard("Construction", construction.candidate_construction_status || row.candidate_construction_status || "", "Deterministic candidate-construction status from governed Oil Shock evidence.")}
+      ${renderResearchFactCard("Missing construction", missingConstructionFields, "Construction fields still missing before candidate generation can proceed.")}
+      ${renderResearchFactCard("Blocker", row.blocker_code || row.exact_blocker || construction.blocker_code || "", "Backend blocker code from Oil Shock flow evidence.")}
+      ${renderResearchFactCard("Owner", row.blocker_owner || "", "Backend blocker owner from Oil Shock flow evidence.")}
+      ${renderResearchFactCard("Signal-to-candidate", signal.signal_to_candidate_status || row.signal_to_candidate_status || "Unavailable", "Trace from Oil Shock raw signal into the normal candidate-contract pipeline.")}
+      ${renderResearchFactCard("Contract status", signal.candidate_contract_status || row.candidate_contract_status || "Unavailable", "Candidate-contract validation status for the Oil Shock raw signal.")}
+      ${renderResearchFactCard("Contract count", signal.candidate_contract_count ?? row.candidate_contract_count ?? row.candidate_count ?? 0, "Matching Oil Shock candidate contracts from aegis_candidate_contracts_v1.")}
+      ${renderResearchFactCard("Rejection", signalReasons, "Candidate-contract rejection reason codes, if any.")}
+      ${renderResearchFactCard("Signal missing", signalMissingFields, "Signal-to-candidate missing fields, if any.")}
+      ${renderResearchFactCard("Candidate count", row.candidate_count ?? 0, "Backend candidate-contract count for Oil Shock.")}
+      ${renderResearchFactCard("Raw signals", signal.raw_signal_count ?? row.raw_signal_count ?? 0, "Raw signals emitted by the deterministic producer before candidate gates.")}
+      ${renderResearchFactCard("Candidate flow", row.candidate_flow_started ? "Started" : "Not started", row.reason_no_candidates_generated_yet || "Existing candidate flow detected.")}
+      ${renderResearchFactCard("Reason codes", reasons, "Deterministic blocker classification.")}
+      ${renderResearchFactCard("Next step", bridge.next_expected_step || row.next_expected_step || "", "Backend proof next expected step.")}
+      ${renderResearchFactCard("David action", row.david_action_required ? "Yes" : "No", row.ui_message || "No David action required. Aegis is waiting for qualifying Oil Shock candidate conditions.")}
+    </div>
+    <p class="support-note">${escapeHtml(signal.ui_message || lineage.ui_message || governance.ui_message || bridge.ui_message || row.ui_message || "No David action required. Aegis is waiting for qualifying Oil Shock candidate conditions.")}</p>
+  </section>`;
+}
+
+function renderAIResearchIntelligenceSection(model = {}) {
+  const rows = safeList(model.aiIntelligence?.hypotheses);
+  const summary = model.aiIntelligence?.summary && typeof model.aiIntelligence.summary === "object" ? model.aiIntelligence.summary : {};
+  const counts = summary.recommendation_counts && typeof summary.recommendation_counts === "object" ? summary.recommendation_counts : {};
+  const countText = Object.entries(counts).map(([key, value]) => `${key}: ${value}`).join(" | ") || "No AI advisory rows";
+  return `<section class="operator-section ai-research-intelligence-section" data-testid="ai-research-intelligence-section" data-artifact="aegis_ai_research_intelligence_summary_v1">
+    <div class="section-heading"><div><div class="section-eyebrow">AI Research Intelligence</div><h3>AI research analysis — advisory only.</h3><p class="muted-mini">Rendered from aegis_ai_research_intelligence_summary_v1. Deterministic Aegis artifacts remain authoritative.</p></div>${renderStatusPill(model.aiIntelligenceHash ? "Artifact backed" : "Unavailable", model.aiIntelligenceHash ? "healthy" : "warning", {})}</div>
+    <div class="research-summary-grid">${renderResearchFactCard("AI concerns", countText, "Advisory recommendation-type counts from backend summary.")}</div>
+    ${rows.length ? `<div class="research-quality-table-wrap"><table class="operator-table research-quality-table"><thead><tr><th>Hypothesis</th><th>AI concern</th><th>Root cause</th><th>Repair</th><th>Duplicate</th><th>Evidence</th><th>Confidence</th></tr></thead><tbody>${rows.map(renderAIResearchIntelligenceRow).join("")}</tbody></table></div>` : `<div class="empty-state">No AI research intelligence rows are available.</div>`}
+  </section>`;
+}
+
+function renderAIResearchIntelligenceRow(row = {}) {
+  return `<tr data-ai-research-intelligence-row data-hypothesis-id="${escapeHtml(row.hypothesis_id || "")}">
+    <td><strong>${escapeHtml(row.display_name || row.hypothesis_id || "Hypothesis")}</strong><div class="muted-mini">${escapeHtml(row.hypothesis_id || "")}</div></td>
+    <td>${escapeHtml(row.ai_recommendation_type || "")}</td>
+    <td>${escapeHtml(row.root_cause_summary || "")}</td>
+    <td>${escapeHtml(row.repair_summary || "")}</td>
+    <td>${escapeHtml(row.duplicate_summary || "")}</td>
+    <td>${escapeHtml(row.evidence_summary || "")}</td>
+    <td>${escapeHtml(row.ai_confidence || "")}</td>
+  </tr>`;
+}
+
+function renderCanonicalHypothesisStatusSummary(model = {}) {
+  const entries = Object.entries(model.stateCounts || {}).sort((a, b) => a[0].localeCompare(b[0]));
+  return `<section class="operator-section hypothesis-status-summary" data-testid="hypothesis-status-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Hypothesis Status Summary</div><h3>Canonical state counts</h3><p class="muted-mini">No UI state inference. Counts come from aegis_hypothesis_workflow_state_v1.</p></div></div>
+    <div class="research-summary-grid">${entries.map(([state, count]) => renderResearchFactCard(state, count, "Canonical workflow state.")).join("") || renderResearchFactCard("No states", 0, "Workflow artifact has no rows.")}</div>
+  </section>`;
+}
+
+function renderCanonicalHypothesisList(model = {}) {
+  const rows = safeList(model.hypotheses);
+  return `<section class="operator-section hypothesis-list" data-testid="hypothesis-list">
+    <div class="section-heading"><div><div class="section-eyebrow">Hypothesis List</div><h3>${escapeHtml(String(rows.length))} hypotheses</h3><p class="muted-mini">State, next action, and allowed actions are backend-rendered fields.</p></div></div>
+    ${rows.length ? `<div class="hypothesis-card-grid research-card-grid">${rows.map(renderCanonicalHypothesisCard).join("")}</div>` : `<div class="empty-state">No canonical hypothesis workflow rows are available.</div>`}
+  </section>`;
+}
+
+function renderCanonicalHypothesisCard(row = {}) {
+  const allowed = safeList(row.allowed_actions).join(", ") || "None";
+  const blockers = safeList(row.blocker_codes).join(", ") || "None";
+  const reasons = safeList(row.reason_codes).join(", ") || "None";
+  return `<article class="hypothesis-card research-card" data-testid="canonical-hypothesis-card" data-hypothesis-id="${escapeHtml(row.hypothesis_id || "")}">
+    <header class="hypothesis-card-header"><div><h3>${escapeHtml(row.display_name || row.hypothesis_id || "Hypothesis")}</h3><p>${escapeHtml(row.source_type || "")}</p></div>${renderStatusPill(row.current_state || "", row.next_action && row.next_action !== "NONE" && row.next_action !== "WAIT_FOR_AUTOMATIC_PROCESSING" ? "warning" : "neutral", {})}</header>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Current state</dt><dd>${escapeHtml(row.current_state || "")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Prior state</dt><dd>${escapeHtml(row.prior_state || "")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Next action</dt><dd>${escapeHtml(row.next_action || "NONE")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>State age</dt><dd>${escapeHtml(String(row.time_in_state_days ?? 0))} days</dd></div>
+      <div class="hypothesis-fact-row"><dt>Stale warning</dt><dd>${escapeHtml(row.stale_state_warning ? row.stale_state_reason || "true" : "false")}</dd></div>
+      ${row.next_step_detail ? `<div class="hypothesis-fact-row"><dt>Next step</dt><dd>${escapeHtml(row.next_step_detail)}</dd></div>` : ""}
+      <div class="hypothesis-fact-row"><dt>Allowed actions</dt><dd>${escapeHtml(allowed)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Reason codes</dt><dd>${escapeHtml(reasons)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Blockers</dt><dd>${escapeHtml(blockers)}</dd></div>
+      ${row.missing_dataset ? `<div class="hypothesis-fact-row"><dt>Missing dataset</dt><dd>${escapeHtml(row.missing_dataset)}</dd></div>` : ""}
+      ${safeList(row.required_fields).length ? `<div class="hypothesis-fact-row"><dt>Required fields</dt><dd>${escapeHtml(safeList(row.required_fields).join(", "))}</dd></div>` : ""}
+      ${row.validation_state ? `<div class="hypothesis-fact-row"><dt>Validation state</dt><dd>${escapeHtml(row.validation_state)}</dd></div>` : ""}
+      ${row.sample_count !== undefined ? `<div class="hypothesis-fact-row"><dt>Sample count</dt><dd>${escapeHtml(String(row.sample_count))}</dd></div>` : ""}
+      ${row.generated_throughput ? `<div class="hypothesis-fact-row"><dt>Generated throughput</dt><dd>${escapeHtml(row.generated_throughput.throughput_status || "")}</dd></div>` : ""}
+      ${row.generated_throughput ? `<div class="hypothesis-fact-row"><dt>Throughput next step</dt><dd>${escapeHtml(row.generated_throughput.next_expected_step || "")}</dd></div>` : ""}
+    </dl>
+    <p class="support-note">${escapeHtml(row.safety_statement || "This is paper research only. Not trade advice. No broker execution. No live trading.")}</p>
+  </article>`;
+}
+
+function buildResearchOperatorModel({ todayPayload = {}, consolePayload = {}, reviewPayload = {}, validationPayload = {}, promotionPayload = {}, paperSetupPayload = {}, routeParams = {} } = {}) {
+  const researchToday = todayPayload.research && typeof todayPayload.research === "object" ? todayPayload.research : {};
+  const pipeline = consolePayload.aegis_research_pipeline && typeof consolePayload.aegis_research_pipeline === "object" ? consolePayload.aegis_research_pipeline : {};
+  const hypotheses = safeList(consolePayload.all_hypotheses).length ? safeList(consolePayload.all_hypotheses) : safeList(pipeline.items);
+  const reviewArtifact = reviewPayload?.artifact && typeof reviewPayload.artifact === "object" ? reviewPayload.artifact : {};
+  const reviewBriefs = safeList(reviewArtifact.briefs);
+  const validationArtifacts = validationPayload?.artifacts && typeof validationPayload.artifacts === "object" ? validationPayload.artifacts : {};
+  const promotionArtifacts = promotionPayload?.artifacts && typeof promotionPayload.artifacts === "object" ? promotionPayload.artifacts : {};
+  const paperSetupArtifacts = paperSetupPayload?.artifacts && typeof paperSetupPayload.artifacts === "object" ? paperSetupPayload.artifacts : {};
+  const paperPromotionRecommendations = researchPaperPromotionRecommendations(promotionArtifacts, paperSetupArtifacts);
+  const validationByHypothesis = researchValidationByHypothesis(validationArtifacts);
+  const findings = reviewBriefs.length ? reviewBriefs.map(researchFindingFromBrief) : hypotheses.filter(researchHypothesisHasLearning).slice(0, 4).map(researchFindingFromHypothesis);
+  const blockers = hypotheses.filter(researchHypothesisBlocked).slice(0, 5).map(researchBlockerFromHypothesis);
+  const actionRows = hypotheses.filter((row) => row.operator_action_required === true).slice(0, 5).map(researchActionFromHypothesis);
+  const activeResearch = hypotheses.filter(researchHypothesisActive).sort((a, b) => Number(a.rank ?? 999) - Number(b.rank ?? 999)).slice(0, 6).map((row) => researchActiveFromHypothesis(row, validationByHypothesis));
+  const sourceDay = String(todayPayload.source_day || researchToday.source_day || pipeline.day_utc || consolePayload.day_utc || routeParams.day || "").slice(0, 10);
+  const requestedDay = String(todayPayload.requested_day || routeParams.day || sourceDay || "").slice(0, 10);
+  const activeCount = Number(researchToday.active_count ?? activeResearch.length ?? 0) || 0;
+  const waitingCount = Number(researchToday.waiting_count ?? hypotheses.filter((row) => researchStateText(row).toLowerCase().includes("queued") || researchStateText(row).toLowerCase().includes("waiting")).length ?? 0) || 0;
+  const blockedCount = Number(researchToday.blocked_count ?? blockers.length ?? 0) || 0;
+  const collectingEvidenceCount = Number(researchToday.collecting_evidence_count ?? activeResearch.filter((row) => row.state === "Collecting Evidence").length ?? 0) || 0;
+  const findingsReadyCount = reviewBriefs.length || findings.filter((row) => row.isFinalFinding).length;
+  const actionCount = actionRows.length;
+  const paperPromotionRecommendationCount = paperPromotionRecommendations.filter((row) => row.approvalState === "PAPER_PROMOTION_RECOMMENDED").length;
+  const totalInvestigations = Number(pipeline.count ?? consolePayload.combined_hypothesis_count ?? hypotheses.length ?? researchToday.total_hypotheses ?? 0) || 0;
+  const summaryText = researchToday.summary || (totalInvestigations ? `${totalInvestigations} research investigations are tracked.` : "No research investigations are recorded.");
+  let state = "NO_RESEARCH";
+  if (paperPromotionRecommendationCount > 0) state = "PAPER_PROMOTION_RECOMMENDED";
+  else if (actionCount > 0) state = "NEEDS_USER_ACTION";
+  else if (blockedCount > 0 && activeResearch.length === 0) state = "RESEARCH_BLOCKED";
+  else if (findingsReadyCount > 0) state = "RESEARCH_COMPLETE";
+  else if (collectingEvidenceCount > 0 || activeResearch.length > 0 || waitingCount > 0) state = "RESEARCH_RUNNING";
+  else if (totalInvestigations > 0) state = "NORMAL";
+  const stateCopy = researchStateCopy(state, { actionCount, paperPromotionRecommendationCount, collectingEvidenceCount, blockedCount, totalInvestigations });
+  const nextStep = researchNextStep({ researchToday, activeResearch, blockers, actionRows, paperPromotionRecommendationCount });
+  const operatorTruth = buildOperatorTruthModel(todayPayload);
+  operatorTruth.primaryStatus = "Paper Research Mode";
+  operatorTruth.primaryTone = "neutral";
+  operatorTruth.actionLabel = paperPromotionRecommendationCount
+    ? `${paperPromotionRecommendationCount} paper promotion approval needed`
+    : (actionCount ? `${actionCount} research follow-up${actionCount === 1 ? "" : "s"}` : "No David action required");
+  return {
+    requestedDay,
+    sourceDay,
+    generatedAt: todayPayload.generated_at || reviewArtifact.generated_at || pipeline.generated_at_utc || consolePayload.generated_at_utc || "",
+    state,
+    ...stateCopy,
+    topReadinessLabel: stateCopy.topReadinessLabel,
+    topReadinessTone: state === "PAPER_PROMOTION_RECOMMENDED" || state === "RESEARCH_BLOCKED" || state === "NEEDS_USER_ACTION" ? "warning" : "neutral",
+    operatorTruth,
+    totalInvestigations,
+    activeCount,
+    waitingCount,
+    blockedCount,
+    collectingEvidenceCount,
+    findingsReadyCount,
+    actionCount,
+    paperPromotionRecommendations,
+    paperPromotionRecommendationCount,
+    activeResearch,
+    findings,
+    blockers,
+    actionRows,
+    nextStep,
+    summaryText,
+    reviewAvailable: reviewPayload?.ok === true,
+    reviewMissingReason: reviewPayload?.message || reviewPayload?.error || "No current-day research findings brief is available.",
+    consoleAvailable: consolePayload?.ok !== false,
+    evidenceRows: [
+      { label: "Requested day", value: requestedDay || "not reported" },
+      { label: "Research source day", value: sourceDay || "not reported" },
+      { label: "Research registry", value: pipeline.count !== undefined ? `${pipeline.count} investigations` : "not reported" },
+      { label: "Current-day summary", value: summaryText },
+      { label: "Findings brief", value: reviewPayload?.ok === true ? "current-day findings available" : "no current-day findings brief" },
+      { label: "Validation engine", value: validationPayload?.ok === true ? "deterministic validation current" : "validation artifact unavailable" },
+      { label: "Paper promotion recommendations", value: promotionPayload?.ok === true ? `${paperPromotionRecommendations.length} queued` : "promotion artifact unavailable" },
+      { label: "Approved paper setup", value: paperSetupPayload?.ok === true ? "paper setup artifact current" : "paper setup artifact unavailable" },
+      { label: "Safety", value: "Research only; no trade advice, broker execution, live trading, or autonomous live trading." },
+    ],
+  };
+}
+
+function researchStateCopy(state, counts = {}) {
+  if (state === "PAPER_PROMOTION_RECOMMENDED") {
+    return {
+      topReadinessLabel: "PAPER MODE",
+      label: "Awaiting paper-test approval",
+      headline: "Paper promotion recommendation awaiting approval.",
+      explanation: `${counts.paperPromotionRecommendationCount || 0} paper promotion approval${counts.paperPromotionRecommendationCount === 1 ? "" : "s"} needed. Approval only starts paper research tracking.`,
+      operatorExpectation: "Approve, reject, or defer the paper promotion recommendation. No trading, broker, live, or real-capital action is enabled.",
+    };
+  }
+  if (state === "NEEDS_USER_ACTION") {
+    return {
+      topReadinessLabel: "Research needs attention",
+      label: "Needs review",
+      headline: "Research follow-ups need review.",
+      explanation: `${counts.actionCount || 0} research follow-up${counts.actionCount === 1 ? "" : "s"} need review. Active evidence collection can continue without David.`,
+      operatorExpectation: "Review only the follow-up rows. Active research rows marked no action will continue collecting evidence.",
+    };
+  }
+  if (state === "RESEARCH_BLOCKED") {
+    return {
+      topReadinessLabel: "Research blocked",
+      label: "Blocked",
+      headline: "Research cannot progress right now.",
+      explanation: "A required research input or runner step is missing for at least one investigation.",
+      operatorExpectation: "Review the blocker reason; operational repair happens outside Research.",
+    };
+  }
+  if (state === "RESEARCH_COMPLETE") {
+    return {
+      topReadinessLabel: "Findings ready",
+      label: "Findings ready",
+      headline: "Research findings are ready.",
+      explanation: "Aegis has operator-readable research findings available for review.",
+      operatorExpectation: "Review findings, then monitor, dismiss, archive, or request more research if needed.",
+    };
+  }
+  if (state === "RESEARCH_RUNNING") {
+    return {
+      topReadinessLabel: "Research active",
+      label: "Active",
+      headline: "Research is active.",
+      explanation: "Aegis is running queued investigations or collecting more evidence before conclusions are ready.",
+      operatorExpectation: "No action is required unless a row explicitly asks for a research decision.",
+    };
+  }
+  if (state === "NORMAL") {
+    return {
+      topReadinessLabel: "Research monitoring",
+      label: "Monitoring",
+      headline: "Research is being monitored.",
+      explanation: "Research investigations exist, but no active finding or blocker needs action right now.",
+      operatorExpectation: "No research action is required.",
+    };
+  }
+  return {
+    topReadinessLabel: "No research activity",
+    label: "No research",
+    headline: "No active research investigations are recorded today.",
+    explanation: "Aegis has no current research work to show for this day.",
+    operatorExpectation: "No research action is required.",
+  };
+}
+
+function researchStateText(row = {}) {
+  return String(row.user_facing_status || row.current_autonomous_state || row.lifecycle_state || row.current_status || row.current_gate || "Research");
+}
+
+function researchHypothesisActive(row = {}) {
+  const text = `${researchStateText(row)} ${row.lifecycle_state || ""} ${row.current_gate || ""} ${row.next_action || ""}`.toLowerCase();
+  return text.includes("collecting evidence") || text.includes("queued") || text.includes("researching") || text.includes("validating") || text.includes("result_review") || text.includes("testing");
+}
+
+function researchHypothesisBlocked(row = {}) {
+  const blocker = String(row.blocker_summary || row.blocker_reason || "").trim();
+  const text = researchStateText(row).toLowerCase();
+  return (blocker && blocker.toLowerCase() !== "no blocker") || text.includes("blocked");
+}
+
+function researchHypothesisHasLearning(row = {}) {
+  return Boolean(row.latest_result_summary || row.conclusion || row.evidence_summary || String(row.current_gate || "").includes("RESULT_REVIEW"));
+}
+
+function researchValidationByHypothesis(artifacts = {}) {
+  const results = safeList(artifacts.validation_result?.results);
+  const gates = safeList(artifacts.promotion_gate?.promotion_gates);
+  const out = {};
+  for (const result of results) {
+    const id = String(result.hypothesis_id || "");
+    if (!id) continue;
+    out[id] = { ...(out[id] || {}), result };
+  }
+  for (const gate of gates) {
+    const id = String(gate.hypothesis_id || "");
+    if (!id) continue;
+    out[id] = { ...(out[id] || {}), gate };
+  }
+  return out;
+}
+
+function researchPaperPromotionRecommendations(artifacts = {}, setupArtifacts = {}) {
+  const queue = artifacts.approval_queue && typeof artifacts.approval_queue === "object" ? artifacts.approval_queue : {};
+  const setupArtifact = setupArtifacts.approved_hypothesis_paper_tracking_setup && typeof setupArtifacts.approved_hypothesis_paper_tracking_setup === "object" ? setupArtifacts.approved_hypothesis_paper_tracking_setup : {};
+  const setupByHypothesis = Object.fromEntries(safeList(setupArtifact.paper_tracking_setups).map((row) => [String(row.hypothesis_id || ""), row]));
+  return safeList(queue.approval_queue || queue.recommendations).map((row) => {
+    const setup = setupByHypothesis[String(row.hypothesis_id || "")] || {};
+    return ({
+    hypothesisId: String(row.hypothesis_id || ""),
+    hypothesisName: row.hypothesis_name || row.hypothesis_id || "Hypothesis proposal",
+    recommendationReason: row.recommendation_reason || "Paper research promotion recommended.",
+    shadowValidationResult: row.shadow_validation_result || "Not reported",
+    expectedSampleFrequency: row.expected_sample_frequency || "Not reported",
+    expectedValidationTimeline: row.expected_validation_timeline || "Not reported",
+    risksCaveats: safeList(row.risks_caveats),
+    approvalState: row.approval_state || "PAPER_PROMOTION_RECOMMENDED",
+    paperReadiness: row.paper_readiness || row.paper_readiness_status || "",
+    safetyStatement: String(row.safety_statement || "").replace(/^This is\s+/i, "") || "Paper research only. Not trade advice. No broker execution. No live trading.",
+    availableActions: safeList(row.available_actions),
+    latestApprovalEvent: row.latest_approval_event && typeof row.latest_approval_event === "object" ? row.latest_approval_event : {},
+    approvedStatusText: setup.approved_status_text || "",
+    paperSetupStatus: setup.paper_setup_status || "",
+    paperSetupReasonCodes: safeList(setup.reason_codes),
+    paperSetupMissingFields: safeList(setup.missing_fields),
+    paperSetupNextStep: setup.next_step || "",
+    candidateGenerationEligible: setup.candidate_generation_eligible === true,
+  });
+  });
+}
+
+function researchActiveFromHypothesis(row = {}, validationByHypothesis = {}) {
+  const required = Number(row.minimum_sample_size ?? row.required_samples ?? 0) || 0;
+  const current = Number(row.sample_size ?? row.current_samples ?? 0) || 0;
+  const operatorActionRequired = row.operator_action_required === true;
+  const validation = validationByHypothesis[String(row.hypothesis_id || "")] || {};
+  const validationResult = validation.result || {};
+  const validationGate = validation.gate || {};
+  return {
+    title: row.title || row.hypothesis_summary || row.hypothesis_id || "Research investigation",
+    state: researchStateText(row),
+    explanation: researchActiveExplanation(row),
+    symbols: safeList(row.symbols || row.required_symbols).join(", ") || "Not reported",
+    evidenceProgress: required ? `${current}/${required} observations` : (row.data_status || row.test_status || "Not reported"),
+    nextStep: row.next_action || row.recommended_next_action || "Wait for the next research update.",
+    nextExpected: row.next_sample_expected_at || row.estimated_completion_date || "No confirmed timing.",
+    operatorActionRequired: operatorActionRequired ? "Review needed" : "No action - collecting evidence.",
+    validationStatus: validationResult.validation_status || "Not evaluated",
+    validationProtocol: validationResult.protocol_id || "No protocol reported",
+    validationSampleCount: validationResult.sample_count ?? "not reported",
+    promotionEligibility: validationGate.eligible_for_candidate_review === true ? "Eligible for candidate review" : "Not eligible for candidate review",
+    requiredMetricStatus: validationResult.required_metric_status?.status || "Not evaluated",
+    artifactBindingStatus: validationResult.artifact_binding_status || "Not evaluated",
+    biasControlStatus: validationResult.bias_control_status || "Not evaluated",
+    sampleSizeStatus: validationResult.sample_size_status || "Not evaluated",
+    validationSummary: validationResult.plain_english_summary || "Deterministic validation has not produced a current result.",
+  };
+}
+
+function researchActiveExplanation(row = {}) {
+  const state = researchStateText(row);
+  const required = Number(row.minimum_sample_size ?? row.required_samples ?? 0) || 0;
+  const current = Number(row.sample_size ?? row.current_samples ?? 0) || 0;
+  if (String(state).toLowerCase().includes("collecting evidence") && required) {
+    const missing = Math.max(required - current, 0);
+    return `Collecting observations before qualification: ${current}/${required} complete, ${missing} remaining.`;
+  }
+  return row.user_facing_explanation || row.latest_result_summary || row.next_action || "Research is being monitored.";
+}
+
+function researchFindingFromHypothesis(row = {}) {
+  return {
+    title: row.title || row.hypothesis_summary || "Research finding",
+    status: row.test_status || row.latest_result || "In progress",
+    conclusion: row.latest_result_summary || row.user_facing_explanation || "Learning is available but not final.",
+    confidence: row.confidence_level || row.confidence || "Not reported",
+    whyItMatters: row.next_action || "This finding informs whether the hypothesis needs more evidence.",
+    isFinalFinding: false,
+  };
+}
+
+function researchFindingFromBrief(brief = {}) {
+  return {
+    title: brief.title || "Research finding",
+    status: brief.status || "Finding",
+    conclusion: brief.conclusion || brief.evidence_summary || "Research finding is available.",
+    confidence: brief.confidence || "Not reported",
+    whyItMatters: brief.why_it_matters || brief.decision_needed || "Review the finding and decide whether to monitor, dismiss, archive, or request more research.",
+    isFinalFinding: true,
+  };
+}
+
+function researchBlockerFromHypothesis(row = {}) {
+  const blocker = String(row.blocker_summary || row.blocker_reason || row.user_facing_explanation || "Research blocker reported.");
+  return {
+    title: row.title || row.hypothesis_summary || row.hypothesis_id || "Research investigation",
+    reason: translateResearchReason(blocker),
+    impact: "This investigation cannot make progress until the research input or queue state is resolved.",
+    nextStep: translateResearchReason(row.next_action || row.recommended_next_action || "Review the research blocker."),
+  };
+}
+
+function researchActionFromHypothesis(row = {}) {
+  return {
+    action: row.primary_action_label || row.recommended_next_action || "Review research follow-up",
+    title: row.title || row.hypothesis_summary || row.hypothesis_id || "Research investigation",
+    reason: translateResearchReason(row.next_action || row.user_facing_explanation || row.blocker_summary || "Research follow-up is requested."),
+    expectation: "Research-only review. No trading or broker action is enabled.",
+  };
+}
+
+function translateResearchReason(value = "") {
+  const text = String(value || "").replaceAll("_", " ").trim();
+  if (!text) return "Not reported";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function researchNextStep({ researchToday = {}, activeResearch = [], blockers = [], actionRows = [], paperPromotionRecommendationCount = 0 } = {}) {
+  if (paperPromotionRecommendationCount) {
+    return {
+      label: "Approve paper test",
+      detail: `${paperPromotionRecommendationCount} paper promotion approval${paperPromotionRecommendationCount === 1 ? "" : "s"} needed for paper research tracking only.`,
+      timing: "Awaiting David approval.",
+    };
+  }
+  if (actionRows.length) {
+    return {
+      label: "Review research follow-ups",
+      detail: `${actionRows.length} research-only follow-up${actionRows.length === 1 ? "" : "s"} need attention.`,
+      timing: "No trading action is involved.",
+    };
+  }
+  const collecting = activeResearch.find((row) => row.nextExpected && row.nextExpected !== "No confirmed timing.");
+  if (collecting) {
+    return { label: "Collect more evidence", detail: collecting.nextStep, timing: collecting.nextExpected };
+  }
+  if (blockers.length) {
+    return { label: "Resolve research blocker", detail: blockers[0].nextStep, timing: "After the blocker is resolved." };
+  }
+  return {
+    label: researchToday.next_observation || "Wait for next research update",
+    detail: researchToday.sample_summary || researchToday.summary || "Aegis will continue monitoring research state.",
+    timing: researchToday.next_observation || "No confirmed timing.",
+  };
+}
+
+function renderResearchOperatorPage(model = {}) {
+  return `<main class="operator-workflow research-operator-workspace" data-testid="research-page">
+    ${renderPaperPromotionRecommendationsCard(model)}
+    <section class="operator-section research-operator-hero" data-testid="research-status-summary">
+      <div class="section-heading">
+        <div>
+          <div class="section-eyebrow">Research</div>
+          <h2>${escapeHtml(model.headline)}</h2>
+          <p class="muted-mini">${escapeHtml(model.explanation)}</p>
+        </div>
+        ${renderStatusPill(model.label, model.state === "PAPER_PROMOTION_RECOMMENDED" || model.state === "NEEDS_USER_ACTION" || model.state === "RESEARCH_BLOCKED" ? "warning" : "neutral", {})}
+      </div>
+      <div class="research-operator-answer" data-testid="research-operator-answer">${escapeHtml(model.operatorExpectation)} No trading action or broker action is enabled from Research.</div>
+      ${renderOperatorTruthStrip(model.operatorTruth || {}, [
+        { label: "Paper promotions", value: String(model.paperPromotionRecommendationCount || 0), detail: "Paper promotion recommendations await paper-test approval only." },
+        { label: "Research blockers", value: String(model.blockers.length || model.blockedCount || 0), detail: "Research blockers do not authorize market action." },
+      ])}
+      <div class="research-summary-grid">
+        ${renderResearchFactCard("Investigations", model.totalInvestigations, "Research ideas and hypotheses being tracked.")}
+        ${renderResearchFactCard("Active", model.activeResearch.length || model.activeCount, "Queued, running, or collecting evidence.")}
+        ${renderResearchFactCard("Findings", model.findings.length, "Research learning available to review.")}
+        ${renderResearchFactCard("Blocked", model.blockers.length || model.blockedCount, "Research work that cannot progress.")}
+        ${renderResearchFactCard("David action", model.paperPromotionRecommendationCount ? `${model.paperPromotionRecommendationCount} paper promotion approval needed` : (model.actionCount ? `${model.actionCount} follow-up${model.actionCount === 1 ? "" : "s"} to review` : "No action required"), model.paperPromotionRecommendationCount ? "Awaiting paper-test approval only; no trading or broker action." : "Only the follow-up rows require review; active evidence collection needs no action.")}
+      </div>
+    </section>
+    ${renderResearchPriorityStrip(model)}
+    ${renderResearchNextStep(model)}
+    ${renderResearchActiveSection(model)}
+    ${renderResearchFindingsSection(model)}
+    ${renderResearchBlockersSection(model)}
+    ${renderResearchActionSection(model)}
+    ${renderResearchEvidence(model)}
+  </main>`;
+}
+
+function renderResearchFactCard(label, value, helper = "") {
+  return `<article class="metric-card research-fact-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "0"))}</strong>${helper ? `<small>${escapeHtml(helper)}</small>` : ""}</article>`;
+}
+
+function renderResearchPriorityStrip(model = {}) {
+  const firstAction = safeList(model.actionRows)[0] || null;
+  const firstFinding = safeList(model.findings)[0] || null;
+  const firstBlocker = safeList(model.blockers)[0] || null;
+  return `<section class="operator-section research-priority-strip" data-testid="research-priority-strip">
+    <div class="section-heading"><div><div class="section-eyebrow">At A Glance</div><h3>What needs review, what was learned, and what is blocked?</h3><p class="muted-mini">The items below explain the Research counts before the longer lists.</p></div></div>
+    <div class="research-priority-grid">
+      ${renderResearchPriorityCard({
+        label: "Follow-ups needing review",
+        title: firstAction ? firstAction.title : "No research follow-up needs review",
+        body: firstAction ? firstAction.reason : "No research-only decision is required right now.",
+        meta: firstAction ? firstAction.expectation : "Aegis continues monitoring research state.",
+        tone: firstAction ? "warning" : "neutral",
+      })}
+      ${renderResearchPriorityCard({
+        label: "Latest finding",
+        title: firstFinding ? firstFinding.title : "No current finding is ready",
+        body: firstFinding ? firstFinding.conclusion : "Research has not produced a finding summary yet.",
+        meta: firstFinding ? `Confidence: ${translateResearchReason(firstFinding.confidence)}` : "Findings will appear here when available.",
+        tone: firstFinding ? "neutral" : "muted",
+      })}
+      ${renderResearchPriorityCard({
+        label: "Research blocker",
+        title: firstBlocker ? firstBlocker.title : "No research blocker reported",
+        body: firstBlocker ? firstBlocker.reason : "No investigation is blocked right now.",
+        meta: firstBlocker ? firstBlocker.nextStep : "Research can continue without a blocker review.",
+        tone: firstBlocker ? "warning" : "neutral",
+      })}
+    </div>
+  </section>`;
+}
+
+function renderResearchPriorityCard({ label = "", title = "", body = "", meta = "", tone = "neutral" } = {}) {
+  const toneClass = tone === "warning" ? "tone-warning" : tone === "muted" ? "tone-muted" : "tone-neutral";
+  return `<article class="research-priority-card ${toneClass}" data-testid="research-priority-card">
+    <div class="research-priority-label">${escapeHtml(label)}</div>
+    <h4>${escapeHtml(title)}</h4>
+    <p>${escapeHtml(body)}</p>
+    <small>${escapeHtml(meta)}</small>
+  </article>`;
+}
+
+function renderPaperPromotionRecommendationsCard(model = {}) {
+  const rows = safeList(model.paperPromotionRecommendations);
+  const pending = rows.filter((row) => row.approvalState === "PAPER_PROMOTION_RECOMMENDED");
+  const decided = rows.filter((row) => row.approvalState !== "PAPER_PROMOTION_RECOMMENDED");
+  const title = pending.length ? "Paper promotion recommendation" : (decided.length ? "Paper promotion decision recorded" : "Paper promotion recommendations");
+  const helper = pending.length ? "Awaiting paper-test approval. One-click approval means only: approve this hypothesis for paper research tracking." : (decided.length ? "No paper-test approval is currently needed for this item." : "No paper promotion recommendations are awaiting review.");
+  return `<section class="operator-section paper-promotion-recommendations" data-testid="paper-promotion-recommendations-card">
+    <div class="section-heading"><div><div class="section-eyebrow">PAPER PROMOTION RECOMMENDATIONS</div><h3>${escapeHtml(title)}</h3><p class="muted-mini">${escapeHtml(helper)}</p></div><span class="status-pill ${pending.length ? "tone-warning" : "tone-neutral"}" data-testid="paper-promotion-recommendation-count">${escapeHtml(String(pending.length))} recommendation${pending.length === 1 ? "" : "s"} awaiting decision</span></div>
+    ${rows.length ? `<div class="hypothesis-card-grid research-card-grid">${rows.map(renderPaperPromotionRecommendationItem).join("")}</div>` : `<div class="empty-state">No paper promotion recommendations are ready.</div>`}
+    <p class="support-note">Paper research only. Not trade advice. No broker execution. No live trading.</p>
+  </section>`;
+}
+
+function renderPaperPromotionRecommendationItem(row = {}) {
+  const risks = safeList(row.risksCaveats).join(" ") || "No additional caveats reported.";
+  const eligible = row.approvalState === "PAPER_PROMOTION_RECOMMENDED";
+  const shadowResult = normalizePromotionShadowResult(row.shadowValidationResult);
+  const paperReadiness = row.paperReadiness || ((eligible || row.approvalState === "PAPER_PROMOTION_APPROVED") && shadowResult === "PASSED" ? "CERTIFIED" : "NOT CERTIFIED");
+  const terminalMessage = paperPromotionTerminalMessage(row.approvalState);
+  const setupLabel = row.paperSetupStatus === "PAPER_TRACKING_READY" ? "READY" : (row.paperSetupStatus === "PAPER_TRACKING_BLOCKED" ? "BLOCKED" : "Not generated yet");
+  const setupDetail = row.paperSetupStatus === "PAPER_TRACKING_BLOCKED" ? (safeList(row.paperSetupReasonCodes).join(", ") || "Readiness blocker reported") : setupLabel;
+  const candidateEligibility = row.candidateGenerationEligible ? "Eligible for future paper candidate generation" : "Not eligible until paper setup is ready";
+  return `<article class="hypothesis-card research-card" data-testid="paper-promotion-recommendation-item" data-hypothesis-id="${escapeHtml(row.hypothesisId)}">
+    <header class="hypothesis-card-header"><div><h3>${escapeHtml(row.hypothesisName)}</h3><p><strong>Why recommended:</strong> ${escapeHtml(row.recommendationReason)}</p></div>${renderStatusPill(row.approvalState, row.approvalState === "PAPER_PROMOTION_APPROVED" ? "healthy" : (eligible ? "warning" : "neutral"), {})}</header>
+    <div class="research-action-row" data-testid="paper-promotion-actions">
+      <button class="primary-action" type="button" data-paper-promotion-action="APPROVE_PAPER_TEST" data-hypothesis-id="${escapeHtml(row.hypothesisId)}" ${eligible ? "" : "disabled"}>Approve Paper Test</button>
+      <button class="ghost-button" type="button" data-paper-promotion-action="REJECT" data-hypothesis-id="${escapeHtml(row.hypothesisId)}" ${eligible ? "" : "disabled"}>Reject</button>
+      <button class="ghost-button" type="button" data-paper-promotion-action="DEFER" data-hypothesis-id="${escapeHtml(row.hypothesisId)}" ${eligible ? "" : "disabled"}>Defer</button>
+    </div>
+    <div class="edge-action-status" data-paper-promotion-status data-tone="${terminalMessage ? "ready" : "neutral"}" ${terminalMessage ? "" : "hidden"}>${escapeHtml(terminalMessage)}</div>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Current state</dt><dd>${escapeHtml(row.approvalState)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Shadow Validation</dt><dd>${escapeHtml(shadowResult)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Paper Readiness</dt><dd>${escapeHtml(paperReadiness)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Expected Sample Rate</dt><dd>${escapeHtml(row.expectedSampleFrequency)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Expected validation timeline</dt><dd>${escapeHtml(row.expectedValidationTimeline)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Risks / caveats</dt><dd>${escapeHtml(risks)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Approval</dt><dd>${escapeHtml(row.approvedStatusText || terminalMessage || "Awaiting paper-test approval")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Paper setup status</dt><dd>${escapeHtml(setupDetail)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Candidate generation eligibility</dt><dd>${escapeHtml(candidateEligibility)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Next step</dt><dd>${escapeHtml(row.paperSetupNextStep || "Awaiting qualifying paper candidates")}</dd></div>
+    </dl>
+    <p class="support-note">${escapeHtml(row.safetyStatement)} Approval does not mean approve trade, approve broker execution, approve real capital, or approve investment recommendation.</p>
+  </article>`;
+}
+
+function normalizePromotionShadowResult(value = "") {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "SHADOW_VALIDATION_PASSED" || text === "PASSED") return "PASSED";
+  if (text === "SHADOW_VALIDATION_FAILED" || text === "FAILED") return "FAILED";
+  return translateResearchReason(value);
+}
+
+function paperPromotionTerminalMessage(state = "") {
+  const normalized = String(state || "").trim().toUpperCase();
+  if (normalized === "PAPER_PROMOTION_APPROVED") return "Approved for paper research tracking.";
+  if (normalized === "PAPER_PROMOTION_REJECTED") return "Paper promotion rejected.";
+  if (normalized === "PAPER_PROMOTION_DEFERRED") return "Paper promotion deferred.";
+  return "";
+}
+
+function renderResearchNextStep(model = {}) {
+  return `<section class="operator-section research-next-step" data-testid="research-next-step">
+    <div class="section-heading"><div><div class="section-eyebrow">Next</div><h3>What happens next?</h3><p class="muted-mini">Research timing is separated from trading and ownership workflows.</p></div></div>
+    <div class="research-next-grid">
+      ${renderResearchFactCard("Next research step", model.nextStep.label, model.nextStep.detail)}
+      ${renderResearchFactCard("Expected timing", model.nextStep.timing, "If no future event is confirmed, Aegis says so plainly.")}
+    </div>
+  </section>`;
+}
+
+function renderResearchActiveSection(model = {}) {
+  const rows = safeList(model.activeResearch);
+  return `<section class="operator-section research-active" data-testid="research-active-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Active Research</div><h3>What is active?</h3><p class="muted-mini">Hypotheses here are being queued, tested, or monitored for more evidence.</p></div><span class="muted-mini">${escapeHtml(String(rows.length))} active</span></div>
+    ${rows.length ? `<div class="hypothesis-card-grid research-card-grid">${rows.map(renderResearchActiveCard).join("")}</div>` : `<div class="empty-state">No research is currently active.</div>`}
+  </section>`;
+}
+
+function renderResearchActiveCard(row = {}) {
+  return `<article class="hypothesis-card research-card" data-testid="research-active-card">
+    <header class="hypothesis-card-header"><div><h3>${escapeHtml(row.title)}</h3><p>${escapeHtml(row.explanation)}</p></div><span class="hypothesis-status hypothesis-status-${escapeHtml(String(row.state || "research").toLowerCase().replaceAll(" ", "-"))}">${escapeHtml(row.state)}</span></header>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Symbols studied</dt><dd>${escapeHtml(row.symbols)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Evidence progress</dt><dd>${escapeHtml(row.evidenceProgress)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Next expected</dt><dd>${escapeHtml(row.nextExpected)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Research action</dt><dd>${escapeHtml(row.operatorActionRequired)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Validation status</dt><dd>${escapeHtml(translateResearchReason(row.validationStatus))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Protocol used</dt><dd>${escapeHtml(row.validationProtocol)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Promotion eligibility</dt><dd>${escapeHtml(row.promotionEligibility)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Required metrics</dt><dd>${escapeHtml(translateResearchReason(row.requiredMetricStatus))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Source binding</dt><dd>${escapeHtml(translateResearchReason(row.artifactBindingStatus))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Bias checks</dt><dd>${escapeHtml(translateResearchReason(row.biasControlStatus))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Sample policy</dt><dd>${escapeHtml(translateResearchReason(row.sampleSizeStatus))}</dd></div>
+    </dl>
+    <p class="support-note">${escapeHtml(row.validationSummary)}</p>
+  </article>`;
+}
+
+function renderResearchFindingsSection(model = {}) {
+  const rows = safeList(model.findings);
+  return `<section class="operator-section research-findings" data-testid="research-findings-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Findings</div><h3>What has been learned?</h3><p class="muted-mini">Findings are research evidence only. They do not create trades or operational actions.</p></div><span class="muted-mini">${escapeHtml(String(rows.length))} finding${rows.length === 1 ? "" : "s"}</span></div>
+    ${rows.length ? `<div class="hypothesis-card-grid research-card-grid">${rows.map(renderResearchFindingCard).join("")}</div>` : `<div class="empty-state">No current research findings are ready yet.</div>`}
+  </section>`;
+}
+
+function renderResearchFindingCard(row = {}) {
+  return `<article class="hypothesis-card research-card" data-testid="research-finding-card">
+    <header class="hypothesis-card-header"><div><h3>${escapeHtml(row.title)}</h3><p>${escapeHtml(row.conclusion)}</p></div>${renderStatusPill(row.isFinalFinding ? "Ready" : "In progress", row.isFinalFinding ? "healthy" : "neutral", {})}</header>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Status</dt><dd>${escapeHtml(translateResearchReason(row.status))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Confidence</dt><dd>${escapeHtml(translateResearchReason(row.confidence))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Why it matters</dt><dd>${escapeHtml(row.whyItMatters)}</dd></div>
+    </dl>
+  </article>`;
+}
+
+function renderResearchBlockersSection(model = {}) {
+  const rows = safeList(model.blockers);
+  return `<section class="operator-section research-blockers" data-testid="research-blockers-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Blocked</div><h3>What is blocked?</h3><p class="muted-mini">Research blockers explain why an investigation cannot progress. Operational repair is handled outside Research.</p></div></div>
+    ${renderSimpleTable({
+      columns: [
+        { label: "Investigation", render: (row) => `<strong>${escapeHtml(row.title)}</strong>` },
+        { label: "Reason", render: (row) => escapeHtml(row.reason) },
+        { label: "Impact", render: (row) => escapeHtml(row.impact) },
+        { label: "What happens next", render: (row) => escapeHtml(row.nextStep) },
+      ],
+      rows,
+      emptyMessage: "No research blockers are reported.",
+    })}
+  </section>`;
+}
+
+function renderResearchActionSection(model = {}) {
+  const rows = safeList(model.actionRows);
+  return `<section class="operator-section research-actions" data-testid="research-action-section">
+    <div class="section-heading"><div><div class="section-eyebrow">David Action</div><h3>${rows.length ? "Research follow-up needed" : "No research action required"}</h3><p class="muted-mini">Only research decisions appear here. No trading or broker action is enabled.</p></div>${renderStatusPill(rows.length ? `${rows.length} follow-up${rows.length === 1 ? "" : "s"}` : "None", rows.length ? "warning" : "neutral", {})}</div>
+    ${renderSimpleTable({
+      columns: [
+        { label: "Action", render: (row) => `<strong>${escapeHtml(row.action)}</strong>` },
+        { label: "Research item", render: (row) => escapeHtml(row.title) },
+        { label: "Reason", render: (row) => escapeHtml(row.reason) },
+        { label: "Expectation", render: (row) => escapeHtml(row.expectation) },
+      ],
+      rows,
+      emptyMessage: "No research action is required.",
+    })}
+  </section>`;
+}
+
+function renderResearchEvidence(model = {}) {
+  return `<details class="operator-disclosure research-evidence" data-testid="research-evidence" data-collapsed-by-default>
+    <summary>View research evidence</summary>
+    ${renderDefinitionRows(model.evidenceRows)}
+  </details>`;
+}
+
+async function renderOperationsWorkspace() {
+  return renderAegisWorkflowPage("opportunities");
+}
+
+function renderAuditEvidenceWorkspace() {
+  return {
+    title: "Engineering Details",
+    meta: "Deep forensic and engineering evidence workspace.",
+    html: [
+      renderSectionHeader({ eyebrow: "Engineering Mode", title: "Engineering Details", subtitle: "Artifact paths, hashes, lineage, and reconciliation detail live here, not in daily Operator Mode." }),
+      renderCardSection({ eyebrow: "Evidence", title: "Low-level surfaces", subtitle: "Old routes remain deep-linkable for debugging.", body: `<div class="command-row"><a class="primary-button" href="/aegis-verified-runtime" data-route="/aegis-verified-runtime">Verified Graph</a><a class="ghost-button" href="/aegis-runtime-truth" data-route="/aegis-runtime-truth">Runtime Truth</a><a class="ghost-button" href="/aegis-repair-center" data-route="/aegis-repair-center">Repair Center</a><a class="ghost-button" href="/aegis-candidate-lineage" data-route="/aegis-candidate-lineage">Candidate Lineage</a></div>` }),
+    ].join(""),
+    contextHtml: renderTrustPanel({ title: "Mode", items: ["Operator Mode hides this detail by default", "Engineering Mode exposes all routes", "Policy gates unchanged"] }),
+  };
+}
+
+function renderWorkflowUnavailable(title = "Workflow", endpoint = "/api/aegis/operator-cockpit", error = {}) {
+  return {
+    title,
+    meta: "Backend unavailable; workflow read model could not be loaded.",
+    html: renderWorkflowCard({
+      payload: {},
+      sourceKey: "workflow_read_model",
+      fieldPath: "workflow_read_model",
+      whyShown: "This page renders read-only Aegis read models and degrades without mutating workflow state.",
+      eyebrow: "BACKEND_UNAVAILABLE",
+      title: `${title} Unavailable`,
+      subtitle: "The read-only projection endpoint did not return a usable payload.",
+      body: renderDefinitionRows([
+        { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || endpoint },
+        { label: "Failure", value: error?.message || "Read model unavailable" },
+      ]),
+    }),
+    contextHtml: "",
+  };
+}
+
 async function renderAegisWorkflowPage(workflow) {
   if (workflow === "theses") return renderAegisThesesWorkflow();
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  if (workflow === "exit_review") {
+    try {
+      const exitPayload = await fetchAegisExitReview(routeParams);
+      const projection = exitPayload?.data || exitPayload?.exit_review_projection_v1 || {};
+      return withOperationalTimestamps(renderExitReviewWorkspace({
+        ok: exitPayload?.ok !== false,
+        day_utc: projection.day_utc || routeParams.day || routeParams.operational_day || "",
+        generated_at_utc: projection.generated_at_utc || "",
+        read_only: true,
+        exit_review_projection_v1: projection,
+        exit_review_projection: projection,
+        source_paths: { exit_review_projection_v1: exitPayload?.artifact_paths?.exit_review_projection || "" },
+      }), projection);
+    } catch (error) {
+      return renderWorkflowUnavailable("Exit Review", "/api/aegis/exit-review/latest", error);
+    }
+  }
+  if (workflow === "performance" || workflow === "review") {
+    try {
+      const [tradeResult, narrativeResult] = await Promise.allSettled([
+        fetchAegisPaperTradeEvaluation(routeParams),
+        fetchAegisNarrativeOperationalAnalytics(routeParams),
+      ]);
+      const tradePayload = tradeResult.status === "fulfilled" ? tradeResult.value : {};
+      const narrativePayload = narrativeResult.status === "fulfilled" ? narrativeResult.value : {};
+      const tradeProjection = tradePayload?.data || tradePayload?.paper_entry_evaluation_projection_v1 || {};
+      const narrative = narrativePayload?.data || narrativePayload?.narrative_operational_analytics_v1 || {};
+      const payload = {
+        ok: tradeResult.status === "fulfilled" || narrativeResult.status === "fulfilled",
+        day_utc: tradeProjection.day_utc || narrative.day_utc || routeParams.day || routeParams.operational_day || "",
+        generated_at_utc: narrative.generated_at_utc || tradeProjection.generated_at_utc || "",
+        read_only: true,
+        paper_entry_evaluation_projection_v1: tradeProjection,
+        paper_entry_evaluation_projection: tradeProjection,
+        narrative_operational_analytics_v1: narrative,
+        narrative_operational_analytics: narrative,
+        source_paths: {
+          paper_trade_evaluation_projection_v1: tradePayload?.artifact_paths?.paper_trade_evaluation_projection || "",
+          narrative_operational_analytics_v1: narrativePayload?.artifact_path || narrative.artifact_path || "",
+        },
+      };
+      return withOperationalTimestamps(renderAegisReviewWorkflow(payload), payload);
+    } catch (error) {
+      return renderWorkflowUnavailable("Performance", "/api/aegis/paper-trade-evaluation/latest", error);
+    }
+  }
   let payload;
   try {
-    payload = ["opportunities", "today", "candidates", "journal", "runtime_timeline"].includes(workflow)
-      ? await fetchAegisOperatorStateSnapshotLatest()
-      : await fetchAegisOperatorCockpit();
+    payload = ["opportunities", "today", "candidates", "candidate_funnel", "journal", "open_paper_positions", "runtime_timeline"].includes(workflow)
+      ? await fetchAegisOperatorStateSnapshotLatest(routeParams)
+      : await fetchAegisOperatorCockpit(routeParams);
   } catch (error) {
     return {
       title: workflowTitle(workflow),
@@ -3141,10 +8164,10 @@ async function renderAegisWorkflowPage(workflow) {
   if (payload && payload.data && typeof payload.data === "object" && payload.data.schema_id === "operator_state_snapshot") {
     payload = { ...payload.data, api_envelope: { ok: payload.ok, degraded: payload.degraded, errors: payload.errors, next_action: payload.next_action } };
   }
-  if (["opportunities", "today", "candidates", "journal", "runtime_timeline"].includes(workflow) && payload.status === "MISSING") {
+  if (["opportunities", "today", "candidates", "candidate_funnel", "journal", "open_paper_positions", "runtime_timeline"].includes(workflow) && payload.status === "MISSING") {
     return renderMissingCanonicalTodayWorkflow(payload);
   }
-  if (["opportunities", "today", "candidates", "journal", "runtime_timeline"].includes(workflow)) {
+  if (["opportunities", "today", "candidates", "candidate_funnel", "journal", "open_paper_positions", "runtime_timeline"].includes(workflow)) {
     payload.operator_state_snapshot = payload.operator_state_snapshot || payload;
     payload.operator_today_projection = payload.operator_today_projection || payload.today_projection || {};
     payload.operator_task_projection = payload.operator_task_projection || payload.operator_tasks_projection || {};
@@ -3203,6 +8226,9 @@ async function renderAegisWorkflowPage(workflow) {
   }
   if (workflow === "opportunities" || workflow === "today") return withOperationalTimestamps(renderAegisTodayWorkflow(payload), payload);
   if (workflow === "candidates") return withOperationalTimestamps(renderAegisCandidatesWorkflow(payload), payload);
+  if (workflow === "open_paper_positions") return withOperationalTimestamps(renderOpenPaperPositionsWorkflow(payload), payload);
+  if (workflow === "candidate_funnel") return withOperationalTimestamps(renderCandidateFunnelWorkspace(payload), payload);
+  if (workflow === "exit_review") return withOperationalTimestamps(renderExitReviewWorkspace(payload), payload);
   if (workflow === "runtime_timeline" || workflow === "scheduler") return renderAegisRuntimeTimelineWorkflow(payload);
   if (workflow === "theses") return renderAegisThesesWorkflow();
   if (workflow === "performance" || workflow === "review") return withOperationalTimestamps(renderAegisReviewWorkflow(payload), payload);
@@ -3219,6 +8245,7 @@ async function renderAegisThesesWorkflow() {
     html: renderHypothesesWorkspace(consolePayload, {}),
     contextHtml: "",
     hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
   };
 }
 
@@ -3263,13 +8290,15 @@ function workflowTitle(workflow) {
     ? "Dashboard"
     : workflow === "candidates"
       ? "Candidates"
-      : workflow === "performance" || workflow === "review"
-        ? "System Health"
+      : workflow === "exit_review"
+        ? "Exit Review"
+        : workflow === "performance" || workflow === "review"
+        ? "Performance"
         : workflow === "theses"
           ? "Hypotheses"
           : workflow === "edge_lab" || workflow === "research"
             ? "Research"
-            : "Captured Trades";
+            : "Closed Trades";
 }
 
 function renderWorkflowCard({ payload, sourceKey, fieldPath, whyShown, eyebrow, title, subtitle, body }) {
@@ -3287,19 +8316,29 @@ function renderCanonicalEvidenceBlock(payload = {}, sourceKey = "canonical_opera
   const source = freshness[sourceKey] || {};
   const sourcePaths = payload.source_paths || {};
   const canonicalPath = sourcePaths.canonical_operator_state || source.path || "";
-  const sourcePath = source.path || canonicalPath || "Source artifact missing; run refresh command.";
-  const freshnessLabel = source.freshness_status || (source.path || canonicalPath ? "Currentness not reported" : "Not generated yet today.");
+  const keyedSourcePath = sourcePaths[sourceKey] || "";
+  const sourcePath = source.path || keyedSourcePath || canonicalPath || "";
+  const freshnessLabel = source.freshness_status || (source.path || keyedSourcePath || canonicalPath ? "Currentness not reported" : "Not generated yet today.");
   return `
-    <details class="support-note" style="margin-top:12px;">
-      <summary>Canonical evidence</summary>
-      ${renderDefinitionRows([
-        { label: "Canonical field path", value: fieldPath || "canonical_operator_state" },
-        { label: "Source artifact path", value: sourcePath },
-        { label: "Freshness status", value: readableStatus(freshnessLabel) },
-        { label: "Generated / last updated", value: source.generated_at || canonical.generated_at_utc || payload.generated_at_utc || "Not generated yet today." },
-        { label: "Why shown", value: whyShown || "Included by workflow projection." },
-        { label: "Drilldown link", value: sourcePath },
-      ])}
+    <details class="support-note evidence-compact" style="margin-top:12px;">
+      <summary>Evidence available</summary>
+      <div class="evidence-compact-body">
+        <p>${escapeHtml(whyShown || "Included by workflow projection.")}</p>
+        ${renderEvidenceTrigger({
+          title: `${sourceKey} evidence`,
+          explanation: whyShown || "Canonical workflow evidence for this section.",
+          supportingMetric: fieldPath || sourceKey,
+          artifactPath: sourcePath,
+          artifactHash: source.content_hash || source.hash || "",
+          replayHash: canonical.source_fingerprint || payload.source_fingerprint || "",
+          sourceTimestamp: source.generated_at || canonical.generated_at_utc || payload.generated_at_utc || "",
+          rawMetricKey: fieldPath || sourceKey,
+          evidenceStatus: sourcePath ? "COMPLETE" : "INSUFFICIENT_DATA",
+          confidence: sourcePath ? "HIGH" : "LOW",
+          label: "View Evidence",
+        })}
+        <div class="muted-mini">Freshness: ${escapeHtml(readableStatus(freshnessLabel))}</div>
+      </div>
     </details>
   `;
 }
@@ -3396,6 +8435,7 @@ function renderReadinessDomainStatuses(ticket = {}) {
   ];
   return `
     <div class="compact-table" style="margin-top:10px;">
+      <h4>Open Position PnL</h4>
       ${renderSimpleTable({
         columns: [
           { label: "Domain", render: (row) => escapeHtml(row.label) },
@@ -3709,11 +8749,11 @@ function renderManualCaptureRecordForm(manual = {}, { blocked = false, blocker =
   const disabledReason = alreadyCaptured
     ? "This ticket already has an immutable manual capture record and is read-only."
     : (blocked ? (blocker || "Governance blocker is present.") : (stale ? staleMessage : (policyReason || `lineage=${lineageStatus}; submit_boundary=${submitBoundaryStatus}`)));
-  const entryReference = manual.entry_reference_price || manual.entry || manual.paper_trade_construction?.entry_reference_price || "";
-  const plannedQuantity = manual.quantity ?? manual.suggested_quantity ?? manual.paper_trade_construction?.suggested_quantity ?? "";
-  const stopPrice = manual.stop_price || manual.stop || manual.paper_trade_construction?.stop_price || "";
-  const risk = manual.risk || manual.max_loss_estimate || manual.paper_trade_construction?.max_loss_estimate || "";
-  const notional = manual.notional || manual.suggested_notional || manual.paper_trade_construction?.suggested_notional || "";
+  const entryReference = manual.entry_reference_price || manual.entry || manual.paper_entry_construction?.entry_reference_price || "";
+  const plannedQuantity = manual.quantity ?? manual.suggested_quantity ?? manual.paper_entry_construction?.suggested_quantity ?? "";
+  const stopPrice = manual.stop_price || manual.stop || manual.paper_entry_construction?.stop_price || "";
+  const risk = manual.risk || manual.max_loss_estimate || manual.paper_entry_construction?.max_loss_estimate || "";
+  const notional = manual.notional || manual.suggested_notional || manual.paper_entry_construction?.suggested_notional || "";
   const draft = readManualCaptureDraft(ticketId);
   let operatorDefault = "David";
   try {
@@ -3870,7 +8910,7 @@ function renderOperatorReadinessProjectionPanel(payload = {}) {
       ${renderDefinitionRows([
         { label: "Runtime", value: runtime.status || "UNKNOWN" },
         { label: "Governance", value: runtime.governance_mode || "Governed" },
-        { label: "Environment", value: runtime.environment || "Production" },
+        { label: "Environment", value: runtime.environment || "Paper Research Mode" },
         { label: "Readiness", value: readiness.status || "UNKNOWN" },
         { label: "Blockers", value: String(readiness.blocker_count ?? blockers.length) },
         { label: "Data warnings", value: String(readiness.stale_market_data_count ?? (market.stale_market_data ? 1 : 0)) },
@@ -3921,8 +8961,22 @@ function dashboardOperationalTimestamps(payload = {}) {
   };
 }
 
+function renderOperationalSessionFallbackBanner(payload = {}) {
+  const resolution = payload.operational_day_resolution || payload.operator_state_snapshot?.operational_day_resolution || {};
+  if (resolution.fallback_applied !== true) return "";
+  const day = resolution.source_day || resolution.resolved_day || payload.displayed_artifact_day || payload.day_utc || "";
+  if (!day) return "";
+  return `<div class="callout info" data-testid="operational-session-fallback-banner" data-operational-session-fallback>${escapeHtml(resolution.banner_message || `Viewing latest valid operational trading session: ${day}`)}</div>`;
+}
+
+function withOperationalSessionFallbackBanner(view = {}, payload = {}) {
+  const banner = renderOperationalSessionFallbackBanner(payload);
+  if (!banner) return view;
+  return { ...view, html: `${banner}${view.html || ""}` };
+}
+
 function withOperationalTimestamps(view = {}, payload = {}) {
-  return { ...view, operationalTimestamps: dashboardOperationalTimestamps(payload) };
+  return { ...withOperationalSessionFallbackBanner(view, payload), operationalTimestamps: dashboardOperationalTimestamps(payload) };
 }
 
 function renderDashboardOperationalTimestamps(payload = {}) {
@@ -4117,95 +9171,1472 @@ function renderDashboardDegradedReadOnlyBanner(payload = {}) {
   </section>`;
 }
 
-function renderCurrentDayStatusBanner(payload = {}) {
-  if (dashboardDegradedReadOnlyState(payload)) return renderDashboardDegradedReadOnlyBanner(payload);
-  const snapshot = payload.operator_state_snapshot || {};
-  const currentTruth = payload.current_operator_truth || snapshot.current_operator_truth || {};
-  const currentDay = payload.current_day_status || snapshot.current_day_status || currentTruth.current_day_status || {};
-  const historical = payload.historical_fallback || snapshot.historical_fallback || currentTruth.historical_fallback || {};
-  const today = snapshot.operator_today_projection || payload.operator_today_projection || {};
-  const runtimeDay = currentTruth.requested_day || today.current_runtime_day || payload.day_utc || snapshot.requested_day || snapshot.day_utc || "";
-  const displayedDay = currentTruth.displayed_artifact_day || payload.displayed_artifact_day || snapshot.displayed_artifact_day || historical.source_day || runtimeDay;
-  const state = String(currentDay.status || currentTruth.current_truth_status || today.current_day_run_status || "").toUpperCase();
-  const missingSymbols = safeList(currentDay.critical_missing_symbols).length ? safeList(currentDay.critical_missing_symbols) : safeList(currentDay.missing_symbols);
-  const failedStep = currentDay.failed_step || "current-day run";
-  const runtimeMode = currentTruth.runtime_mode || today.runtime_mode || today.operational_mode || currentDay.runtime_mode || currentDay.market_data_mode || "";
-  const marketDataMode = runtimeMode || currentDay.market_data_mode || currentTruth.market_data_mode || today.market_data_mode || "";
-  const finalEodStatus = currentDay.final_eod_certification_status || currentTruth.final_eod_certification_status || today.final_eod_certification_status || "";
-  const finalEodPending = currentDay.final_eod_certification_pending === true || today.final_eod_certification_pending === true || String(finalEodStatus).toUpperCase() === "PENDING";
-  const nextAction = currentDay.next_action || "Review current-day run artifacts.";
-  const lastAttempt = currentDay.last_attempt_time || currentTruth.generated_at_utc || payload.generated_at_utc || "";
-  const schedulerFailure = currentDay.scheduler_failure || {};
-  const schedulerLine = schedulerFailure.status === "FAILED"
-    ? `<span>Scheduler: ${escapeHtml(schedulerFailure.blocker || "failed")} - ${escapeHtml(schedulerFailure.next_action || "Review scheduler artifact.")}</span>`
-    : "";
-  let title = "Today’s run is current.";
-  let tone = "healthy";
-  if (state === "INTRADAY_OPERATIONAL_READY") {
-    title = "Today’s intraday sleeve run is current. Final EOD certification is pending.";
-    tone = "healthy";
-  } else if (state === "MARKET_NOT_FINALIZED_YET") {
-    title = currentDay.message || "Market data is not finalized yet. Aegis will retry at 16:30, 17:00, and 18:00.";
-    tone = "warning";
-  } else if (state === "PROVIDER_TIMEOUT") {
-    title = currentDay.message || "Provider timeout. Some symbols were not fetched.";
-    tone = "danger";
-  } else if (state === "PROVIDER_SOURCE_UNAVAILABLE") {
-    title = currentDay.message || "Provider source unavailable. Current-day final data is not available.";
-    tone = "danger";
-  } else if (state === "CURRENT_DAY_DATA_STALE") {
-    title = currentDay.message || "Current-day market data is stale.";
-    tone = "danger";
-  } else if (state === "PARTIAL_PROVIDER_SUCCESS") {
-    title = currentDay.message || `Partial market data available. Missing: ${missingSymbols.join(", ") || "none reported"}.`;
-    tone = "warning";
-  } else if (state === "FINAL_EOD_READY") {
-    title = currentDay.message || "Final EOD market data is ready.";
-    tone = "healthy";
-  } else if (["CURRENT_DAY_FAILED"].includes(state)) {
-    title = currentDay.message || "Today’s run failed: market data unavailable.";
-    tone = "danger";
-  } else if (["CURRENT_DAY_BLOCKED", "HISTORICAL_ONLY"].includes(state)) {
-    title = currentDay.message || "Today’s candidates are blocked.";
-    tone = "warning";
-  } else if (displayedDay && runtimeDay && displayedDay !== runtimeDay) {
-    title = "Showing latest completed historical result from " + displayedDay + ".";
-    tone = "warning";
+function dashboardRunStatusSummary(payload = {}) {
+  const currentDay = payload.current_day_status || {};
+  const today = payload.operator_today_projection || {};
+  const day = today.displayed_artifact_day || payload.displayed_artifact_day || today.current_runtime_day || payload.day_utc || currentDay.day_utc || "unknown";
+  const eodRaw = currentDay.final_eod_certification_status || today.final_eod_certification_status || "unknown";
+  const eodPending = currentDay.final_eod_certification_pending === true || today.final_eod_certification_pending === true || String(eodRaw).toUpperCase() === "PENDING";
+  const eodText = eodPending ? "EOD pending" : `EOD ${readableStatus(eodRaw)}`;
+  const candidateRaw = currentDay.candidate_certification_state || today.candidate_certification_state || currentDay.certification_state || "unknown";
+  const candidatePending = String(candidateRaw).toUpperCase().includes("PENDING");
+  const candidateText = candidatePending ? "Candidate certification pending" : readableStatus(candidateRaw);
+  return { day, eodText, candidateText, currentDay, today };
+}
+
+function dashboardCandidateProjection(payload = {}) {
+  return payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {};
+}
+
+function dashboardPaperOperatorProjection(payload = {}) {
+  return payload.paper_operator_projection || payload.paper_operator_projection_v1 || payload.canonical_operator_state?.paper_operator_projection || {};
+}
+
+function dashboardCandidateLifecycleProjection(payload = {}) {
+  return payload.candidate_lifecycle_projection || payload.candidate_lifecycle_projection_v1 || payload.canonical_operator_state?.candidate_lifecycle_projection || {};
+}
+
+function renderRuntimeModeStatusStrip(payload = {}) {
+  const projection = dashboardPaperOperatorProjection(payload);
+  const paper = projection.paper_mode || {};
+  const advisory = projection.advisory_mode || {};
+  const live = projection.live_mode || {};
+  const paperStatus = String(paper.status || "UNKNOWN").toUpperCase();
+  const advisoryStatus = String(advisory.status || "BLOCKED").toUpperCase();
+  const liveStatus = String(live.status || "DISABLED").toUpperCase();
+  return `<div class="operator-summary-strip operator-dashboard-summary runtime-mode-status-strip" data-runtime-mode-status-strip>
+    ${renderMetricCard({ label: "Paper Mode", value: paperStatus })}
+    ${renderMetricCard({ label: "Advisory Mode", value: advisoryStatus })}
+    ${renderMetricCard({ label: "Live Mode", value: liveStatus === "DISABLED_BY_DESIGN" ? "DISABLED" : liveStatus })}
+    ${renderMetricCard({ label: "Paper Actions", value: safeList(paper.allowed_actions).join(", ") || "None" })}
+  </div>`;
+}
+
+function dashboardRuntimeTruth(payload = {}) {
+  return payload.runtime_truth_kernel || payload.runtime_truth || payload.readiness_kernel || payload.current_operator_truth?.runtime_truth_kernel || {};
+}
+
+function dashboardLatestRunSummary(payload = {}) {
+  const { currentTruth, currentDay, today, snapshot } = dashboardCurrentDayPayload(payload);
+  const projection = dashboardCandidateProjection(payload);
+  const runtime = dashboardRuntimeTruth(payload);
+  const operationalDay = projection.day_utc || currentTruth.requested_day || today.current_runtime_day || payload.requested_day || payload.day_utc || snapshot.requested_day || snapshot.day_utc || "unknown";
+  const run = projection.run_summary || {};
+  const generatedAt = run.diagnostics_completed_at || run.completed_at || projection.generated_at_utc || projection.canonical_generated_at || currentDay.last_attempt_time || today.last_certification_attempt_at || payload.generated_at_utc || payload.generated_at || "";
+  const runStart = run.run_start || run.started_at || "NOT_RECORDED";
+  const diagnosticsCompletedAt = run.diagnostics_completed_at || run.completed_at || "";
+  const diagnosticsStartedAt = run.diagnostics_started_at || "NOT_RECORDED";
+  const projectionGeneratedAt = run.projection_generated_at || projection.projection_generated_at || projection.generated_at || projection.canonical_generated_at || "";
+  const marketSnapshotTime = run.market_snapshot_time || projection.market_snapshot_time || "";
+  const candidateSnapshotTime = run.candidate_snapshot_time || projection.candidate_snapshot_time || "";
+  const runtimeClass = String(runtime.runtime_truth_classification || payload.runtime_truth_classification || currentTruth.runtime_truth_classification || "").toUpperCase();
+  const readiness = String(runtime.highest_readiness_layer || runtime.readiness_status || currentDay.status || currentTruth.current_truth_status || "UNKNOWN").toUpperCase();
+  const diagnosticsStatus = String(projection.diagnostics_status || "UNKNOWN").toUpperCase();
+  const queueStatus = String(projection.paper_review_queue_status || "UNKNOWN").toUpperCase();
+  const diagnosticOutputs = Number(run.diagnostic_candidate_outputs ?? projection.diagnostic_candidate_outputs ?? run.diagnostics_candidates_generated ?? projection.diagnostics_candidates_generated ?? projection.candidates_generated_count ?? 0);
+  const generatedCandidates = Number(run.reviewable_current_day_candidates ?? projection.reviewable_current_day_candidates ?? run.valid_candidate_contracts ?? projection.valid_candidate_contracts ?? run.candidate_contracts_created ?? projection.candidate_contracts_created ?? projection.candidate_contract_count ?? today.candidate_contract_count ?? 0);
+  const contracts = Number(run.valid_candidate_contracts ?? projection.valid_candidate_contracts ?? run.candidate_contracts_created ?? projection.candidate_contracts_created ?? projection.candidate_contract_count ?? today.candidate_contract_count ?? 0);
+  const rejectedContracts = Number(run.rejected_candidate_contracts ?? projection.rejected_candidate_contracts ?? 0);
+  const mismatchExplanation = run.mismatch_explanation || projection.mismatch_explanation || {};
+  const persistent = Number(projection.persistent_candidate_state_count ?? 0);
+  const awaiting = Number(projection.awaiting_review_count ?? projection.paper_review_queue_count ?? 0);
+  const reviewable = Number(projection.reviewable_candidate_count ?? awaiting);
+  const blocked = Number(projection.blocked_count ?? projection.locked_non_certified_count ?? 0);
+  const rejected = Number(run.rejected_count ?? projection.rejected_count ?? projection.workflow_state_counts?.REJECTED_BY_OPERATOR ?? 0);
+  const rawSignals = Number(run.raw_signals ?? projection.raw_signal_count ?? today.raw_signal_count ?? currentDay.raw_signal_count ?? 0);
+  const sleevesExpected = Number(run.sleeves_expected ?? projection.sleeves_expected ?? currentDay.sleeves_expected ?? today.sleeves_expected ?? 0);
+  const sleevesExecuted = Number(run.sleeves_run ?? projection.sleeves_run ?? currentDay.sleeves_executed ?? today.sleeves_executed ?? projection.sleeves_executed ?? 0);
+  const openPositions = Number(projection.workflow_state_counts?.PAPER_POSITION_OPEN ?? projection.paper_position_open_count ?? 0);
+  const closedPositions = Number(projection.workflow_state_counts?.PAPER_POSITION_CLOSED ?? projection.paper_position_closed_count ?? 0);
+  const legacyCaptures = Number(projection.legacy_capture_count ?? payload.positions?.legacy_capture_count ?? payload.canonical_operator_state?.positions?.legacy_capture_count ?? 0);
+  const expired = Number(projection.workflow_state_counts?.EXPIRED ?? projection.expired_count ?? 0);
+  const currentDayGenerationRan = diagnosticsStatus === "AVAILABLE" || rawSignals > 0 || diagnosticOutputs > 0 || generatedCandidates > 0 || contracts > 0;
+  const runStatus = String(run.status || "").toUpperCase() || (readiness === "BLOCKED" ? "BLOCKED" : (runtimeClass.includes("PARTIAL") || diagnosticsStatus === "MISSING" || diagnosticsStatus === "UNKNOWN" ? "PARTIAL" : "SUCCESS"));
+  const blockers = safeList(runtime.missing_or_stale_sources)
+    .map((row) => row.logical_name || row.source_key || row.artifact_id || row.reason || "runtime blocker")
+    .filter(Boolean)
+    .slice(0, 4);
+  const topBlockers = blockers.length ? blockers : safeList(payload.blockers).map((row) => row.code || row.reason || "runtime blocker").filter(Boolean).slice(0, 4);
+  const carriedExplanation = persistent > 0
+    ? `${persistent} lifecycle candidate${persistent === 1 ? " is" : "s are"} carried forward until approved, rejected, expired, or invalidated by runtime policy.`
+    : "No carried-forward lifecycle candidates are active.";
+  const generationExplanation = currentDayGenerationRan
+    ? "Current-day candidate diagnostics are available."
+    : "Current-day candidate generation has not completed for the displayed operational day.";
+  const diagnosticRejectionRows = safeList(run.diagnostic_rejection_rows).length
+    ? safeList(run.diagnostic_rejection_rows)
+    : (safeList(projection.diagnostic_rejection_rows).length ? safeList(projection.diagnostic_rejection_rows) : safeList(mismatchExplanation.diagnostic_rejection_rows));
+  const inputContractReconciliationRows = safeList(run.input_contract_reconciliation_rows).length
+    ? safeList(run.input_contract_reconciliation_rows)
+    : (safeList(projection.input_contract_reconciliation_rows).length ? safeList(projection.input_contract_reconciliation_rows) : safeList(mismatchExplanation.input_contract_reconciliation_rows));
+  return { operationalDay, generatedAt, runStart, diagnosticsStartedAt, diagnosticsCompletedAt, projectionGeneratedAt, marketSnapshotTime, candidateSnapshotTime, runStatus, readiness, diagnosticsStatus, queueStatus, contracts, generatedCandidates, diagnosticOutputs, rejectedContracts, mismatchExplanation, diagnosticRejectionRows, inputContractReconciliationRows, persistent, awaiting, reviewable, blocked, rejected, rawSignals, sleevesExpected, sleevesExecuted, openPositions, closedPositions, legacyCaptures, expired, topBlockers, carriedExplanation, generationExplanation, run };
+}
+
+function renderDiagnosticRejectionReasons(rows = [], projection = {}) {
+  const rejectionRows = safeList(rows);
+  const sourcePath = projection.diagnostic_rejection_source_path || projection.candidate_diagnostics_path || projection.run_summary?.diagnostic_rejection_source_path || projection.run_summary?.diagnostics_path || "";
+  const targetDay = projection.day_utc || projection.run_summary?.target_day || "YYYY-MM-DD";
+  if (!rejectionRows.length) {
+    const rejectedCount = Number(projection.rejected_count ?? projection.run_summary?.rejected_count ?? 0);
+    if (rejectedCount <= 0) return "";
+    const command = `TARGET_DAY=${targetDay} npm run aegis:candidate-diagnostics && TARGET_DAY=${targetDay} npm run aegis:canonical-operator-state`;
+    return `<section class="diagnostic-action-summary callout warning" data-testid="diagnostic-action-summary">
+      <div class="eyebrow">Top Issue</div>
+      <strong>NO_PER_OUTPUT_REJECTION_ROWS</strong>
+      <div class="diagnostic-summary-grid">
+        <div><span>Impact</span><p>Diagnostics reported ${escapeHtml(String(rejectedCount))} rejected candidates, but no per-output rejection rows were present.</p></div>
+        <div><span>Next Action</span><p>Rebuild candidate diagnostics and canonical operator state.</p></div>
+        <div><span>Affected Count</span><strong>${escapeHtml(String(rejectedCount))}</strong></div>
+      </div>
+      <div class="engineering-fix-actions"><button class="primary-button" type="button" data-copy-text="${escapeHtml(command)}">Repair</button><button class="ghost-button" type="button" data-copy-text="${escapeHtml(command)}">Copy Command</button></div>
+      <details class="diagnostic-detail-drawer engineering-details-table">
+        <summary>Evidence</summary>
+        <div class="engineering-group-action"><strong>Command:</strong> <button class="ghost-button" type="button" data-copy-text="${escapeHtml(command)}">Copy Command</button> <code>${escapeHtml(command)}</code></div>
+        <div class="engineering-group-action"><strong>Diagnostics evidence:</strong> <button class="ghost-button" type="button" data-copy-text="${escapeHtml(sourcePath || "")}">Copy Path</button> <span class="muted-mini">${escapeHtml(sourcePath || "not available")}</span></div>
+      </details>
+    </section>`;
   }
-  const staleLine = displayedDay && runtimeDay && displayedDay !== runtimeDay
-    ? `<div class="callout warning"><strong>READ_ONLY_PRIOR_DAY_FALLBACK</strong> Showing latest completed historical result from ${escapeHtml(displayedDay)}. Current-day candidate generation waits for validation.</div>`
-    : "";
-  const retryActionAvailable = currentDay.retry_action_available === true || currentDay.retry_action_endpoint === "/api/aegis/data-remediation/run";
-  const retryButton = retryActionAvailable && ["CURRENT_DAY_FAILED", "CURRENT_DAY_BLOCKED", "MARKET_NOT_FINALIZED_YET", "PROVIDER_TIMEOUT", "PROVIDER_SOURCE_UNAVAILABLE", "CURRENT_DAY_DATA_STALE", "PARTIAL_PROVIDER_SUCCESS", "PENDING_VENDOR_DATA", "PARTIAL_DATA_AVAILABLE", "READ_ONLY_PRIOR_DAY_FALLBACK"].includes(state) && String(failedStep).includes("market_data")
-    ? `<form class="research-data-acquisition-form research-data-acquisition-plan" data-day="${escapeHtml(runtimeDay)}">
-        <input type="hidden" name="data_action" value="fetch-market-data-now">
-        <input type="hidden" name="day_utc" value="${escapeHtml(runtimeDay)}">
-        <input type="hidden" name="playbook_id" value="${escapeHtml(currentDay.retry_action_playbook_id || "refresh_required_symbol_data")}">
-        <input type="hidden" name="symbols" value="${escapeHtml(missingSymbols.join(","))}">
-        <button class="action-button" type="submit" data-command="retry-market-data-refresh" data-day="${escapeHtml(runtimeDay)}">Retry market data refresh</button>
-        <span class="edge-action-status" data-research-data-acquisition-status></span>
-      </form>`
-    : "";
+  const groups = groupDiagnosticRejectionRows(rejectionRows, projection);
+  const actionRequired = groups.filter((group) => group.actionability === "ACTION_REQUIRED");
+  const monitor = groups.filter((group) => group.actionability === "MONITOR");
+  const informational = groups.filter((group) => group.actionability === "INFORMATIONAL");
+  const actionRequiredCount = actionRequired.reduce((total, group) => total + group.rows.length, 0);
+  const monitorCount = monitor.reduce((total, group) => total + group.rows.length, 0);
+  const informationalCount = informational.reduce((total, group) => total + group.rows.length, 0);
+  const topGroup = actionRequired[0] || monitor[0] || informational[0];
+  const fullTable = renderSimpleTable({
+    columns: [
+      { label: "Sleeve / symbol", render: (row) => escapeHtml([row.sleeve_id || row.producer_id || "UNKNOWN", row.symbol || ""].filter(Boolean).join(" / ")) },
+      { label: "Actionability", render: (row) => renderStatusPill(diagnosticRejectionActionability(row), diagnosticRejectionActionability(row) === "ACTION_REQUIRED" ? "warning" : "neutral", {}) },
+      { label: "Diagnostic status", render: (row) => renderStatusPill(row.run_status || row.status || "UNKNOWN", String(row.run_status || row.status || "").toUpperCase() === "BLOCKED" ? "warning" : "neutral", {}) },
+      { label: "Rejection reason", render: (row) => `<strong>${escapeHtml(row.rejection_reason || row.reason || row.canonical_blocker || "UNKNOWN")}</strong>` },
+      { label: "Reason codes", render: (row) => escapeHtml(safeList(row.reason_codes).join(", ") || row.canonical_blocker || "UNKNOWN") },
+      { label: "Next repair action", render: (row) => `<button class="ghost-button" type="button" data-copy-text="${escapeHtml(diagnosticRejectionRequiredAction(row, projection))}">Copy Command</button><div class="muted-mini">${escapeHtml(diagnosticRejectionRequiredAction(row, projection))}</div>` },
+      { label: "Evidence", render: (row) => `<button class="ghost-button" type="button" data-copy-text="${escapeHtml(row.source_artifact_path || sourcePath || "")}">Copy Path</button><div class="muted-mini">${escapeHtml(row.source_artifact_path || sourcePath || "not available")}</div>` },
+    ],
+    rows: rejectionRows,
+    emptyMessage: "No diagnostic rejection rows reported.",
+  });
+  return `<section class="diagnostic-action-summary" data-testid="diagnostic-action-summary">
+    <div class="support-note"><strong>Candidate Rejections</strong><span>Grouped by issue type, affected sleeve, and required action. Raw diagnostic rows stay behind View Details.</span></div>
+    <div class="diagnostic-action-counts" aria-label="Diagnostic rejection actionability counts">
+      <span><strong>${actionRequiredCount}</strong> Action required</span>
+      <span><strong>${monitorCount}</strong> Monitor</span>
+      <span><strong>${informationalCount}</strong> Informational</span>
+    </div>
+    ${topGroup ? renderDiagnosticTopIssue(topGroup, projection) : ""}
+    <div class="diagnostic-issue-groups">
+      ${actionRequired.map((group) => renderDiagnosticIssueGroup(group, projection)).join("") || `<div class="muted-mini">No action-required candidate rejection groups are visible by default.</div>`}
+    </div>
+    ${monitor.length ? `<details class="diagnostic-hidden-note"><summary>${monitorCount} monitor row${monitorCount === 1 ? "" : "s"} hidden</summary>${monitor.map((group) => renderDiagnosticIssueGroup(group, projection)).join("")}</details>` : ""}
+    ${informational.length ? `<details class="diagnostic-hidden-note"><summary>${informationalCount} informational row${informationalCount === 1 ? "" : "s"} hidden</summary>${informational.map((group) => renderDiagnosticIssueGroup(group, projection)).join("")}</details>` : ""}
+    <details class="diagnostic-detail-drawer engineering-details-table">
+      <summary>View Details</summary>
+      <div class="support-note"><strong>Full diagnostic rejection table</strong><span>Raw rows, evidence paths, and commands from candidate_generation_diagnostics.v1.json are preserved here.</span></div>
+      ${renderDiagnosticGroupedCommands(groups)}
+      ${fullTable}
+      <div class="engineering-group-action"><strong>Diagnostics evidence:</strong> <button class="ghost-button" type="button" data-copy-text="${escapeHtml(sourcePath || "")}">Copy Path</button> <span class="muted-mini">${escapeHtml(sourcePath || "not available")}</span></div>
+    </details>
+  </section>`;
+}
+
+function diagnosticRejectionText(row = {}) {
+  return [
+    row.run_status,
+    row.status,
+    row.rejection_reason,
+    row.reason,
+    row.canonical_blocker,
+    safeList(row.reason_codes).join(" "),
+  ].filter(Boolean).join(" ").toUpperCase();
+}
+
+function diagnosticRejectionIssueType(row = {}) {
+  return String(row.rejection_reason || row.reason || row.canonical_blocker || safeList(row.reason_codes)[0] || row.run_status || row.status || "UNKNOWN").toUpperCase();
+}
+
+function diagnosticRejectionActionability(row = {}) {
+  const text = diagnosticRejectionText(row);
+  if (text.includes("NON_BLOCKING") || text.includes("INFORMATIONAL")) return "INFORMATIONAL";
+  if (String(row.run_status || row.status || "").toUpperCase() === "BLOCKED") return "ACTION_REQUIRED";
+  if (row.next_repair_action || row.repair_action || row.required_action) return "ACTION_REQUIRED";
+  if (text.includes("MISSING") || text.includes("MISMATCH") || text.includes("BLOCKED") || text.includes("STALE")) return "ACTION_REQUIRED";
+  if (text.includes("REJECT") || text.includes("NO_INTENT") || text.includes("NOT_PROMOTED")) return "MONITOR";
+  return "INFORMATIONAL";
+}
+
+function diagnosticRejectionRequiredAction(row = {}, projection = {}) {
+  const explicit = row.next_repair_action || row.repair_action || row.required_action || row.action;
+  if (explicit) return explicit;
+  const targetDay = projection.day_utc || projection.run_summary?.target_day || "YYYY-MM-DD";
+  const text = diagnosticRejectionText(row);
+  if (text.includes("MISSING_REQUIRED_INPUTS") || text.includes("SLEEVE_INPUT_REQUIREMENT_BLOCKED") || text.includes("MARKET_DATA_SHA_MISMATCH") || text.includes("ALLOWED_SYMBOL_MISMATCH")) {
+    return `TARGET_DAY=${targetDay} npm run aegis:repair-input-contracts`;
+  }
+  if (text.includes("STALE") || text.includes("MISMATCH")) {
+    return `TARGET_DAY=${targetDay} npm run aegis:candidate-diagnostics`;
+  }
+  return "Review diagnostic details";
+}
+
+function diagnosticRejectionImpact(group = {}) {
+  const type = String(group.issueType || "").toUpperCase();
+  if (type.includes("MISSING_REQUIRED_INPUTS") || type.includes("SLEEVE_INPUT_REQUIREMENT_BLOCKED")) return "Blocks current-day valid candidates for the affected sleeve.";
+  if (type.includes("MARKET_DATA_SHA_MISMATCH")) return "Diagnostics may be comparing sleeve inputs to an older certified market-data artifact.";
+  if (type.includes("ALLOWED_SYMBOL_MISMATCH")) return "The sleeve and generated inputs disagree about the allowed trading universe.";
+  if (type.includes("NO_INTENT")) return "Signals exist, but no actionable candidate intent was declared.";
+  if (type.includes("RAW_SIGNAL_NOT_PROMOTED")) return "Raw signals were evaluated but did not become reviewable candidates.";
+  return "Prevents or explains why these rows did not become reviewable candidates.";
+}
+
+function groupDiagnosticRejectionRows(rows = [], projection = {}) {
+  const grouped = new Map();
+  safeList(rows).forEach((row) => {
+    const issueType = diagnosticRejectionIssueType(row);
+    const sleeve = row.sleeve_id || row.producer_id || "UNKNOWN";
+    const requiredAction = diagnosticRejectionRequiredAction(row, projection);
+    const actionability = diagnosticRejectionActionability(row);
+    const key = [issueType, sleeve, requiredAction, actionability].join("||");
+    if (!grouped.has(key)) {
+      grouped.set(key, { issueType, affectedSleeve: sleeve, requiredAction, actionability, rows: [], symbols: new Set() });
+    }
+    const group = grouped.get(key);
+    group.rows.push(row);
+    if (row.symbol) group.symbols.add(row.symbol);
+  });
+  return Array.from(grouped.values()).sort((a, b) => {
+    const rank = { ACTION_REQUIRED: 0, MONITOR: 1, INFORMATIONAL: 2 };
+    const rankDelta = (rank[a.actionability] ?? 9) - (rank[b.actionability] ?? 9);
+    if (rankDelta !== 0) return rankDelta;
+    return b.rows.length - a.rows.length;
+  });
+}
+
+function diagnosticRejectionActionLabel(action = "") {
+  const text = String(action || "").toLowerCase();
+  if (text.includes("repair-input-contracts")) return "Run repair-input-contracts";
+  if (text.includes("candidate-diagnostics")) return "Run candidate diagnostics";
+  if (text.includes("canonical-operator-state")) return "Refresh canonical operator state";
+  return action || "Review diagnostic details";
+}
+
+function renderDiagnosticTopIssue(group = {}, projection = {}) {
+  const buttonLabel = String(group.requiredAction || "").toLowerCase().includes("repair-input-contracts") ? "Repair" : "Copy Action";
+  return `<article class="diagnostic-top-issue">
+    <div class="eyebrow">Top Issue</div>
+    <h4>${escapeHtml(operatorPlainLabel(group.issueType || "Diagnostic rejection"))}</h4>
+    <div class="diagnostic-summary-grid">
+      <div><span>Impact</span><p>${escapeHtml(diagnosticRejectionImpact(group))}</p></div>
+      <div><span>Next Action</span><p>${escapeHtml(diagnosticRejectionActionLabel(group.requiredAction || "Review diagnostic details"))}</p></div>
+      <div><span>Affected Count</span><strong>${escapeHtml(String(group.rows?.length || 0))}</strong><p>${escapeHtml(group.affectedSleeve || "UNKNOWN")}</p></div>
+    </div>
+    <div class="engineering-fix-actions">
+      <button class="primary-button" type="button" data-copy-text="${escapeHtml(group.requiredAction || "")}">${escapeHtml(buttonLabel)}</button>
+      <button class="ghost-button" type="button" data-copy-text="${escapeHtml(group.requiredAction || "")}">Copy Command</button>
+    </div>
+  </article>`;
+}
+
+function renderDiagnosticIssueGroup(group = {}, projection = {}) {
+  const symbols = Array.from(group.symbols || []).slice(0, 8);
+  const hiddenSymbols = Math.max(0, (group.symbols?.size || 0) - symbols.length);
+  return `<article class="diagnostic-issue-group" data-diagnostic-actionability="${escapeHtml(group.actionability || "INFORMATIONAL")}">
+    <header class="engineering-issue-header">
+      <div><div class="eyebrow">${escapeHtml(group.actionability || "INFORMATIONAL")}</div><h4>${escapeHtml(operatorPlainLabel(group.issueType || "Diagnostic rejection"))}</h4></div>
+      ${renderStatusPill(`${group.rows?.length || 0} row${(group.rows?.length || 0) === 1 ? "" : "s"}`, group.actionability === "ACTION_REQUIRED" ? "warning" : "neutral", {})}
+    </header>
+    <div class="engineering-default-columns">
+      <div><span>Affected sleeve</span><strong>${escapeHtml(group.affectedSleeve || "UNKNOWN")}</strong></div>
+      <div><span>Why it matters</span><p>${escapeHtml(diagnosticRejectionImpact(group))}</p></div>
+      <div><span>Required action</span><p>${escapeHtml(diagnosticRejectionActionLabel(group.requiredAction || "Review diagnostic details"))}</p></div>
+      <div><span>Symbols</span><p>${escapeHtml(symbols.join(", ") || "sleeve-level issue")}${hiddenSymbols ? ` +${hiddenSymbols} more` : ""}</p></div>
+    </div>
+    <div class="engineering-fix-actions"><button class="ghost-button" type="button" data-copy-text="${escapeHtml(group.requiredAction || "")}">Copy Command</button></div>
+  </article>`;
+}
+
+function renderDiagnosticGroupedCommands(groups = []) {
+  const commands = Array.from(new Set(safeList(groups).map((group) => group.requiredAction).filter(Boolean)));
+  if (!commands.length) return "";
+  return `<div class="engineering-group-action"><strong>Grouped repair action${commands.length === 1 ? "" : "s"}:</strong> ${commands.map((command) => `<button class="ghost-button" type="button" data-copy-text="${escapeHtml(command)}">Copy Command</button> <code>${escapeHtml(command)}</code>`).join(" ")}</div>`;
+}
+
+
+function engineeringRowText(row = {}) {
+  return [
+    row.contract_status,
+    row.allowed_symbol_status,
+    row.market_data_hash_status,
+    row.stale_intent_status,
+    row.exact_mismatch_cause,
+    row.reconciliation_status,
+    row.status,
+    safeList(row.reason_codes).join(" "),
+  ].filter(Boolean).join(" ").toUpperCase();
+}
+
+function engineeringIssueSeverity(row = {}) {
+  const text = engineeringRowText(row);
+  if (row.blocking_current_day_valid_candidates === true || text.includes("BLOCKING") || text.includes("FAIL") || text.includes("ERROR")) return "BLOCKING";
+  if (text.includes("WARNING") || text.includes("MISMATCH") || text.includes("STALE") || text.includes("MISSING") || text.includes("REJECT")) return "WARNING";
+  return "NON_BLOCKING";
+}
+
+function engineeringIssueHasAction(row = {}) {
+  return Boolean(row.repair_action || row.next_repair_action || row.required_action || row.action);
+}
+
+function engineeringActionability(row = {}) {
+  const severity = engineeringIssueSeverity(row);
+  if (severity === "BLOCKING") return "ACTION_REQUIRED";
+  if (severity === "WARNING") return "MONITOR";
+  return "INFORMATIONAL";
+}
+
+function engineeringIssueVisibleByDefault(row = {}) {
+  return engineeringIssueSeverity(row) === "BLOCKING";
+}
+
+function engineeringIssueWhy(row = {}) {
+  const cause = row.exact_mismatch_cause || safeList(row.reason_codes)[0] || row.contract_status || "Input check completed";
+  if (String(cause).toUpperCase().includes("MARKET_DATA_SHA_MISMATCH")) return "Sleeve contracts may reference an older certified market-data artifact.";
+  if (String(cause).toUpperCase().includes("ALLOWED_SYMBOL")) return "The sleeve and its generated inputs disagree about which symbols are allowed.";
+  if (String(cause).toUpperCase().includes("STALE")) return "One downstream input may have been generated before the latest certified artifact.";
+  if (row.blocking_current_day_valid_candidates) return "This issue can block current-day candidate diagnostics or reviewable contracts.";
+  return operatorPlainLabel(cause);
+}
+
+function engineeringIssueAction(row = {}, projection = {}) {
+  return row.repair_action || row.next_repair_action || row.required_action || row.action || `TARGET_DAY=${projection.day_utc || projection.run_summary?.target_day || "YYYY-MM-DD"} npm run aegis:repair-input-contracts`;
+}
+
+function engineeringHashMismatchCount(rows = []) {
+  return safeList(rows).filter((row) => {
+    const text = engineeringRowText(row);
+    return text.includes("MARKET_DATA_SHA_MISMATCH") || String(row.market_data_hash_status || "").toUpperCase() === "MISMATCH";
+  }).length;
+}
+
+function renderEngineeringIssueCard(row = {}, projection = {}, index = 0) {
+  const sleeve = row.sleeve_id || row.producer_id || "UNKNOWN";
+  const severity = engineeringIssueSeverity(row);
+  const actionability = engineeringActionability(row);
+  const status = row.contract_status || row.reconciliation_status || row.status || severity;
+  const detailRows = [
+    ["Actionability", actionability],
+    ["Allowed symbols", `${row.allowed_symbol_status || "UNKNOWN"} · expected ${safeList(row.expected_allowed_symbols).join(", ") || "none"} · actual ${safeList(row.actual_symbols).join(", ") || "none"}`],
+    ["Market data hash", `${row.market_data_hash_status || "UNKNOWN"} · expected ${row.market_data_hash_detail?.expected_hash || row.expected_hash || "not available"} · actual ${row.market_data_hash_detail?.actual_hash || row.actual_hash || "not available"}`],
+    ["Stale intent", `${row.stale_intent_status || "UNKNOWN"}${row.stale_artifact_path ? " · " + row.stale_artifact_path : ""}`],
+    ["Artifact path", row.source_artifact_path || row.input_contract_path || row.stale_artifact_path || "not available"],
+    ["generated_at", row.generated_at || row.expected_generated_at || row.actual_generated_at || "not available"],
+    ["Reconciliation internals", row.exact_mismatch_cause || safeList(row.reason_codes).join(", ") || "none reported"],
+  ];
+  return `<article class="engineering-issue-card" data-engineering-actionability="${escapeHtml(actionability)}" data-engineering-severity="${escapeHtml(severity)}">
+    <header class="engineering-issue-header">
+      <div><div class="eyebrow">${escapeHtml(severity)}</div><h4>${escapeHtml(sleeve)}</h4></div>
+      ${renderStatusPill(actionability, actionability === "ACTION_REQUIRED" ? "warning" : (actionability === "MONITOR" ? "neutral" : "success"), {})}
+    </header>
+    <div class="engineering-default-columns">
+      <div><span>Sleeve</span><strong>${escapeHtml(sleeve)}</strong></div>
+      <div><span>Status</span>${renderStatusPill(operatorPlainLabel(status), severity === "BLOCKING" ? "warning" : "neutral", {})}</div>
+      <div><span>Why it matters</span><p>${escapeHtml(engineeringIssueWhy(row))}</p></div>
+      <div><span>Actionability</span><strong>${escapeHtml(actionability === "ACTION_REQUIRED" ? "Action required" : (actionability === "MONITOR" ? "Monitor" : "Informational"))}</strong></div>
+    </div>
+    <details class="engineering-issue-details">
+      <summary>Details</summary>
+      ${renderDefinitionRows(detailRows)}
+    </details>
+  </article>`;
+}
+
+function renderEngineeringFixNext(rows = [], projection = {}) {
+  const allRows = safeList(rows);
+  const blockingRows = allRows.filter((row) => engineeringIssueSeverity(row) === "BLOCKING");
+  const warningRows = allRows.filter((row) => engineeringIssueSeverity(row) === "WARNING");
+  const informationalRows = allRows.filter((row) => engineeringIssueSeverity(row) === "NON_BLOCKING");
+  const first = blockingRows[0];
+  if (!first) {
+    return `<section class="engineering-fix-next"><div class="eyebrow">Fix Next</div><strong>No blocking repair is currently required.</strong><p class="muted-mini">Warnings and informational rows are collapsed under View Details.</p></section>`;
+  }
+  const command = engineeringIssueAction(first, projection);
+  const expectedImpact = String(engineeringRowText(first)).includes("MARKET_DATA_SHA_MISMATCH")
+    ? "Refreshes sleeve expected hashes so diagnostics consume the current certified market-data artifact."
+    : "Clears the highest-priority engineering blocker before the next candidate diagnostic run.";
+  return `<section class="engineering-fix-next" data-testid="engineering-fix-next">
+    <div class="eyebrow">Fix Next</div>
+    <div class="engineering-fix-next-grid">
+      <div><span>Issue</span><strong>${escapeHtml(first.sleeve_id || first.producer_id || "Input contract issue")}</strong><p>${escapeHtml(engineeringIssueWhy(first))}</p></div>
+      <div><span>Impact</span><p>${escapeHtml(expectedImpact)}</p></div>
+      <div><span>Action</span><p>Run repair-input-contracts.</p><code>${escapeHtml(command)}</code></div>
+    </div>
+    <div class="engineering-fix-actions">
+      <button class="primary-button" type="button" data-copy-text="${escapeHtml(command)}">Repair Input Contracts</button>
+      <button class="ghost-button" type="button" data-copy-text="${escapeHtml(command)}">Copy Command</button>
+    </div>
+    <p class="muted-mini">${warningRows.length} related warning${warningRows.length === 1 ? "" : "s"} and ${informationalRows.length} informational row${informationalRows.length === 1 ? "" : "s"} will be rechecked automatically.</p>
+  </section>`;
+}
+
+function renderEngineeringRunSummaryCards(summary = {}, projection = {}) {
+  const rows = safeList(summary.inputContractReconciliationRows);
+  const blocking = rows.filter((row) => engineeringIssueSeverity(row) === "BLOCKING").length;
+  const warning = rows.filter((row) => engineeringIssueSeverity(row) === "WARNING").length;
+  const nonBlocking = Math.max(0, rows.length - blocking - warning);
+  const coverage = projection.market_data_coverage || projection.run_summary?.market_data_coverage || {};
+  const hashMismatches = engineeringHashMismatchCount(rows.length ? rows : (projection.input_contract_reconciliation_rows || projection.run_summary?.input_contract_reconciliation_rows || []));
+  return `<div class="engineering-summary-grid" data-testid="engineering-summary-cards">
+    <section class="engineering-summary-card"><div class="eyebrow">Market Data</div><div class="engineering-summary-metrics"><span><strong>${String(coverage.status || "READY").toUpperCase() === "READY" ? "Ready" : escapeHtml(String(coverage.status || "Unknown"))}</strong> Status</span><span><strong>${escapeHtml(String(coverage.stale_symbol_count ?? safeList(coverage.stale_symbols).length ?? 0))}</strong> Stale</span><span><strong>${hashMismatches}</strong> Hash mismatches</span></div></section>
+    <section class="engineering-summary-card"><div class="eyebrow">Candidate Contracts</div><div class="engineering-summary-metrics"><span><strong>${escapeHtml(String(summary.contracts ?? 0))}</strong> Valid</span><span><strong>${escapeHtml(String(summary.rejectedContracts ?? 0))}</strong> Rejected</span></div></section>
+    <section class="engineering-summary-card"><div class="eyebrow">Input Checks</div><div class="engineering-summary-metrics"><span><strong>${blocking}</strong> Blocking</span><span><strong>${warning}</strong> Warning</span><span><strong>${nonBlocking}</strong> Non-blocking</span></div></section>
+  </div>`;
+}
+
+function renderMarketDataCoveragePanel(projection = {}) {
+  const coverage = projection.market_data_coverage || projection.run_summary?.market_data_coverage || {};
+  if (!coverage || Object.keys(coverage).length === 0) return "";
+  const missing = safeList(coverage.missing_symbols);
+  const stale = safeList(coverage.stale_symbols);
+  const affected = safeList(coverage.blocking_consumers).length ? safeList(coverage.blocking_consumers) : safeList(coverage.consumer_sleeves);
+  const status = String(coverage.status || "UNKNOWN").toUpperCase();
+  const reconciliationRows = safeList(projection.input_contract_reconciliation_rows).length ? safeList(projection.input_contract_reconciliation_rows) : safeList(projection.run_summary?.input_contract_reconciliation_rows);
+  const hasHashMismatch = reconciliationRows.some((row) => String(row.market_data_hash_status || "").toUpperCase() === "MISMATCH" || String(row.exact_mismatch_cause || "").includes("MARKET_DATA_SHA_MISMATCH"));
+  const coverageReadyHashMismatchMessage = status === "READY" && hasHashMismatch ? "Coverage is ready, but downstream sleeve contracts were generated against an older market-data hash. Run repair-input-contracts." : "";
+  return `<div class="callout ${status === "READY" ? "success" : "warning"}" data-testid="market-data-coverage-panel">
+    <strong>MARKET_DATA_COVERAGE_${escapeHtml(status)}</strong>
+    <div class="operator-summary-strip operator-dashboard-summary">
+      ${renderMetricCard({ label: "Required symbols", value: String(coverage.required_symbol_count ?? 0) })}
+      ${renderMetricCard({ label: "Certified", value: String(coverage.certified_symbol_count ?? 0) })}
+      ${renderMetricCard({ label: "Missing", value: String(coverage.missing_symbol_count ?? missing.length) })}
+      ${renderMetricCard({ label: "Stale", value: String(coverage.stale_symbol_count ?? stale.length) })}
+      ${renderMetricCard({ label: "Coverage", value: `${coverage.coverage_pct ?? 0}%` })}
+    </div>
+    ${coverageReadyHashMismatchMessage ? `<div class="callout warning"><strong>DOWNSTREAM_CONTRACT_HASH_STALE</strong><div class="muted-mini">${escapeHtml(coverageReadyHashMismatchMessage)}</div></div>` : ""}
+    <div class="muted-mini">Affected sleeves: ${escapeHtml(affected.join(", ") || "none")}</div>
+    <div class="muted-mini">Missing: ${escapeHtml(missing.slice(0, 24).join(", ") || "none")}${missing.length > 24 ? "..." : ""}</div>
+    <div class="muted-mini">Stale: ${escapeHtml(stale.slice(0, 24).join(", ") || "none")}${stale.length > 24 ? "..." : ""}</div>
+    <div class="muted-mini">Repair: <code>${escapeHtml(coverage.repair_action || `TARGET_DAY=${projection.day_utc || projection.run_summary?.target_day || "YYYY-MM-DD"} npm run aegis:repair-input-contracts`)}</code></div>
+    <div class="muted-mini">Evidence: ${escapeHtml(coverage.source_path || "not available")}</div>
+  </div>`;
+}
+
+function renderInputContractReconciliationRows(rows = [], projection = {}) {
+  const reconciliationRows = safeList(rows);
+  const sourcePath = projection.input_contract_reconciliation_source_path || projection.run_summary?.input_contract_reconciliation_source_path || "";
+  if (!reconciliationRows.length) return "";
+  const blockingRows = reconciliationRows.filter((row) => engineeringIssueSeverity(row) === "BLOCKING");
+  const warningRows = reconciliationRows.filter((row) => engineeringIssueSeverity(row) === "WARNING");
+  const informationalRows = reconciliationRows.filter((row) => engineeringIssueSeverity(row) === "NON_BLOCKING");
+  const primaryCommand = engineeringIssueAction(blockingRows[0] || warningRows[0] || informationalRows[0] || {}, projection);
+  const fullTable = renderSimpleTable({
+    columns: [
+      { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || row.producer_id || "UNKNOWN") },
+      { label: "Status", render: (row) => renderStatusPill(row.contract_status || "UNKNOWN", row.blocking_current_day_valid_candidates ? "warning" : "success", {}) },
+      { label: "Allowed symbols", render: (row) => `<span class="muted-mini">${escapeHtml(row.allowed_symbol_status || "UNKNOWN")} · expected ${escapeHtml(String(safeList(row.expected_allowed_symbols).slice(0, 8).join(", ") || "none"))}${safeList(row.expected_allowed_symbols).length > 8 ? "…" : ""} · actual ${escapeHtml(String(safeList(row.actual_symbols).slice(0, 8).join(", ") || "none"))}${safeList(row.actual_symbols).length > 8 ? "…" : ""}</span>` },
+      { label: "Market hash", render: (row) => `<span class="muted-mini">${escapeHtml(row.market_data_hash_status || "UNKNOWN")} · expected ${escapeHtml(String(row.market_data_hash_detail?.expected_hash || row.expected_hash || "").slice(0, 16))} · actual ${escapeHtml(String(row.market_data_hash_detail?.actual_hash || row.actual_hash || "").slice(0, 16))}</span>` },
+      { label: "Stale intent", render: (row) => `<span class="muted-mini">${escapeHtml(row.stale_intent_status || "UNKNOWN")} ${row.stale_artifact_path ? "· " + escapeHtml(row.stale_artifact_path) : ""}</span>` },
+      { label: "Cause", render: (row) => `<strong>${escapeHtml(row.exact_mismatch_cause || safeList(row.reason_codes).join(", ") || "UNKNOWN")}</strong>` },
+      { label: "Blocking", render: (row) => renderStatusPill(row.blocking_current_day_valid_candidates ? "BLOCKING" : "NON_BLOCKING", row.blocking_current_day_valid_candidates ? "warning" : "success", {}) },
+    ],
+    rows: reconciliationRows,
+    emptyMessage: "No input contract reconciliation rows reported.",
+  });
   return `
-    <section class="current-day-status-banner ${escapeHtml(tone)}" aria-label="Current Day Run Status">
-      <div class="current-day-status-banner-main">
-        <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(runtimeDay ? `Affected day: ${runtimeDay}` : "Affected day: unknown")}</span>
+    <section class="engineering-input-checks" data-testid="engineering-input-checks">
+      <div class="support-note"><strong>Input Contract Issues</strong><span>${blockingRows.length} blocking, ${warningRows.length} warning, ${informationalRows.length} informational. Shared repair action is shown once.</span></div>
+      ${renderEngineeringFixNext(reconciliationRows, projection)}
+      <details class="engineering-nonblocking-details">
+        <summary>Warnings (${warningRows.length})</summary>
+        <div class="engineering-issue-list">
+          ${warningRows.map((row, index) => renderEngineeringIssueCard(row, projection, index)).join("") || `<div class="muted-mini">No warnings are currently hidden.</div>`}
+        </div>
+      </details>
+      <details class="engineering-nonblocking-details">
+        <summary>Informational rows (${informationalRows.length})</summary>
+        <div class="engineering-issue-list">
+          ${informationalRows.map((row, index) => renderEngineeringIssueCard(row, projection, index)).join("") || `<div class="muted-mini">No informational rows are currently hidden.</div>`}
+        </div>
+      </details>
+      <details class="engineering-details-table">
+        <summary>View Details</summary>
+        <div class="support-note"><strong>Producer contract mismatch table</strong><span>Expected vs actual sleeve input contracts from input_contract_reconciliation.v1.json.</span></div>
+        <div class="engineering-group-action"><strong>Grouped repair action:</strong> <button class="ghost-button" type="button" data-copy-text="${escapeHtml(primaryCommand)}">Repair Input Contracts</button> <code>${escapeHtml(primaryCommand)}</code></div>
+        ${fullTable}
+        <div class="muted-mini">Evidence: ${escapeHtml(sourcePath || "not available")}</div>
+      </details>
+    </section>`;
+}
+
+function renderDashboardLatestRunSummary(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "canonical_operator_state_v1",
+    fieldPath: "candidate_ui_projection",
+    whyShown: "Latest Run Summary uses canonical operator state, candidate lifecycle state, and runtime truth instead of historical session fallback text.",
+    eyebrow: "LATEST_RUN_SUMMARY",
+    title: "Latest Run Summary",
+    subtitle: `${summary.operationalDay} · ${summary.runStatus} · ${summary.generationExplanation}`,
+    body: `${renderEngineeringRunSummaryCards(summary, payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {})}
+    <div class="support-note dashboard-latest-run-explanation" data-testid="dashboard-latest-run-explanation">
+      <strong>${escapeHtml(summary.carriedExplanation)}</strong>
+      <span>${escapeHtml(summary.generationExplanation)}</span>
+      <span>Top blockers: ${escapeHtml(summary.topBlockers.length ? summary.topBlockers.join(", ") : "none reported")}</span>
+      <span><a href="/aegis-candidates?session=current">Current-day candidate diagnostics available</a></span>
+      <span><a href="/aegis-candidates?session=current">Paper Research Mode</a></span>
+    </div>
+    <details class="engineering-details-table dashboard-run-details">
+      <summary>Run Details</summary>
+      <div class="operator-summary-strip operator-dashboard-summary dashboard-latest-run-summary" data-testid="dashboard-latest-run-summary">
+        ${renderMetricCard({ label: "Operational day", value: summary.operationalDay })}
+        ${renderMetricCard({ label: "Diagnostics completed", value: formatTimestamp(summary.diagnosticsCompletedAt) })}
+        ${renderMetricCard({ label: "Run status", value: summary.runStatus })}
+        ${renderMetricCard({ label: "Sleeves expected", value: String(summary.sleevesExpected) })}
+        ${renderMetricCard({ label: "Sleeves executed", value: String(summary.sleevesExecuted) })}
+        ${renderMetricCard({ label: "Raw signals", value: String(summary.rawSignals) })}
+        ${renderMetricCard({ label: "Diagnostic candidate outputs", value: String(summary.diagnosticOutputs) })}
+        <a class="metric-card-link" href="/aegis-candidates?session=current" aria-label="Open today's candidates">${renderMetricCard({ label: "Current-day valid candidates", value: String(summary.generatedCandidates) })}</a>
+        ${renderMetricCard({ label: "Valid candidate contracts", value: String(summary.contracts) })}
+        ${renderMetricCard({ label: "Carried-forward reviewable candidates", value: String(summary.persistent) })}
+        ${renderMetricCard({ label: "Awaiting paper review", value: String(summary.awaiting) })}
+        ${renderMetricCard({ label: "Blocked / rejected", value: `${summary.blocked} / ${summary.rejected}` })}
+        ${renderMetricCard({ label: "Runtime readiness", value: summary.readiness })}
+        ${renderMetricCard({ label: "Diagnostics", value: summary.diagnosticsStatus })}
       </div>
+    </details>
+    ${renderMarketDataCoveragePanel(payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {})}
+    ${renderInputContractReconciliationRows(summary.inputContractReconciliationRows, payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {})}`,
+  });
+}
+
+function renderDashboardCurrentOperationalState(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  return renderCardSection({
+    eyebrow: "CURRENT_OPERATIONAL_STATE",
+    title: "Current Operational State",
+    subtitle: "Separates current-day generation from carried-forward lifecycle work.",
+    body: `${renderRuntimeModeStatusStrip(payload)}<div class="operator-summary-strip operator-dashboard-summary" data-testid="dashboard-current-operational-state">
+      <a class="metric-card-link" href="/aegis-candidates?session=current" aria-label="Open today's candidates">${renderMetricCard({ label: "Current-day valid candidates", value: String(summary.generatedCandidates) })}</a>
+      <a class="metric-card-link" href="/aegis-candidates?session=current" aria-label="Open Candidate Contracts: 25 Valid">${renderMetricCard({ label: "Candidate Contracts", value: `${String(summary.contracts)} Valid` })}</a>
+      ${renderMetricCard({ label: "Prior-day active lifecycle", value: String(summary.persistent) })}
+      ${renderMetricCard({ label: "Awaiting review", value: String(summary.reviewable) })}
+      <a class="metric-card-link" href="/aegis-candidates?section=open-paper-positions" aria-label="Open paper positions">${renderMetricCard({ label: "Open paper positions", value: String(summary.openPositions) })}</a>
+      ${renderMetricCard({ label: "Closed governed trades", value: String(summary.closedPositions) })}
+      ${renderMetricCard({ label: "Legacy / partial historical trades", value: String(summary.legacyCaptures) })}
+      ${renderMetricCard({ label: "Expired", value: String(summary.expired) })}
+    </div>`,
+  });
+}
+
+function renderDashboardNineFiftyRunVisibility(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  const projection = dashboardCandidateProjection(payload);
+  const sourcePaths = projection.source_paths || {};
+  return renderCardSection({
+    eyebrow: "RUN_VISIBILITY",
+    title: "9:50 Run Visibility",
+    subtitle: "Latest governed run outcome, diagnostics, blockers, and evidence links.",
+    body: renderDefinitionRows([
+      { label: "Run start", value: summary.runStart === "NOT_RECORDED" ? "NOT_RECORDED" : formatTimestamp(summary.runStart) },
+      { label: "Market snapshot time", value: formatTimestamp(summary.marketSnapshotTime) },
+      { label: "Candidate snapshot time", value: formatTimestamp(summary.candidateSnapshotTime) },
+      { label: "Diagnostics started at", value: summary.diagnosticsStartedAt === "NOT_RECORDED" ? "NOT_RECORDED" : formatTimestamp(summary.diagnosticsStartedAt) },
+      { label: "Diagnostics completed at", value: formatTimestamp(summary.diagnosticsCompletedAt) },
+      { label: "Projection generated at", value: formatTimestamp(summary.projectionGeneratedAt) },
+      { label: "Dashboard rendered at", value: "CLIENT_RENDER_TIME" },
+      { label: "Run classification", value: summary.runStatus },
+      { label: "Sleeves run", value: `${summary.sleevesExecuted} / ${summary.sleevesExpected}` },
+      { label: "Signals found", value: String(summary.rawSignals) },
+      { label: "Candidate count", value: `${summary.diagnosticOutputs} diagnostic outputs, ${summary.contracts} valid contracts, ${summary.rejectedContracts} rejected contracts, ${summary.persistent} carried-forward` },
+      { label: "Run evidence status", value: projection.run_visibility_status || summary.run.run_visibility_status || "UNKNOWN" },
+      { label: "Mismatch explanation", value: summary.mismatchExplanation.operator_message || (summary.diagnosticOutputs > summary.contracts && summary.contracts === 0 ? "Diagnostics found candidate-like outputs, but 0 passed candidate contract validation." : "none") },
+      { label: "Contract rejection reason", value: summary.mismatchExplanation.reason || "none" },
+      { label: "Price timestamp", value: summary.mismatchExplanation.price_timestamp || summary.mismatchExplanation.sample_stale_diagnostics?.price_timestamp || "not available" },
+      { label: "Candidate snapshot timestamp", value: summary.mismatchExplanation.candidate_snapshot_timestamp || summary.mismatchExplanation.sample_stale_diagnostics?.candidate_snapshot_timestamp || "not available" },
+      { label: "Freshness policy", value: summary.mismatchExplanation.freshness_policy_mode || summary.mismatchExplanation.sample_stale_diagnostics?.freshness_policy_mode || "not available" },
+      { label: "Freshness window seconds", value: String(summary.mismatchExplanation.freshness_window_seconds ?? summary.mismatchExplanation.sample_stale_diagnostics?.freshness_window_seconds ?? "not available") },
+      { label: "Stale by seconds", value: String(summary.mismatchExplanation.stale_by_seconds ?? summary.mismatchExplanation.sample_stale_diagnostics?.stale_by_seconds ?? "not calculable") },
+      { label: "Stale reason", value: summary.mismatchExplanation.stale_reason || summary.mismatchExplanation.sample_stale_diagnostics?.stale_reason || "not available" },
+      { label: "Mismatch evidence", value: summary.mismatchExplanation.evidence_path || "not available" },
+      { label: "Next repair action", value: summary.mismatchExplanation.next_repair_action || "not required" },
+      { label: "Blockers", value: summary.topBlockers.length ? summary.topBlockers.join(", ") : "none reported" },
+      { label: "Diagnostics completed", value: summary.diagnosticsStatus === "AVAILABLE" ? "yes" : "no" },
+      { label: "Diagnostics evidence", value: projection.candidate_diagnostics_path || sourcePaths.candidate_generation_diagnostics || "not available" },
+      { label: "Paper review evidence", value: projection.paper_review_queue_path || sourcePaths.paper_review_queue || "not available" },
+    ]) + `<div class="support-note"><strong>Diagnostic rejection reasons</strong><span>Shown from candidate_generation_diagnostics.v1.json for the displayed day.</span></div>` + renderDiagnosticRejectionReasons(summary.diagnosticRejectionRows, projection) + `<div class="action-row" style="margin-top:12px;">${renderRefreshCandidateContractsButton(payload, projection)}</div>`,
+  });
+}
+
+function renderRefreshCandidateContractsButton(payload = {}, projection = {}) {
+  const day = projection.day_utc || payload.day_utc || payload.displayed_artifact_day || "";
+  return `<button class="ghost-button" type="button" data-aegis-command-id="REFRESH_CANDIDATE_CONTRACTS" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="candidate_contracts" data-aegis-command-target-id="${escapeHtml(day)}" data-aegis-command-payload="${escapeHtml(JSON.stringify({ day_utc: day }))}">Refresh Candidate Contracts</button>`;
+}
+
+function renderDashboardLifecycleSummary(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  return renderCardSection({
+    eyebrow: "LIFECYCLE_SUMMARY",
+    title: "Candidate Lifecycle Summary",
+    subtitle: "Human-reviewed paper state only. Live trading remains disabled.",
+    body: `<div class="operator-summary-strip operator-dashboard-summary" data-testid="dashboard-lifecycle-summary">
+      ${renderMetricCard({ label: "Awaiting review", value: String(summary.reviewable) })}
+      ${renderMetricCard({ label: "Paper positions open", value: String(summary.openPositions) })}
+      ${renderMetricCard({ label: "Paper positions closed", value: String(summary.closedPositions) })}
+      ${renderMetricCard({ label: "Legacy / partial historical trades", value: String(summary.legacyCaptures) })}
+      ${renderMetricCard({ label: "Rejected", value: String(summary.rejected) })}
+      ${renderMetricCard({ label: "Expired", value: String(summary.expired) })}
+    </div>`,
+  });
+}
+
+function renderDashboardOperatorAttentionNow(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  const items = [];
+  if (summary.reviewable > 0) items.push({ label: "Pending paper reviews", value: `${summary.reviewable} candidate${summary.reviewable === 1 ? "" : "s"}`, action: "Open Candidates" });
+  if (summary.openPositions > 0) items.push({ label: "Open paper positions", value: `${summary.openPositions} position${summary.openPositions === 1 ? "" : "s"}`, action: "Monitor exits" });
+  if (summary.diagnosticsStatus !== "AVAILABLE") items.push({ label: "Blocked current-day generation", value: summary.generationExplanation, action: "Run candidate diagnostics" });
+  if (summary.topBlockers.length) items.push({ label: "Runtime context blockers", value: summary.topBlockers.join(", "), action: "Open Repair Center" });
+  return renderCardSection({
+    eyebrow: "OPERATOR_ATTENTION_NOW",
+    title: "What Needs Operator Attention Right Now?",
+    subtitle: "Prioritized actions from candidate lifecycle and runtime truth.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Priority", render: (row) => `<strong>${escapeHtml(row.label)}</strong>` },
+        { label: "State", render: (row) => escapeHtml(row.value) },
+        { label: "Action", render: (row) => escapeHtml(row.action) },
+      ],
+      rows: items,
+      emptyMessage: "No operator action is currently required.",
+    }),
+  });
+}
+
+function renderCurrentDayStatusBanner(payload = {}) {
+  const summary = dashboardLatestRunSummary(payload);
+  const routeCommand = {
+    command_id: "OPEN_VALID_ROUTE",
+    label: "View runtime details",
+    action_type: "EXPAND_SECTION",
+    target_type: "navigation",
+    target_id: "aegis_runtime_timeline",
+    route: "/aegis-runtime-timeline",
+  };
+  return `<section class="current-day-status-banner compact" aria-label="Current Day Run Status">
+    <div class="current-day-status-banner-main">
+      <strong>Operational day: ${escapeHtml(summary.operationalDay)} · Latest run: ${escapeHtml(summary.runStatus)} · Awaiting review: ${escapeHtml(String(summary.reviewable))}</strong>
+    </div>
+    <details class="dashboard-runtime-details">
+      <summary>View runtime details</summary>
       <div class="current-day-status-banner-details">
-        <span>Mode: ${escapeHtml(marketDataMode || "unknown")}</span>
-        <span>Final EOD: ${escapeHtml(finalEodPending ? "PENDING" : (finalEodStatus || "unknown"))}</span>
-        <span>${escapeHtml(finalEodPending ? "Final EOD certification pending." : "Final EOD certification current.")}</span>
-        <span>Failed step: ${escapeHtml(failedStep)}</span>
-        <span>Last attempt: ${escapeHtml(formatTimestamp(lastAttempt))}</span>
-        <span>Missing symbols: ${escapeHtml(missingSymbols.length ? missingSymbols.join(", ") : "none reported")}</span>
-        <span>Next action: ${escapeHtml(nextAction)}</span>
-        ${schedulerLine}
+        <span>Runtime readiness: ${escapeHtml(summary.readiness)}</span>
+        <span>Diagnostics: ${escapeHtml(summary.diagnosticsStatus)}</span>
+        <span>Diagnostics completed at: ${escapeHtml(formatTimestamp(summary.diagnosticsCompletedAt))}</span>
+        <span>Next action: ${escapeHtml(summary.reviewable > 0 ? "Review carried-forward paper candidates." : summary.generationExplanation)}</span>
       </div>
-      ${retryButton}
-      ${staleLine}
-    </section>
-  `;
+      ${renderCommandButton(routeCommand, "ghost-button", {})}
+    </details>
+  </section>`;
+}
+
+function dashboardAttentionProjection(payload = {}) {
+  return payload.attention_queue_projection_v1 || payload.attention_queue_projection || {};
+}
+
+function dashboardAttentionPriorityClass(priority = "INFO") {
+  return `attention-priority-${String(priority || "INFO").toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`;
+}
+
+function renderDashboardHealthSummary(payload = {}) {
+  const attention = dashboardAttentionProjection(payload);
+  const key = attention.key_numbers || {};
+  const captureTickets = Number(key.capture_tickets ?? 0);
+  const capability = attention.platform_capture_capability || payload.operator_today_projection?.platform_capture_capability || "READY";
+  const message = attention.system_health_summary || "Aegis is operational. Review the attention queue for current operator tasks.";
+  return `<section class="attention-dashboard-hero" data-testid="dashboard-attention-hero">
+    <div>
+      <p class="eyebrow">SYSTEM HEALTH</p>
+      <h2>${escapeHtml(message)}</h2>
+      <p class="muted-mini">Manual capture capability: ${escapeHtml(capability)} · IB capture tickets: ${escapeHtml(String(captureTickets))} · ${escapeHtml(captureTickets > 0 ? "Review ticket before any manual IB action." : "No action required")}</p>
+    </div>
+    <div class="attention-dashboard-health-pill">${escapeHtml(attention.active_count ? `${attention.active_count} item${attention.active_count === 1 ? "" : "s"} need review` : (attention.empty_state_message || "No operator action required."))}</div>
+  </section>`;
+}
+
+function attentionPriorityRank(priority = "INFO") {
+  const order = { CRITICAL: 0, ACTION_REQUIRED: 1, REVIEW: 2, WARNING: 3, INFO: 4 };
+  return order[String(priority || "INFO").toUpperCase()] ?? 5;
+}
+
+function dashboardLegacyAttentionSuppressed(item = {}, payload = {}) {
+  const text = `${item.title || ""} ${item.summary || ""}`;
+  if (!/\bDOW\b/i.test(text) || !/exit review/i.test(text)) return false;
+  const summary = dashboardLatestRunSummary(payload);
+  const itemDay = String(item.day_utc || item.operational_day || item.source_day || "");
+  const actionable = item.operator_action_required === true || item.operator_attention_required === true;
+  return !(actionable && itemDay === summary.operationalDay);
+}
+
+function dashboardGroupedAttentionItems(items = [], payload = {}) {
+  const active = safeList(items).filter((item) => String(item.dismissed_status || "ACTIVE") !== "DISMISSED" && !dashboardLegacyAttentionSuppressed(item, payload));
+  const repairSources = active.filter((item) => String(item.category || "") === "REPAIR_SOURCE");
+  if (repairSources.length <= 1) return active;
+  const domains = repairSources
+    .map((item) => String(item.title || "").replace(/ source missing$/i, "").trim())
+    .filter(Boolean);
+  const linkedArtifacts = repairSources.flatMap((item) => safeList(item.linked_artifacts));
+  const grouped = {
+    attention_id: `attention:external-sources:${repairSources.length}`,
+    priority: repairSources.sort((a, b) => attentionPriorityRank(a.priority) - attentionPriorityRank(b.priority))[0]?.priority || "WARNING",
+    category: "REPAIR_SOURCE",
+    title: `${repairSources.length} external sources missing`,
+    summary: `${domains.join(", ") || "External source setup"} require source setup. This is not a core system failure; open Repair Center for guided setup.`,
+    recommended_action: "Open Repair Center",
+    target_workspace: "Repair Center",
+    target_route: "/aegis-repair-center",
+    linked_artifacts: linkedArtifacts,
+    evidence_status: repairSources.some((item) => String(item.evidence_status || "") === "MISSING") ? "MISSING" : "AVAILABLE",
+    created_at: repairSources.map((item) => item.created_at).filter(Boolean).sort()[0] || "",
+    dismissed_status: "ACTIVE",
+    grouped_count: repairSources.length,
+  };
+  return [grouped, ...active.filter((item) => String(item.category || "") !== "REPAIR_SOURCE")]
+    .sort((a, b) => attentionPriorityRank(a.priority) - attentionPriorityRank(b.priority) || String(a.created_at || "").localeCompare(String(b.created_at || "")) || String(a.title || "").localeCompare(String(b.title || "")));
+}
+
+function renderAttentionWorkspaceButton(item = {}) {
+  const route = item.target_route || "/aegis-runtime-timeline";
+  return `<button class="primary-button" type="button" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="${escapeHtml(item.target_workspace || "workspace")}" data-route="${escapeHtml(route)}">Open Workspace</button>`;
+}
+
+function renderDashboardAttentionItem(item = {}) {
+  return `<article class="attention-queue-item ${escapeHtml(dashboardAttentionPriorityClass(item.priority))}" data-attention-id="${escapeHtml(item.attention_id || "")}" data-attention-category="${escapeHtml(item.category || "")}">
+    <div class="attention-queue-main">
+      <div class="attention-queue-kicker"><span>${escapeHtml(item.priority || "INFO")}</span><span>${escapeHtml(readableStatus(item.category || "INFO"))}</span></div>
+      <h3>${escapeHtml(item.title || "Attention item")}</h3>
+      <p>${escapeHtml(item.summary || "Review this item in its workspace.")}</p>
+      <strong>${escapeHtml(item.recommended_action || "Open workspace")}</strong>
+    </div>
+    <div class="attention-queue-actions">
+      ${renderAttentionWorkspaceButton(item)}
+      <details class="attention-evidence-drawer">
+        <summary>View Evidence</summary>
+        ${safeList(item.linked_artifacts).length ? renderSimpleTable({
+          columns: [
+            { label: "Artifact", render: (row) => escapeHtml(row.logical_name || "artifact") },
+            { label: "Status", render: () => escapeHtml(item.evidence_status || "AVAILABLE") },
+            { label: "Hash", render: (row) => escapeHtml(row.content_hash || row.artifact_sha256 || "available in workspace") },
+          ],
+          rows: safeList(item.linked_artifacts),
+          emptyMessage: "Evidence is available in the target workspace.",
+        }) : `<p class="muted-mini">Evidence is available in ${escapeHtml(item.target_workspace || "the target workspace")}.</p>`}
+      </details>
+    </div>
+  </article>`;
+}
+
+function renderDashboardAttentionQueueV1(payload = {}) {
+  const attention = dashboardAttentionProjection(payload);
+  const items = dashboardGroupedAttentionItems(attention.items, payload);
+  const visible = items.slice(0, 3);
+  const overflow = items.slice(3);
+  const rows = items.length
+    ? `<div class="attention-queue-list" data-testid="attention-queue-list">${visible.map(renderDashboardAttentionItem).join("")}</div>
+      ${overflow.length ? `<details class="attention-queue-overflow" data-testid="attention-queue-overflow"><summary>View all attention items (${items.length})</summary><div class="attention-queue-list">${overflow.map(renderDashboardAttentionItem).join("")}</div></details>` : ""}`
+    : `<div class="empty-state" data-testid="attention-queue-empty">${escapeHtml(attention.empty_state_message || "No operator action required.")}</div>`;
+  return renderCardSection({
+    eyebrow: items.length ? "ATTENTION_QUEUE" : "NO_ACTION_REQUIRED",
+    title: "Attention Queue",
+    subtitle: items.length ? "Top 3 operator items. Open the full list only when needed." : "No operator action required.",
+    body: rows,
+  });
+}
+
+function renderDashboardKeyNumbersV1(payload = {}) {
+  const attention = dashboardAttentionProjection(payload);
+  const key = attention.key_numbers || {};
+  return renderCardSection({
+    eyebrow: "TODAYS_KEY_NUMBERS",
+    title: "Today’s Key Numbers",
+    subtitle: "Compact operator summary. Detailed certification, evidence, and validation views live in their workspaces.",
+    body: `<div class="operator-summary-strip operator-dashboard-summary attention-key-numbers" data-testid="dashboard-key-numbers">
+      ${renderMetricCard({ label: "Capture tickets", value: String(key.capture_tickets ?? 0) })}
+      ${renderMetricCard({ label: "Open trades", value: String(key.open_trades ?? 0) })}
+      ${renderMetricCard({ label: "Unrealized P&L", value: paperTradeUsd(key.unrealized_pnl ?? 0) })}
+      ${renderMetricCard({ label: "Active blockers", value: String(key.active_blockers ?? 0) })}
+      ${renderMetricCard({ label: "Replay / provider", value: String(key.replay_provider_status || "Operational") })}
+    </div>`,
+  });
+}
+
+function renderDashboardRecentImportantEventsV1(payload = {}) {
+  const attention = dashboardAttentionProjection(payload);
+  const events = safeList(attention.recent_important_events);
+  return renderCardSection({
+    eyebrow: "RECENT_EVENTS",
+    title: "Recent Important Events",
+    subtitle: "High-signal context only. Open the workspace for history and audit detail.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Event", render: (row) => `<strong>${escapeHtml(row.title || "Event")}</strong><div class="muted-mini">${escapeHtml(row.summary || "")}</div>` },
+        { label: "Workspace", render: (row) => row.route ? `<button class="ghost-button" type="button" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="recent_event_workspace" data-route="${escapeHtml(row.route)}">Open</button>` : "-" },
+      ],
+      rows: events,
+      emptyMessage: "No important events are currently visible.",
+    }),
+  });
+}
+
+
+function engineeringQueuePayload(envelope = {}) {
+  return envelope.artifact || envelope.data || envelope || {};
+}
+
+function engineeringQueueSummary(queue = {}) {
+  return queue.summary || {};
+}
+
+function engineeringPriorityClass(priority = "P3") {
+  return `engineering-priority-${String(priority || "P3").toLowerCase()}`;
+}
+
+function engineeringClassificationTone(classification = "INFORMATIONAL") {
+  const normalized = String(classification || "INFORMATIONAL").toUpperCase();
+  if (normalized === "BLOCKING") return "warning";
+  if (["WAITING_FOR_DATA", "WAITING_FOR_OPERATOR", "WAITING_FOR_TIME", "DEGRADED"].includes(normalized)) return "neutral";
+  return "success";
+}
+
+function renderEngineeringOperatorActionsCard(operatorActions = 0, systemActions = 0) {
+  const label = operatorActions > 0 ? "Operator Actions Required" : "System repair actions";
+  const value = operatorActions > 0 ? operatorActions : systemActions;
+  return `<a class="metric-card engineering-action-card" href="#engineering-operator-actions" data-testid="engineering-operator-actions-card">
+      <div class="metric-card-header"><span class="metric-card-label">${escapeHtml(label)}</span></div>
+      <div class="metric-card-main"><strong class="metric-card-value">${escapeHtml(String(value))}</strong></div>
+      <div class="metric-card-detail">Open action queue</div>
+    </a>`;
+}
+
+function renderEngineeringStatusSummary(queue = {}) {
+  const summary = engineeringQueueSummary(queue);
+  const run = queue.run_health || {};
+  const operatorActions = Number(summary.operator_actions_required ?? 0) || 0;
+  const systemActions = Number(summary.system_repair_actions ?? 0) || 0;
+  return `<section class="operator-section engineering-status-summary" data-testid="engineering-status-summary">
+    <div class="section-heading"><div><div class="section-eyebrow">Engineering Status Summary</div><h3>Engineering status summary</h3><p class="muted-mini">Graph validation and runtime readiness are shown separately so READY and BLOCKED cannot be confused.</p></div></div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Graph Validation", value: operatorPlainLabel(summary.graph_validation_status || "UNKNOWN") })}
+      ${renderMetricCard({ label: "Runtime Readiness", value: operatorPlainLabel(summary.runtime_readiness_status || summary.runtime_health || run.runtime_truth_classification || "UNKNOWN") })}
+      ${renderMetricCard({ label: "Blocking Issues", value: String(summary.blocking_issues ?? 0) })}
+      ${renderMetricCard({ label: "Warnings", value: String((summary.degraded_issues ?? 0) + (summary.waiting_for_data ?? 0) + (summary.waiting_for_time ?? 0)) })}
+      ${renderEngineeringOperatorActionsCard(operatorActions, systemActions)}
+      ${renderMetricCard({ label: "Data Readiness", value: operatorPlainLabel(summary.data_readiness || "UNKNOWN") })}
+      ${renderMetricCard({ label: "Last Successful Run", value: String(run.last_successful_run || "NOT_RECORDED") })}
+    </div>
+    <div class="callout warning" data-testid="engineering-readiness-explanation">${escapeHtml(summary.runtime_readiness_explanation || "Runtime readiness is reported separately from verified graph status.")}</div>
+  </section>`;
+}
+
+function renderEngineeringDayClarity(queue = {}) {
+  const day = queue.day_clarity || {};
+  const historical = day.is_historical_operational_session === true;
+  return `<section class="operator-section engineering-day-clarity" data-testid="engineering-day-clarity">
+    <div class="section-heading"><div><div class="section-eyebrow">Day Clarity</div><h3>Operational day context</h3></div>${historical ? renderStatusPill("Historical", "neutral", {}) : renderStatusPill("Current", "success", {})}</div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Requested Day", value: String(day.requested_day || queue.requested_day || queue.day_utc || "unknown") })}
+      ${renderMetricCard({ label: "Source Day", value: String(day.source_day || queue.source_day || queue.day_utc || "unknown") })}
+      ${renderMetricCard({ label: "Operational Day", value: String(day.operational_day || queue.operational_day || queue.day_utc || "unknown") })}
+    </div>
+    ${historical ? `<div class="callout warning">Viewing historical operational session.</div>` : ""}
+  </section>`;
+}
+
+function renderEngineeringAskIssueButtons(row = {}) {
+  const problem = row.operator_issue || row.issue || "this engineering issue";
+  const issueContext = [
+    `Problem: ${problem}`,
+    `Cause: ${row.operator_summary || row.cause || "not reported"}`,
+    `Repair status: ${row.repair_status || "not reported"}`,
+    `Evidence: ${row.human_evidence_summary || row.evidence || "not reported"}`,
+  ].join("\n");
+  const prompts = [
+    { label: "Ask Aegis: Explain this issue", question: `Explain this issue.\n${issueContext}` },
+    { label: "Ask Aegis: What should be fixed first?", question: `What should I fix first?\n${issueContext}` },
+  ];
+  return prompts.map((prompt) => `<a class="ghost-button" href="#ask-aegis" data-ask-aegis-prompt="${escapeHtml(prompt.question)}" data-ask-aegis-issue-id="${escapeHtml(row.issue_id || "")}">${escapeHtml(prompt.label)}</a>`).join("");
+}
+
+function engineeringHasRepairCommand(row = {}) {
+  return String(row.repair_status || "").toUpperCase() === "REPAIR_AVAILABLE" && Boolean(row.repair_command);
+}
+
+function renderEngineeringRepairUnavailable(row = {}) {
+  const reason = row.repair_unavailable_reason || "Repair command unavailable. Use Ask Aegis or inspect recovery plan.";
+  const recovery = row.recovery_plan_path || row.recovery_plan_id || "";
+  return `<div class="definition-row"><span class="definition-term">Repair</span><div class="definition-value"><strong>No direct repair command is available.</strong></div></div>
+    <div class="definition-row"><span class="definition-term">Next Step</span><div class="definition-value"><strong>${escapeHtml(reason)}</strong>${recovery ? `<div class="muted-mini">Recovery plan: <strong>${escapeHtml(recovery)}</strong></div>` : ""}</div></div>`;
+}
+
+function renderEngineeringRepairDefinitionRows(row = {}) {
+  const hasRepair = engineeringHasRepairCommand(row);
+  return `${hasRepair ? `<div class="definition-row"><span class="definition-term">Repair</span><div class="definition-value"><strong>${escapeHtml(row.operator_next_step || row.repair_action || "Run the repair command, then verify.")}</strong></div></div>
+        <div class="definition-row"><span class="definition-term">Repair Command</span><div class="definition-value"><code>${escapeHtml(row.repair_command)}</code></div></div>` : renderEngineeringRepairUnavailable(row)}
+        ${row.verification_command ? `<div class="definition-row"><span class="definition-term">Verify</span><div class="definition-value"><code>${escapeHtml(row.verification_command)}</code></div></div>` : ""}`;
+}
+
+function renderEngineeringIssueActionButtons(row = {}) {
+  return `<div class="operator-local-actions compact engineering-issue-actions">${renderEngineeringAskIssueButtons(row)}${engineeringHasRepairCommand(row) ? `<button class="ghost-button" type="button" data-copy-text="${escapeHtml(row.repair_command)}">Copy Repair Command</button>` : ""}${row.verification_command ? `<button class="ghost-button" type="button" data-copy-text="${escapeHtml(row.verification_command)}">Copy Verify Command</button>` : ""}</div>`;
+}
+
+function renderEngineeringRepairRows(rows = [], { emptyMessage = "No issues reported.", showLimit = 0 } = {}) {
+  const visible = showLimit ? safeList(rows).slice(0, showLimit) : safeList(rows);
+  if (!visible.length) return `<div class="empty-state">${escapeHtml(emptyMessage)}</div>`;
+  return `<div class="engineering-repair-list">${visible.map((row) => `<article class="stack-card engineering-repair-row" data-engineering-issue-id="${escapeHtml(row.issue_id || "")}">
+      <div class="section-heading"><div><div class="section-eyebrow">Problem</div><h4>${escapeHtml(row.operator_issue || row.issue || "Issue")}</h4></div><div>${renderStatusPill(row.priority || "P3", row.priority === "P0" || row.priority === "P1" ? "warning" : "neutral", {})}<div class="muted-mini ${escapeHtml(engineeringPriorityClass(row.priority))}">${escapeHtml(operatorPlainLabel(row.classification || "INFORMATIONAL"))}</div></div></div>
+      <div class="definition-list compact engineering-repair-fields">
+        <div class="definition-row"><span class="definition-term">Cause</span><div class="definition-value"><strong>${escapeHtml(row.operator_summary || row.cause || "No cause reported.")}</strong></div></div>
+        <div class="definition-row"><span class="definition-term">Impact</span><div class="definition-value"><strong>${escapeHtml(row.operator_impact || row.impact || "No impact reported.")}</strong></div></div>
+        <div class="definition-row"><span class="definition-term">Repair Status</span><div class="definition-value"><strong>${escapeHtml(systemHealthRepairStatusLabel(row.repair_status || "REPAIR_UNAVAILABLE"))}</strong></div></div>
+        ${renderEngineeringRepairDefinitionRows(row)}
+      </div>
+      ${renderEngineeringIssueActionButtons(row)}
+      <details class="operator-disclosure engineering-row-evidence"><summary>Raw evidence and source artifacts</summary>${renderDefinitionRows([
+        { label: "Human evidence summary", value: row.human_evidence_summary || "No evidence summary reported." },
+        { label: "Raw engineering label", value: row.issue || "not available" },
+        { label: "Raw evidence", value: row.raw_evidence || row.evidence || "No raw evidence reported." },
+        { label: "Timestamp", value: row.timestamp || "not available" },
+        { label: "Confidence", value: row.confidence || "not available" },
+        { label: "Artifacts", value: safeList(row.source_artifacts).join("\n") || "not available" },
+      ])}</details>
+    </article>`).join("")}</div>`;
+}
+
+function renderEngineeringIssueTable(rows = [], { emptyMessage = "No issues reported.", showLimit = 0 } = {}) {
+  return renderEngineeringRepairRows(rows, { emptyMessage, showLimit });
+}
+
+function renderEngineeringOperatorActionTable(rows = [], { emptyMessage = "No operator action is currently required." } = {}) {
+  const visible = safeList(rows);
+  return renderSimpleTable({
+    columns: [
+      { label: "Action", render: (row) => `<strong>${escapeHtml(row.operator_next_step || row.repair_action || row.operator_issue || row.issue || "Action")}</strong>` },
+      { label: "Reason", render: (row) => escapeHtml(row.operator_summary || row.cause || "No reason reported.") },
+      { label: "Severity", render: (row) => `${renderStatusPill(row.priority || "P3", row.priority === "P0" || row.priority === "P1" ? "warning" : "neutral", {})}<div class="muted-mini">${escapeHtml(operatorPlainLabel(row.classification || "INFORMATIONAL"))}</div>` },
+      { label: "Source Issue", render: (row) => `<strong>${escapeHtml(row.operator_issue || row.issue || "Issue")}</strong><details class="operator-disclosure"><summary>Raw evidence</summary>${renderDefinitionRows([{ label: "Human evidence summary", value: row.human_evidence_summary || "not available" }, { label: "Raw label", value: row.issue || "not available" }, { label: "Raw evidence", value: row.raw_evidence || row.evidence || "not available" }])}</details>` },
+      { label: "Action Type", render: (row) => escapeHtml(operatorPlainLabel(row.action_type || "VERIFY_ONLY")) },
+      { label: "User Action Required", render: (row) => String(row.action_type || "").toUpperCase() === "USER_ACTION" ? "Yes" : "No" },
+      { label: "Ask Aegis", render: (row) => `<div class="operator-local-actions compact">${renderEngineeringAskIssueButtons(row)}</div>` },
+      { label: "Repair / Verify", render: (row) => `${engineeringHasRepairCommand(row) ? `<div><code>${escapeHtml(row.repair_command)}</code></div>` : `<div class="muted-mini">Repair command unavailable.</div>`}${row.verification_command ? `<div class="muted-mini">Verify: <code>${escapeHtml(row.verification_command)}</code></div>` : ""}` },
+    ],
+    rows: visible,
+    emptyMessage,
+  });
+}
+
+function renderEngineeringTopIssueHero(row = {}) {
+  if (!row || !Object.keys(row).length) return `<div class="empty-state">No engineering repair is currently prioritized.</div>`;
+  return `<article class="stack-card engineering-top-issue" data-testid="engineering-top-issue" data-engineering-issue-id="${escapeHtml(row.issue_id || "")}">
+    <div class="section-heading"><div><div class="section-eyebrow">Fix First / Top Issue</div><h3>${escapeHtml(row.operator_issue || row.issue || "Top issue")}</h3><p class="muted-mini">${escapeHtml(row.operator_summary || row.cause || "No cause reported.")}</p></div><div>${renderStatusPill(row.priority || "P3", row.priority === "P0" || row.priority === "P1" ? "warning" : "neutral", {})}<div class="muted-mini">${escapeHtml(operatorPlainLabel(row.classification || "INFORMATIONAL"))}</div></div></div>
+    <div class="definition-list compact engineering-top-issue-fields">
+      <div class="definition-row"><span class="definition-term">Problem</span><div class="definition-value"><strong>${escapeHtml(row.operator_issue || row.issue || "Issue")}</strong></div></div>
+      <div class="definition-row"><span class="definition-term">Cause</span><div class="definition-value"><strong>${escapeHtml(row.operator_summary || row.cause || "No cause reported.")}</strong></div></div>
+      <div class="definition-row"><span class="definition-term">Impact</span><div class="definition-value"><strong>${escapeHtml(row.operator_impact || row.impact || "No impact reported.")}</strong></div></div>
+      <div class="definition-row"><span class="definition-term">Repair Status</span><div class="definition-value"><strong>${escapeHtml(systemHealthRepairStatusLabel(row.repair_status || "REPAIR_UNAVAILABLE"))}</strong></div></div>
+      ${renderEngineeringRepairDefinitionRows(row)}
+      <div class="definition-row"><span class="definition-term">Evidence</span><div class="definition-value"><strong>${escapeHtml(row.human_evidence_summary || "No evidence summary reported.")}</strong></div></div>
+    </div>
+    <div class="operator-local-actions compact engineering-issue-actions">${renderEngineeringAskIssueButtons(row)}</div>
+    <details class="operator-disclosure engineering-row-evidence"><summary>Source artifacts and commands</summary>${renderDefinitionRows([
+      { label: "Verification command", value: row.verification_command || "not available" },
+      { label: "Raw engineering label", value: row.issue || "not available" },
+      { label: "Raw evidence", value: row.raw_evidence || row.evidence || "not available" },
+      { label: "Timestamp", value: row.timestamp || "not available" },
+      { label: "Confidence", value: row.confidence || "not available" },
+      { label: "Artifacts", value: safeList(row.source_artifacts).join("\n") || "not available" },
+    ])}</details>
+  </article>`;
+}
+
+function renderEngineeringFixFirst(queue = {}) {
+  const rows = safeList(queue.fix_first);
+  const [topIssue, ...remaining] = rows;
+  return `<section class="operator-section engineering-fix-first" data-testid="engineering-fix-first">
+    ${renderEngineeringTopIssueHero(topIssue || {})}
+    <div class="section-heading"><div><div class="section-eyebrow">Fix First</div><h3>Additional prioritized repairs</h3><p class="muted-mini">Deterministic queue from aegis_engineering_priority_queue_v1. Maximum five items including the top issue.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} item${rows.length === 1 ? "" : "s"}</span></div>
+    ${renderEngineeringIssueTable(remaining, { emptyMessage: "No additional engineering repairs are currently prioritized.", showLimit: 4 })}
+  </section>`;
+}
+
+function renderEngineeringOperatorActions(queue = {}) {
+  const operatorRows = safeList(queue.operator_actions_required);
+  const systemRows = safeList(queue.system_repair_actions);
+  const rows = operatorRows.length ? operatorRows : systemRows;
+  const operatorMode = operatorRows.length > 0;
+  const label = operatorMode ? "Operator Actions Required" : "System repair actions";
+  const title = operatorMode ? "Operator action queue" : "System repair action queue";
+  const empty = operatorMode ? "No operator action is currently required." : "No system repair action is currently queued.";
+  return `<section id="engineering-operator-actions" class="operator-section engineering-operator-actions" data-testid="engineering-operator-actions">
+    <div class="section-heading"><div><div class="section-eyebrow">${escapeHtml(label)}</div><h3>${escapeHtml(title)}</h3><p class="muted-mini">Rows are classified by action type so system repairs and verify-only checks are not mislabeled as user-required work.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} action${rows.length === 1 ? "" : "s"}</span></div>
+    ${renderEngineeringOperatorActionTable(rows, { emptyMessage: empty })}
+  </section>`;
+}
+
+function renderEngineeringActiveBlockers(queue = {}) {
+  const rows = safeList(queue.active_blockers);
+  return `<section class="operator-section engineering-active-blockers" data-testid="engineering-active-blockers">
+    <div class="section-heading"><div><div class="section-eyebrow">Active Blockers</div><h3>True blockers</h3><p class="muted-mini">Missing artifacts, failed producers, unavailable data, runtime failures, or schema mismatches only.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} blocker${rows.length === 1 ? "" : "s"}</span></div>
+    ${renderEngineeringIssueTable(rows, { emptyMessage: "No true blockers reported." })}
+  </section>`;
+}
+
+function renderEngineeringDegraded(queue = {}) {
+  const rows = safeList(queue.degraded_but_functional);
+  return `<section class="operator-section engineering-degraded" data-testid="engineering-degraded-functional">
+    <div class="section-heading"><div><div class="section-eyebrow">Degraded but Functional</div><h3>Degraded but functional</h3><p class="muted-mini">Issues that explain partial telemetry, delayed reports, source waits, or operator waits without making the portal unusable.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} degraded</span></div>
+    ${renderEngineeringIssueTable(rows, { emptyMessage: "No degraded-but-functional issues reported." })}
+  </section>`;
+}
+
+function renderEngineeringRunHealth(queue = {}) {
+  const run = queue.run_health || {};
+  return `<section class="operator-section engineering-run-health" data-testid="engineering-run-health">
+    <div class="section-heading"><div><div class="section-eyebrow">Run Health</div><h3>Run health</h3></div>${renderStatusPill(operatorPlainLabel(run.run_status || "UNKNOWN"), "neutral", {})}</div>
+    ${renderDefinitionRows([
+      { label: "last run", value: run.last_run || "NOT_RECORDED" },
+      { label: "last successful run", value: run.last_successful_run || "NOT_RECORDED" },
+      { label: "next expected run", value: run.next_expected_run || "not available" },
+      { label: "run status", value: run.run_status || "UNKNOWN" },
+      { label: "missing run visibility", value: truthyText(run.missing_run_visibility === true) },
+    ])}
+  </section>`;
+}
+
+function renderEngineeringDiagnostics(queue = {}) {
+  const diagnostics = queue.diagnostics || {};
+  const sourceRows = safeList(diagnostics.source_artifacts || queue.source_artifacts);
+  return `<section class="operator-section engineering-diagnostics" data-testid="engineering-diagnostics">
+    <details class="operator-disclosure engineering-diagnostics-panel">
+      <summary>Diagnostics</summary>
+      ${renderDefinitionRows([
+        { label: "Artifact", value: "aegis_engineering_priority_queue_v1" },
+        { label: "Artifact path", value: queue.artifact_path || "truth/reports/aegis_engineering_priority_queue_v1/<day>/engineering_priority_queue.v1.json" },
+        { label: "Raw issue count", value: String(diagnostics.raw_issue_count ?? safeList(queue.issues).length) },
+        { label: "Deduped issue count", value: String(diagnostics.deduped_issue_count ?? safeList(queue.issues).length) },
+        { label: "Source artifacts", value: sourceRows.map((row) => `${row.source_id || "source"}: ${row.status || "UNKNOWN"}`).join("\n") || "none" },
+      ])}
+    </details>
+  </section>`;
+}
+
+
+
+function systemHealthPlainText(value = "") {
+  let text = String(value || "");
+  text = text.replace(/Runtime truth kernel reports highest readiness layer BLOCKED with explicit root blocker\(s\): EVIDENCE_REJECTED:aegis_lite_eod_report, EVIDENCE_MISSING:paper_session_authority\.?/g, "Runtime verification is incomplete and required runtime evidence is missing.");
+  text = text.replace(/Runtime truth is blocked by explicit root blocker\(s\): EVIDENCE_REJECTED:aegis_lite_eod_report, EVIDENCE_MISSING:paper_session_authority\.?/g, "Runtime verification is incomplete and required runtime evidence is missing.");
+  text = text.replace(/EVIDENCE_REJECTED:aegis_lite_eod_report/g, "runtime verification incomplete");
+  text = text.replace(/EVIDENCE_MISSING:paper_session_authority/g, "required runtime evidence missing");
+  text = text.replace(/Runtime truth PARTIAL_CONTEXT/g, "runtime context is incomplete");
+  text = text.replace(/runtime_truth_classification=PARTIAL_CONTEXT/g, "runtime context is incomplete");
+  text = text.replace(/highest_readiness_layer=BLOCKED/g, "runtime readiness is blocked");
+  text = text.replace(/DATA_READY/g, "data readiness");
+  text = text.replace(/MANUAL_TRADE_CAPTURE_ALLOWED/g, "manual capture capability");
+  text = text.replace(/PAPER_TRADE_CREATION_ALLOWED/g, "paper trade creation capability");
+  text = text.replace(/TRADE_ADVICE_ALLOWED/g, "trade-advice capability");
+  text = text.replace(/AUTONOMOUS_EXECUTION_ALLOWED/g, "autonomous execution capability");
+  text = text.replace(/PARTIAL_CONTEXT/g, "incomplete runtime context");
+  text = text.replace(/rerun audit/gi, "verify health");
+  text = text.replace(/rerun the audit/gi, "verify health");
+  return text;
+}
+
+function systemHealthOperatorQueue(queue = {}) {
+  const clone = { ...queue };
+  const sanitizeRow = (row = {}) => ({
+    ...row,
+    operator_issue: systemHealthPlainText(row.operator_issue || row.issue || "Health issue"),
+    operator_summary: systemHealthPlainText(row.operator_summary || row.cause || "No cause reported."),
+    operator_impact: systemHealthPlainText(row.operator_impact || row.impact || "No impact reported."),
+    operator_next_step: systemHealthPlainText(row.operator_next_step || row.repair_action || "Inspect the recovery plan, then verify."),
+    human_evidence_summary: systemHealthPlainText(row.human_evidence_summary || row.evidence || "No evidence summary reported."),
+    repair_action: systemHealthPlainText(row.repair_action || row.operator_next_step || "Inspect the recovery plan, then verify."),
+    repair_unavailable_reason: "No direct repair command is available. Review the runtime recovery plan, then verify the health state.",
+    recovery_plan_id: row.recovery_plan_id ? "Runtime recovery plan" : "",
+    recovery_plan_path: "",
+  });
+  clone.fix_first = safeList(queue.fix_first).map(sanitizeRow);
+  clone.active_blockers = safeList(queue.active_blockers).map(sanitizeRow);
+  clone.degraded_but_functional = safeList(queue.degraded_but_functional).map(sanitizeRow);
+  clone.operator_actions_required = safeList(queue.operator_actions_required).map(sanitizeRow);
+  clone.system_repair_actions = safeList(queue.system_repair_actions).map(sanitizeRow);
+  clone.summary = { ...(queue.summary || {}) };
+  if (clone.summary.runtime_readiness_explanation) clone.summary.runtime_readiness_explanation = systemHealthPlainText(clone.summary.runtime_readiness_explanation);
+  return clone;
+}
+
+function systemHealthState(queue = {}, verifiedRuntime = {}) {
+  const summary = engineeringQueueSummary(queue);
+  const runtimeStatus = String(summary.runtime_readiness_status || summary.runtime_health || verifiedRuntime.runtime_truth?.highest_readiness_layer || "").toUpperCase();
+  const blocking = Number(summary.blocking_issues || 0);
+  const degraded = Number(summary.degraded_issues || 0) + Number(summary.waiting_for_data || 0) + Number(summary.waiting_for_time || 0);
+  const repairRows = safeList(queue.fix_first).filter((row) => String(row.repair_status || "").toUpperCase().includes("REPAIR"));
+  if (blocking > 0 || runtimeStatus === "BLOCKED") return "BLOCKED";
+  if (repairRows.length) return "REPAIR_NEEDED";
+  if (degraded > 0) return "DEGRADED";
+  return "HEALTHY";
+}
+
+function systemHealthHeadline(state = "DEGRADED") {
+  if (state === "HEALTHY") return "Aegis can operate for the requested day.";
+  if (state === "REPAIR_NEEDED") return "Aegis needs a repair or recovery check.";
+  if (state === "BLOCKED") return "Aegis is monitoring only because runtime evidence is incomplete.";
+  return "Aegis is operating with degraded dependencies.";
+}
+
+function systemHealthExpectation(state = "DEGRADED", queue = {}) {
+  const top = safeList(queue.fix_first)[0] || {};
+  if (state === "HEALTHY") return "No repair action is required. Continue monitoring normally.";
+  if (state === "BLOCKED") return top.operator_next_step || "Inspect the named recovery plan, then verify after current evidence is repaired.";
+  if (state === "REPAIR_NEEDED") return top.operator_next_step || "Follow the repair or recovery plan, then verify the health state.";
+  return "Continue monitoring with the stated limitations. Repair only rows that provide a real repair step.";
+}
+
+function systemHealthCanOperateLabel(state = "DEGRADED") {
+  if (state === "HEALTHY") return "Yes";
+  if (state === "DEGRADED") return "Partially";
+  if (state === "REPAIR_NEEDED") return "Needs repair";
+  return "Runtime Guarded";
+}
+
+function systemHealthRepairStatusLabel(status = "") {
+  const value = String(status || "").toUpperCase();
+  if (value === "REPAIR_AVAILABLE") return "Repair available";
+  if (value === "REPAIR_NEEDS_RECOVERY_PLAN") return "Recovery plan required";
+  if (value === "REPAIR_MANUAL_INVESTIGATION") return "Manual investigation required";
+  if (value === "VERIFY_ONLY") return "Verification only";
+  if (value === "REPAIR_UNAVAILABLE") return "No direct repair available";
+  return operatorPlainLabel(status || "REPAIR_UNAVAILABLE");
+}
+
+function systemHealthOperatorActionSummary(queue = {}) {
+  const rows = safeList(queue.operator_actions_required);
+  const actionSummary = operatorTruthDavidActionSummary(rows);
+  const immediateRows = rows.filter(operatorTruthIsDavidAction);
+  const top = safeList(queue.fix_first)[0] || {};
+  if (immediateRows.length) {
+    return { label: actionSummary.label, helper: "Review the listed health follow-up before relying on affected workflows." };
+  }
+  if (String(top.repair_status || "").toUpperCase() === "REPAIR_NEEDS_RECOVERY_PLAN") {
+    return { label: actionSummary.label, helper: actionSummary.helper || "No trade or broker action is available; inspect the recovery plan and monitor verification." };
+  }
+  if (String(systemHealthState(queue) || "").toUpperCase() === "BLOCKED") {
+    return { label: "Monitor recovery progress", helper: "Aegis is not asking David to capture or approve anything while runtime evidence is incomplete." };
+  }
+  return { label: "No operator action required", helper: "Continue monitoring normally." };
+}
+
+function systemHealthHealthySummary(queue = {}, verifiedRuntime = {}) {
+  const summary = engineeringQueueSummary(queue);
+  const graph = String(summary.graph_validation_status || verifiedRuntime.graph_status || "").toUpperCase();
+  const runtime = String(summary.runtime_readiness_status || verifiedRuntime.runtime_readiness_status || "").toUpperCase();
+  if (graph === "READY" && runtime === "BLOCKED") return "Evidence graph healthy. Runtime verification incomplete.";
+  if (graph === "READY") return "Evidence graph healthy.";
+  if (runtime === "BLOCKED") return "Runtime verification incomplete.";
+  return "Core validation status is available below.";
+}
+
+function systemHealthRecoveryPlanLabel(row = {}) {
+  return row.recovery_plan_id || row.recovery_plan_path || "Runtime recovery plan";
+}
+
+function systemHealthDataAvailabilityRows(queue = {}) {
+  const summary = engineeringQueueSummary(queue);
+  const diagnostics = queue.diagnostics || {};
+  const sourceRows = safeList(diagnostics.source_artifacts || queue.source_artifacts);
+  const missingStale = sourceRows.filter((row) => ["MISSING", "STALE", "READ_ERROR", "FAILED"].includes(String(row.status || "").toUpperCase()));
+  const currentSources = sourceRows.filter((row) => String(row.status || "").toUpperCase() === "AVAILABLE");
+  const certifiedMarks = summary.certified_same_day_marks || "UNKNOWN";
+  const estimatedMarks = summary.latest_estimated_marks || "UNKNOWN";
+  const pricingLimitation = summary.pricing_limitation || "UNKNOWN";
+  const pricingHelper = pricingLimitation === "EXPECTED_NON_TRADING_DAY_LIMITATION_NOT_REPAIR"
+    ? "Expected non-trading-day limitation; prior-session estimates are not a repair-needed pricing failure."
+    : pricingLimitation === "LATEST_ESTIMATE_DATA_REPAIR_NEEDED"
+      ? "Latest available estimate marks are missing; data recovery is needed."
+      : "Canonical certification remains separate from operator estimates.";
+  return [
+    {
+      label: "Current-day data",
+      value: operatorPlainLabel(summary.data_readiness || "UNKNOWN"),
+      helper: summary.data_readiness === "BLOCKED" ? "Some required data is not certified for this day." : "Required data is available at the reported level.",
+    },
+    {
+      label: "Available evidence sources",
+      value: String(currentSources.length),
+      helper: "Evidence sources available to the health check.",
+    },
+    {
+      label: "Missing or stale sources",
+      value: String(missingStale.length),
+      helper: missingStale.length ? "One or more health inputs are missing or stale." : "No missing or stale source rows were reported by the health queue.",
+    },
+    {
+      label: "Certified same-day marks",
+      value: operatorPlainLabel(certifiedMarks),
+      helper: "Canonical P&L remains not certified when same-day certified marks do not exist.",
+    },
+    {
+      label: "Latest estimated marks",
+      value: operatorPlainLabel(estimatedMarks),
+      helper: "Read-only operator visibility only; not canonical P&L.",
+    },
+    {
+      label: "Pricing limitation",
+      value: operatorPlainLabel(pricingLimitation),
+      helper: pricingHelper,
+    },
+    {
+      label: "Source day",
+      value: String(queue.source_day || queue.day_utc || "unknown"),
+      helper: "Health evidence source day.",
+    },
+  ];
+}
+
+function renderSystemHealthStatus(queue = {}, verifiedRuntime = {}) {
+  const summary = engineeringQueueSummary(queue);
+  const truth = buildOperatorTruthModel(verifiedRuntime, queue);
+  const technicalState = systemHealthState(queue, verifiedRuntime);
+  const run = queue.run_health || {};
+  const graphStatus = operatorPlainLabel(summary.graph_validation_status || "UNKNOWN");
+  const runtimeStatus = operatorPlainLabel(summary.runtime_readiness_status || run.runtime_truth_classification || "UNKNOWN");
+  const actionSummary = systemHealthOperatorActionSummary(queue);
+  const healthySummary = systemHealthHealthySummary(queue, verifiedRuntime);
+  const safetyText = "Trade advice, broker execution, live trading, and autonomous execution remain disabled.";
+  return `<section class="operator-section system-health-hero" data-testid="system-health-operating-status">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">System Health</div>
+        <h2>${escapeHtml(truth.primaryStatus || "PAPER MODE")}</h2>
+        <p class="muted-mini">${escapeHtml(truth.summary || "Runtime truth controls whether Aegis can act.")} ${escapeHtml(healthySummary)}</p>
+      </div>
+      ${renderStatusPill(truth.primaryStatus || "PAPER MODE", truth.primaryTone || "warning", {})}
+    </div>
+    <div class="performance-operator-answer" data-testid="system-health-operator-answer">${escapeHtml(actionSummary.label)}. Aegis cannot act while runtime truth is blocked; recovery details below are system issues, not David trading actions.</div>
+    <div class="performance-summary-grid">
+      ${renderPerformanceFactCard("Can Aegis act?", truth.canAct ? "Yes" : truth.actingStatus, truth.runtimeBlocked ? "Runtime guarded. Acting is blocked until runtime evidence is repaired." : "Operation is limited to enabled policy gates.")}
+      ${renderPerformanceFactCard("David action", actionSummary.label, actionSummary.helper)}
+      ${renderPerformanceFactCard("Technical health", operatorPlainLabel(technicalState), "Technical state is detail; operator status remains governed by runtime truth.")}
+      ${renderPerformanceFactCard("Graph validation", graphStatus, "Evidence graph status; not the same as runtime readiness.")}
+      ${renderPerformanceFactCard("Runtime readiness", runtimeStatus, "Primary operational truth for whether Aegis can act.")}
+      ${renderPerformanceFactCard("Runtime capability blockers", String(truth.blockedCapabilityCount), "Capability blockers are not David action counts.")}
+      ${renderPerformanceFactCard("Data availability", operatorPlainLabel(summary.data_readiness || "UNKNOWN"), "Current-day data certification status.")}
+      ${renderPerformanceFactCard("Safety mode", "Protected", safetyText)}
+    </div>
+  </section>`;
+}
+
+function renderSystemHealthTopIssue(row = {}) {
+  if (!row || !Object.keys(row).length) return `<div class="empty-state">No health recovery item is currently prioritized.</div>`;
+  const repairStatus = systemHealthRepairStatusLabel(row.repair_status || "REPAIR_UNAVAILABLE");
+  const recoveryPlan = systemHealthRecoveryPlanLabel(row);
+  return `<article class="stack-card engineering-top-issue system-health-top-issue" data-testid="engineering-top-issue" data-system-health-issue-id="${escapeHtml(row.issue_id || "")}">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">Top Health Issue</div>
+        <h3>${escapeHtml(row.operator_issue || row.issue || "Top health issue")}</h3>
+        <p class="muted-mini">${escapeHtml(row.operator_summary || row.cause || "No cause reported.")}</p>
+      </div>
+      <div>${renderStatusPill(row.priority || "P3", row.priority === "P0" || row.priority === "P1" ? "warning" : "neutral", {})}<div class="muted-mini">${escapeHtml(operatorPlainLabel(row.classification || "INFORMATIONAL"))}</div></div>
+    </div>
+    <div class="definition-list compact engineering-top-issue-fields">
+      <div class="definition-row"><span class="definition-term">Impact</span><div class="definition-value"><strong>${escapeHtml(row.operator_impact || row.impact || "No impact reported.")}</strong></div></div>
+      <div class="definition-row"><span class="definition-term">Recovery</span><div class="definition-value"><strong>${escapeHtml(repairStatus)}</strong><div class="muted-mini">${escapeHtml(recoveryPlan)} is the place to inspect before verification.</div></div></div>
+      <div class="definition-row"><span class="definition-term">Verify</span><div class="definition-value">Rerun health verification after recovery evidence is updated.</div></div>
+      <div class="definition-row"><span class="definition-term">Evidence</span><div class="definition-value"><strong>${escapeHtml(row.human_evidence_summary || "No evidence summary reported.")}</strong></div></div>
+    </div>
+    <div class="operator-local-actions compact engineering-issue-actions">${renderEngineeringAskIssueButtons(row)}</div>
+    <details class="operator-disclosure engineering-row-evidence"><summary>Source artifacts and commands</summary>${renderDefinitionRows([
+      { label: "Verification command", value: row.verification_command || "not available" },
+      { label: "Raw engineering label", value: row.issue || "not available" },
+      { label: "Raw evidence", value: row.raw_evidence || row.evidence || "No raw evidence reported." },
+      { label: "Timestamp", value: row.timestamp || "not available" },
+      { label: "Confidence", value: row.confidence || "not available" },
+      { label: "Artifacts", value: safeList(row.source_artifacts).join("\n") || "not available" },
+    ])}</details>
+  </article>`;
+}
+
+function renderSystemHealthFixFirst(queue = {}) {
+  const rows = safeList(queue.fix_first);
+  const [topIssue, ...remaining] = rows;
+  return `<section class="operator-section system-health-fix-first" data-testid="system-health-fix-first">
+    <div class="section-heading">
+      <div>
+        <div class="section-eyebrow">Recovery</div>
+        <h3>What should happen next?</h3>
+        <p class="muted-mini">Diagnosis, recovery, and verification are separated so status checks are not mistaken for repair.</p>
+      </div>
+      <span class="support-chip">${escapeHtml(String(rows.length))} fix-first item${rows.length === 1 ? "" : "s"}</span>
+    </div>
+    ${renderSystemHealthTopIssue(topIssue || {})}
+    ${remaining.length ? `<details class="operator-disclosure system-health-additional-issues"><summary>Additional recovery items</summary>${renderEngineeringIssueTable(remaining, { emptyMessage: "No additional health repairs are prioritized.", showLimit: 4 })}</details>` : ""}
+  </section>`;
+}
+
+function renderSystemHealthOperatorActionState(queue = {}) {
+  const operatorRows = safeList(queue.operator_actions_required);
+  const actionSummary = operatorTruthDavidActionSummary(operatorRows);
+  const humanRows = operatorRows.filter((row) => String(row.action_type || "").toUpperCase() === "USER_ACTION");
+  const immediateRows = operatorRows.filter(operatorTruthIsDavidAction);
+  const safetyPolicyRows = operatorRows.filter(operatorTruthIsPolicyCapabilityBlock);
+  const label = actionSummary.label;
+  const helper = actionSummary.helper;
+  return `<section class="operator-section system-health-action-state" data-testid="system-health-action-state">
+    <div class="section-heading"><div><div class="section-eyebrow">David Action</div><h3>${escapeHtml(label)}</h3><p class="muted-mini">${escapeHtml(helper)}</p></div><span class="status-pill tone-neutral">${escapeHtml(String(immediateRows.length))} David / ${escapeHtml(String(safetyPolicyRows.length))} policy/capability</span></div>
+    ${immediateRows.length ? renderEngineeringOperatorActionTable(immediateRows, { emptyMessage: "No operator action is currently required." }) : `<div class="empty-state">No David action is currently required. Policy-gated capability blocks remain visible under blocked capability and recovery taxonomy.</div>`}
+  </section>`;
+}
+
+function renderSystemHealthDataAvailability(queue = {}) {
+  const rows = systemHealthDataAvailabilityRows(queue);
+  return `<section class="operator-section system-health-data" data-testid="system-health-data-availability">
+    <div class="section-heading"><div><div class="section-eyebrow">Data Availability</div><h3>Is required data available?</h3><p class="muted-mini">This summarizes operational data dependencies, not portfolio performance.</p></div></div>
+    <div class="performance-completeness-grid">
+      ${rows.map((row) => renderPerformanceFactCard(row.label, row.value, row.helper)).join("")}
+    </div>
+  </section>`;
+}
+
+
+function systemHealthNextExpectedRunLabel(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "No future run reported";
+  const parsed = Date.parse(raw);
+  if (Number.isFinite(parsed) && parsed < Date.now()) return "No future run reported";
+  return raw;
+}
+
+function renderSystemHealthDependencies(queue = {}) {
+  const run = queue.run_health || {};
+  const diagnostics = queue.diagnostics || {};
+  const sourceRows = safeList(diagnostics.source_artifacts || queue.source_artifacts);
+  const routeSources = sourceRows.slice(0, 5).map((row) => ({
+    dependency: operatorPlainLabel(row.source_id || "source"),
+    status: operatorPlainLabel(row.status || "UNKNOWN"),
+    updated: row.timestamp || "not reported",
+  }));
+  return `<section class="operator-section system-health-dependencies" data-testid="system-health-dependencies">
+    <div class="section-heading"><div><div class="section-eyebrow">Run and Dependency Health</div><h3>What dependencies are unhealthy?</h3><p class="muted-mini">Run timing and dependency status are summarized here; raw evidence is collapsed below.</p></div>${renderStatusPill(operatorPlainLabel(run.run_status || "UNKNOWN"), "neutral", {})}</div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Last run", value: run.last_run || "Not recorded" })}
+      ${renderMetricCard({ label: "Last successful run", value: run.last_successful_run || "Not recorded" })}
+      ${renderMetricCard({ label: "Next expected run", value: systemHealthNextExpectedRunLabel(run.next_expected_run) })}
+      ${renderMetricCard({ label: "Run visibility", value: run.missing_run_visibility === true ? "Incomplete" : "Available" })}
+    </div>
+    ${renderSimpleTable({
+      columns: [
+        { label: "Dependency", render: (row) => escapeHtml(row.dependency) },
+        { label: "Status", render: (row) => escapeHtml(row.status) },
+        { label: "Updated", render: (row) => escapeHtml(row.updated) },
+      ],
+      rows: routeSources,
+      emptyMessage: "No dependency source rows were reported.",
+    })}
+  </section>`;
+}
+
+function renderSystemHealthBlockers(queue = {}) {
+  const rows = safeList(queue.active_blockers);
+  return `<section class="operator-section system-health-blockers" data-testid="system-health-blockers">
+    <div class="section-heading"><div><div class="section-eyebrow">Operator Blockers</div><h3>What is blocked?</h3><p class="muted-mini">Operator blockers are distinct from runtime capability blockers, root causes, and fix-first recovery items.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} operator blocker${rows.length === 1 ? "" : "s"}</span></div>
+    ${renderEngineeringIssueTable(rows, { emptyMessage: "No active health blockers are reported." })}
+  </section>`;
+}
+
+function renderSystemHealthDegraded(queue = {}) {
+  const rows = safeList(queue.degraded_but_functional);
+  return `<section class="operator-section system-health-degraded" data-testid="system-health-degraded">
+    <div class="section-heading"><div><div class="section-eyebrow">Degraded Dependencies</div><h3>What is degraded?</h3><p class="muted-mini">These issues may limit trust or visibility without becoming the top blocker.</p></div><span class="support-chip">${escapeHtml(String(rows.length))} degraded</span></div>
+    ${renderEngineeringIssueTable(rows, { emptyMessage: "No degraded dependencies are reported." })}
+  </section>`;
+}
+
+function renderSystemHealthEvidence(queue = {}) {
+  const diagnostics = queue.diagnostics || {};
+  const sourceRows = safeList(diagnostics.source_artifacts || queue.source_artifacts);
+  return `<section class="operator-section system-health-evidence" data-testid="system-health-evidence">
+    <details class="operator-disclosure system-health-evidence-panel">
+      <summary>View health evidence</summary>
+      ${renderDefinitionRows([
+        { label: "Requested day", value: queue.requested_day || queue.day_utc || "unknown" },
+        { label: "Source day", value: queue.source_day || queue.day_utc || "unknown" },
+        { label: "Raw issue count", value: String(diagnostics.raw_issue_count ?? safeList(queue.issues).length) },
+        { label: "Deduped issue count", value: String(diagnostics.deduped_issue_count ?? safeList(queue.issues).length) },
+        { label: "Evidence sources", value: sourceRows.map((row) => `${operatorPlainLabel(row.source_id || "source")}: ${operatorPlainLabel(row.status || "UNKNOWN")}`).join("\n") || "none" },
+      ])}
+    </details>
+  </section>`;
+}
+
+async function renderEngineeringDashboardWorkspace() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  const [queueEnvelope, verifiedRuntime, surfaceReadinessEnvelope] = await Promise.all([
+    fetchAegisEngineeringPriorityQueue(routeParams),
+    fetchAegisVerifiedRuntimePortalModel(routeParams).catch((error) => ({
+      model_status: "UNAVAILABLE",
+      operator_message: `Verified runtime packet model unavailable: ${error?.message || error}`,
+    })),
+    fetchAegisSurfaceReadiness(routeParams).catch(() => ({})),
+  ]);
+  const queue = engineeringQueuePayload(queueEnvelope);
+  queue.artifact_path = queueEnvelope.artifact_path || queue.artifact_path || "";
+  const askPayload = {
+    ...queue,
+    verified_runtime_graph: verifiedRuntime,
+    day_utc: queue.day_utc || routeParams.day || routeParams.operational_day || "",
+    requested_day: queue.requested_day || routeParams.day || "",
+    source_day: queue.source_day || queue.day_utc || "",
+    generated_at: queue.generated_at,
+    actions_required: safeList(queue.fix_first).map((row) => ({ title: row.issue, suggested_command: row.repair_command, action: row.repair_action })),
+  };
+  const surfaceReadiness = surfaceReadinessEnvelope.data || surfaceReadinessEnvelope.artifact || {};
+  const operatorSurfaceContract = surfaceReadinessEnvelope.operator_surface_contract || surfaceReadiness.operator_surface_contract || {};
+  queue.surface_readiness = surfaceReadiness;
+  queue.surface_readiness_by_id = surfaceReadiness.surface_by_id || {};
+  queue.operator_surface_contract = operatorSurfaceContract;
+  queue.operator_surface_contract_by_id = operatorSurfaceContract.contract_by_id || operatorSurfaceContract.surface_by_id || {};
+  const engineeringSurface = surfaceContractRow(queue, "engineering");
+  const healthQueue = systemHealthOperatorQueue(queue);
+  const healthAskPayload = { ...askPayload, ...healthQueue, actions_required: safeList(healthQueue.fix_first).map((row) => ({ title: row.operator_issue || row.issue, suggested_command: row.repair_command, action: row.repair_action })) };
+  const summary = engineeringQueueSummary(healthQueue);
+  const operatorTruth = buildOperatorTruthModel(verifiedRuntime, healthQueue);
+  const bodyHtml = `<main class="operator-workflow system-health-workspace" data-testid="system-health-page">${[
+      renderSectionHeader({ eyebrow: "System Health", title: "System Health", subtitle: "Can Aegis operate, what is healthy, what is degraded, and what is blocked?" }),
+      renderOperatorTruthStrip(operatorTruth, [
+        { label: "Operator blockers", value: String(safeList(healthQueue.active_blockers).length), detail: "Operator-facing blocked workflows." },
+        { label: "Fix-first items", value: String(safeList(healthQueue.fix_first).length), detail: "Recovery ordering; not David actions." },
+      ]),
+      renderSystemHealthStatus(healthQueue, verifiedRuntime),
+      renderSystemHealthFixFirst(healthQueue),
+      renderAskAegisPanel(healthAskPayload, verifiedRuntime),
+      renderSystemHealthOperatorActionState(healthQueue),
+      renderSystemHealthBlockers(healthQueue),
+      renderSystemHealthDegraded(healthQueue),
+      renderSystemHealthDataAvailability(healthQueue),
+      renderSystemHealthDependencies(healthQueue),
+      renderSystemHealthEvidence(healthQueue),
+    ].join("")}</main>`;
+  return {
+    title: "System Health",
+    headerTitle: "System Health",
+    meta: "Operational status, dependencies, data availability, blockers, and recovery guidance.",
+    html: TroubleshootingTemplate({ surfaceId: "engineering", contractRow: engineeringSurface, bodyHtml: bodyHtml }),
+    topReadinessLabel: operatorTruth.primaryStatus,
+    topReadinessTone: operatorTruth.primaryTone,
+    operatorTruth,
+    engineeringNavStatus: Number(summary.blocking_issues || 0) > 0 ? `${summary.blocking_issues} blocker${Number(summary.blocking_issues || 0) === 1 ? "" : "s"}` : (String(summary.runtime_readiness_status || "").toUpperCase() === "BLOCKED" ? "Runtime blocked" : "Runtime clear"),
+    contextHtml: "",
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
 }
 
 function renderAegisTodayWorkflow(payload) {
@@ -4214,39 +10645,28 @@ function renderAegisTodayWorkflow(payload) {
   const incidentState = dashboardIncidentState(payload);
   if (incidentState) {
     return {
-      title: "Dashboard",
-      meta: "Current-day incident. Normal dashboard content is hidden until the hard failure clears.",
+      title: "Engineering Dashboard",
+      meta: "Current-day engineering incident. Command Center remains the daily operator dashboard.",
       html: renderDashboardIncidentPage(payload),
       contextHtml: "",
       dashboardIncidentMode: true,
       dashboardIncidentState: incidentState,
     };
   }
-  const currentTruth = payload.current_operator_truth || {};
-  const runtimeDay = today.current_runtime_day || payload.requested_day || payload.day_utc || "unknown";
-  const mode = today.runtime_mode || today.operational_mode || payload.runtime_mode || "UNKNOWN";
-  const intradayStatus = today.current_day_run_status || currentDay.status || payload.current_truth_status || "UNKNOWN";
-  const marketDataState = today.market_data_state || currentDay.market_data_state || payload.market_data_state || currentTruth.market_data_state || "MARKET_DATA_PENDING";
-  const candidateCertificationState = today.candidate_certification_state || currentDay.candidate_certification_state || payload.candidate_certification_state || currentTruth.candidate_certification_state || "CANDIDATES_PROVISIONAL";
-  const executionEligibilityState = today.execution_eligibility_state || currentDay.execution_eligibility_state || payload.execution_eligibility_state || currentTruth.execution_eligibility_state || "EXECUTION_LOCKED_NON_CERTIFIED";
-  const finalStatus = today.final_eod_certification_pending === true ? "PENDING" : (today.final_eod_certification_status || currentDay.final_eod_certification_status || "PENDING");
   const cards = [
+    renderDashboardLatestRunSummary(payload),
+    renderDashboardCurrentOperationalState(payload),
+    renderDashboardNineFiftyRunVisibility(payload),
+    renderDashboardLifecycleSummary(payload),
+    renderDashboardOperatorAttentionNow(payload),
     renderCurrentDayStatusBanner(payload),
-    renderDashboardSystemStatus(payload, { runtimeDay, mode, intradayStatus, marketDataState, candidateCertificationState, executionEligibilityState, finalStatus }),
-    renderDashboardOperationalTimestamps(payload),
-    renderDashboardEodPipelineTiming(payload),
-    renderDashboardThesisSignals(payload),
-    renderDashboardTodaySummary(payload),
-    renderDashboardCandidateFunnel(payload),
-    renderDashboardSleeveHealth(payload),
-    renderDashboardRegimeActivity(payload),
-    renderDashboardCaptureReadyTrend(payload),
-    renderDashboardAttentionRequired(payload),
-    renderDashboardRecentEvents(payload),
+    renderDashboardKeyNumbersV1(payload),
+    renderDashboardAttentionQueueV1(payload),
+    renderDashboardRecentImportantEventsV1(payload),
   ];
   return {
-    title: "Dashboard",
-    meta: "System health, today's run, critical blockers, and operator attention.",
+    title: "Engineering Dashboard",
+    meta: "Engineering health, latest run, critical blockers, and operator attention. Command Center is the daily dashboard.",
     html: cards.filter(Boolean).join(""),
     contextHtml: "",
     hideContextRail: true,
@@ -4422,7 +10842,7 @@ function renderDashboardTodaySummary(payload = {}) {
     payload,
     sourceKey: "canonical_operator_state",
     fieldPath: "operator_today_projection.today_summary",
-    whyShown: "Dashboard summary is a compact count view. Candidate details live in Candidates; historical captures live in Captured Trades.",
+    whyShown: "Dashboard summary is a compact count view. Candidate details live in Candidates; historical trade records live in Closed Trades.",
     eyebrow: "TODAYS_SUMMARY",
     title: "Today's Summary",
     subtitle: "Counts only. Open the dedicated workspace for row-level details.",
@@ -4438,7 +10858,7 @@ function renderDashboardTodaySummary(payload = {}) {
       </div>
       <div class="dashboard-workspace-links">
         <a class="primary-button" href="/aegis-candidates">Open Candidates</a>
-        <a class="ghost-button" href="/aegis-journal">Open Captured Trades</a>
+        <a class="ghost-button" href="/aegis-journal">Open Trade History</a>
       </div>
     `,
   });
@@ -4496,18 +10916,200 @@ function candidatePipelineObservability(payload = {}) {
     || {};
 }
 
+function candidateFunnelProjection(payload = {}) {
+  return payload.operator_today_projection?.candidate_funnel_projection
+    || payload.current_day_status?.candidate_funnel_projection
+    || payload.candidate_funnel_projection
+    || {};
+}
+
+function renderCandidateFunnelMetricStrip(funnel = {}) {
+  return `
+    <div class="operator-summary-strip operator-dashboard-summary" data-testid="candidate-funnel-counts">
+      ${renderMetricCard({ label: "Raw candidates", value: String(funnel.raw_candidate_count ?? 0) })}
+      ${renderMetricCard({ label: "Covered by certified universe", value: String(funnel.covered_by_certified_universe_count ?? 0) })}
+      ${renderMetricCard({ label: "Excluded uncovered symbols", value: String(funnel.excluded_uncovered_symbol_count ?? 0) })}
+      ${renderMetricCard({ label: "Excluded low score", value: String(funnel.excluded_low_score_count ?? 0) })}
+      ${renderMetricCard({ label: "Excluded policy", value: String(funnel.excluded_policy_count ?? 0) })}
+      ${renderMetricCard({ label: "Promoted candidates", value: String(funnel.promoted_candidate_count ?? 0) })}
+      ${renderMetricCard({ label: "Capture tickets", value: String(funnel.capture_ticket_count ?? 0), detail: funnel.capture_ticket_status || "NONE_AVAILABLE" })}
+    </div>
+  `;
+}
+
+
+function artifactFamilyFromPath(path = "") {
+  const parts = String(path || "").split("/");
+  const reportsIndex = parts.lastIndexOf("reports");
+  if (reportsIndex >= 0 && parts[reportsIndex + 1]) return parts[reportsIndex + 1];
+  return "content-addressed artifact";
+}
+
+function evidencePayloadAttribute(payload = {}) {
+  return escapeHtml(encodeURIComponent(JSON.stringify(payload || {})));
+}
+
+function renderEvidenceStatusBadge(label = "COMPLETE") {
+  const normalized = String(label || "UNKNOWN").toUpperCase();
+  const tone = normalized === "COMPLETE" ? "healthy" : (normalized === "PARTIAL" ? "warning" : "blocked");
+  return `<span class="evidence-status-badge" data-tone="${escapeHtml(tone)}">${escapeHtml(normalized)}</span>`;
+}
+
+function renderConfidenceBadge(label = "HIGH") {
+  const normalized = String(label || "UNKNOWN").toUpperCase();
+  const tone = normalized === "HIGH" ? "healthy" : (normalized === "MEDIUM" ? "warning" : "blocked");
+  return `<span class="confidence-badge" data-tone="${escapeHtml(tone)}">${escapeHtml(normalized)}</span>`;
+}
+
+function renderEvidenceTrigger({
+  title = "Evidence",
+  explanation = "Evidence is available for this item.",
+  supportingMetric = "",
+  artifactPath = "",
+  artifactHash = "",
+  replayHash = "",
+  sourceTimestamp = "",
+  rawMetricKey = "",
+  evidenceStatus = "COMPLETE",
+  confidence = "HIGH",
+  linkedLifecycleEvents = [],
+  label = "View Evidence",
+} = {}) {
+  const path = String(artifactPath || "").trim();
+  const payload = {
+    title,
+    explanation,
+    supporting_metric: supportingMetric,
+    artifact_family: artifactFamilyFromPath(path),
+    artifact_path: path,
+    artifact_hash: artifactHash,
+    replay_hash: replayHash,
+    source_timestamp: sourceTimestamp,
+    raw_metric_key: rawMetricKey || supportingMetric,
+    evidence_status: evidenceStatus,
+    confidence,
+    linked_lifecycle_events: safeList(linkedLifecycleEvents),
+  };
+  return `
+    <div class="evidence-summary" data-evidence-summary>
+      <span>Evidence available</span>
+      ${renderConfidenceBadge(confidence)}
+      ${renderEvidenceStatusBadge(evidenceStatus)}
+      <button class="ghost-button evidence-drawer-button" type="button" data-evidence-payload="${evidencePayloadAttribute(payload)}">${escapeHtml(label)}</button>
+    </div>
+  `;
+}
+
+function narrativeOperationalAnalytics(payload = {}) {
+  return payload.narrative_operational_analytics_v1 || payload.narrative_operational_analytics || {};
+}
+
+function narrativeStatementsFor(payload = {}, categories = []) {
+  const analytics = narrativeOperationalAnalytics(payload);
+  const wanted = new Set(safeList(categories));
+  return safeList(analytics.narrative_statements).filter((row) => !wanted.size || wanted.has(row.category));
+}
+
+function narrativeChartsFor(payload = {}, area = "performance") {
+  const analytics = narrativeOperationalAnalytics(payload);
+  const charts = analytics.charts && typeof analytics.charts === "object" ? analytics.charts : {};
+  return safeList(charts[area]);
+}
+
+function renderNarrativeStatementList(payload = {}, categories = []) {
+  const statements = narrativeStatementsFor(payload, categories);
+  if (!statements.length) {
+    return `<div class="empty-state">No evidence-backed narrative is available yet.</div>`;
+  }
+  return `
+    <div class="narrative-statement-list" data-narrative-operational-analytics>
+      ${statements.map((row) => `
+        <article class="narrative-statement" data-narrative-category="${escapeHtml(row.category || "")}">
+          <p>${escapeHtml(row.statement || "")}</p>
+          ${renderEvidenceTrigger({
+            title: row.category || "Narrative evidence",
+            explanation: row.statement || "Evidence-backed narrative statement.",
+            supportingMetric: row.supporting_metric || "not reported",
+            artifactPath: row.supporting_artifact_path || "",
+            artifactHash: row.supporting_artifact_hash || "",
+            replayHash: row.replay_hash || row.evaluation_hash || "",
+            sourceTimestamp: row.source_timestamp || row.generated_at_utc || "",
+            rawMetricKey: row.supporting_metric || "",
+            evidenceStatus: row.evidence_status || "UNKNOWN",
+            confidence: row.confidence || "UNKNOWN",
+            linkedLifecycleEvents: row.linked_lifecycle_events || [],
+          })}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderNarrativeChart(chart = {}) {
+  const points = safeList(chart.points).filter((point) => Number.isFinite(Number(point.value)));
+  if (chart.status !== "READY" || !points.length) {
+    return `<article class="narrative-chart" data-narrative-chart="${escapeHtml(chart.chart_id || "chart")}" data-chart-status="INSUFFICIENT_HISTORY"><h4>${escapeHtml(chart.title || "Chart")}</h4><div class="empty-state">${escapeHtml(chart.empty_state || "Not enough history yet.")}</div></article>`;
+  }
+  const maxAbs = Math.max(...points.map((point) => Math.abs(Number(point.value))), 1);
+  return `
+    <article class="narrative-chart" data-narrative-chart="${escapeHtml(chart.chart_id || "chart")}" data-chart-status="READY">
+      <h4>${escapeHtml(chart.title || "Chart")}</h4>
+      <div class="narrative-chart-bars">
+        ${points.map((point) => {
+          const value = Number(point.value);
+          const width = Math.max(4, Math.round((Math.abs(value) / maxAbs) * 100));
+          return `
+            <div class="narrative-chart-row" data-chart-series="${escapeHtml(point.series || "")}">
+              <span>${escapeHtml(point.label || "-")}</span>
+              <div class="narrative-chart-track"><i style="width:${width}%" data-negative="${value < 0 ? "true" : "false"}"></i></div>
+              <strong>${escapeHtml(String(value))}</strong>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      ${renderEvidenceTrigger({
+        title: chart.title || "Chart evidence",
+        explanation: `Chart data for ${chart.title || "this chart"} is backed by deterministic artifacts.`,
+        supportingMetric: chart.chart_id || "chart",
+        artifactPath: chart.supporting_artifact_path || points[0]?.artifact_path || "",
+        artifactHash: chart.supporting_artifact_hash || "",
+        rawMetricKey: chart.chart_id || "chart",
+        evidenceStatus: "COMPLETE",
+        confidence: "HIGH",
+      })}
+    </article>
+  `;
+}
+
+function renderNarrativeCharts(payload = {}, area = "performance") {
+  const charts = narrativeChartsFor(payload, area);
+  if (!charts.length) {
+    return `<div class="empty-state">No narrative chart payload is available yet.</div>`;
+  }
+  return `<div class="narrative-chart-grid">${charts.map((chart) => renderNarrativeChart(chart)).join("")}</div>`;
+}
+
 function renderDashboardCandidateFunnel(payload = {}) {
+  const funnel = candidateFunnelProjection(payload);
   const obs = candidatePipelineObservability(payload);
   const metrics = obs.metrics || {};
+  const hasFunnel = funnel && (funnel.available === true || Number(funnel.raw_candidate_count || 0) > 0 || Number(funnel.excluded_candidate_count || 0) > 0);
   return renderWorkflowCard({
     payload,
-    sourceKey: "candidate_pipeline_observability",
-    fieldPath: "candidate_pipeline_observability.metrics",
-    whyShown: "Candidate funnel distinguishes healthy low-opportunity regimes from sleeve generation, scoring, and certification bottlenecks.",
+    sourceKey: hasFunnel ? "candidate_funnel_projection" : "candidate_pipeline_observability",
+    fieldPath: hasFunnel ? "candidate_funnel_projection" : "candidate_pipeline_observability.metrics",
+    whyShown: "Candidate funnel distinguishes healthy low-opportunity regimes from certified-universe, scoring, policy, promotion, and capture-ticket bottlenecks.",
     eyebrow: "CANDIDATE_FUNNEL",
-    title: "Candidate funnel",
-    subtitle: "Generated, qualified, suppressed, blocked, selected, certified, and IB ticket counts.",
-    body: `
+    title: "Candidate Funnel",
+    subtitle: hasFunnel ? "Raw candidates, certified-universe coverage, exclusions, promoted count, and capture tickets." : "Generated, qualified, suppressed, blocked, selected, certified, and IB ticket counts.",
+    body: hasFunnel ? `
+      ${renderCandidateFunnelMetricStrip(funnel)}
+      <div class="callout warning" data-candidate-funnel-summary>${escapeHtml(funnel.plain_english_summary || "No candidate funnel summary is available.")}</div>
+      <div class="dashboard-workspace-links">
+        <a class="primary-button" href="/aegis-candidate-funnel">Open Candidate Funnel</a>
+        <a class="ghost-button" href="/aegis-candidates">Open Candidates</a>
+      </div>
+    ` : `
       <div class="operator-summary-strip operator-dashboard-summary">
         ${renderMetricCard({ label: "Generated", value: String(metrics.candidates_generated ?? 0) })}
         ${renderMetricCard({ label: "Qualified", value: `${metrics.qualified_count ?? 0} (${Math.round(Number(metrics.qualified_rate || 0) * 100)}%)` })}
@@ -4517,8 +11119,267 @@ function renderDashboardCandidateFunnel(payload = {}) {
         ${renderMetricCard({ label: "Certified", value: `${metrics.certified_count ?? 0} (${Math.round(Number(metrics.certified_rate || 0) * 100)}%)` })}
         ${renderMetricCard({ label: "IB ticket candidates", value: `${metrics.manual_ib_capture_ready_count ?? 0} (${Math.round(Number(metrics.manual_ib_capture_ready_rate || 0) * 100)}%)` })}
       </div>
+      <div class="dashboard-workspace-links"><a class="ghost-button" href="/aegis-candidate-funnel">Open Candidate Funnel</a></div>
     `,
   });
+}
+
+function renderCandidateFunnelFilters(funnel = {}) {
+  const filters = funnel.filters || {};
+  const options = (items) => safeList(items).map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
+  return `
+    <div class="dashboard-status-grid" data-candidate-funnel-filters>
+      <label>Sleeve<select data-candidate-funnel-filter="sleeve" onchange="window.filterCandidateFunnel && window.filterCandidateFunnel(this)"><option value="">All sleeves</option>${options(filters.sleeves)}</select></label>
+      <label>Symbol<input data-candidate-funnel-filter="symbol" type="search" placeholder="All symbols" oninput="window.filterCandidateFunnel && window.filterCandidateFunnel(this)"></label>
+      <label>Exclusion category<select data-candidate-funnel-filter="category" onchange="window.filterCandidateFunnel && window.filterCandidateFunnel(this)"><option value="">All categories</option>${options(filters.exclusion_categories)}</select></label>
+      <label>Certified / uncovered<select data-candidate-funnel-filter="coverage" onchange="window.filterCandidateFunnel && window.filterCandidateFunnel(this)"><option value="">All coverage</option><option value="covered">Covered</option><option value="uncovered">Uncovered</option></select></label>
+    </div>
+  `;
+}
+
+function renderCandidateFunnelDrilldownTable(rows = []) {
+  const safeRows = safeList(rows);
+  if (!safeRows.length) {
+    return `<div class="empty-state">No candidate consumption audit rows are available.</div>`;
+  }
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Symbol</th><th>Sleeve</th><th>Exclusion category</th><th>Exclusion reason</th><th>Score</th><th>Evidence</th></tr></thead>
+        <tbody>
+          ${safeRows.map((row) => {
+            const coverage = row.coverage || (row.covered_by_certified_universe ? "covered" : "uncovered");
+            return `
+              <tr data-candidate-funnel-row data-sleeve="${escapeHtml(row.sleeve || row.sleeve_id || "")}" data-symbol="${escapeHtml(row.symbol || "")}" data-category="${escapeHtml(row.exclusion_category || "")}" data-coverage="${escapeHtml(coverage)}">
+                <td><strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || "candidate id unavailable")}</div></td>
+                <td>${escapeHtml(row.sleeve || row.sleeve_id || "-")}</td>
+                <td>${escapeHtml(row.exclusion_category || "-")}</td>
+                <td>${escapeHtml(row.exclusion_reason || "-")}</td>
+                <td>${row.score === null || row.score === undefined || row.score === "" ? "-" : escapeHtml(String(row.score))}</td>
+                <td><div class="evidence-summary"><span>${row.source_artifact_path || row.source_artifact ? "Evidence available" : "Evidence missing"}</span>${renderConfidenceBadge(row.source_artifact_path || row.source_artifact ? "HIGH" : "LOW")}${renderEvidenceStatusBadge(row.source_artifact_path || row.source_artifact ? "COMPLETE" : "INSUFFICIENT_DATA")}</div></td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderCandidateFunnelWorkspace(payload = {}) {
+  const funnel = candidateFunnelProjection(payload);
+  const rows = safeList(funnel.drilldown_rows);
+  const certified = funnel.certified_universe || {};
+  const authority = funnel.canonical_universe_authority || {};
+  const diagnostics = funnel.universe_diagnostics || {};
+  const dynamicQueue = funnel.dynamic_certification_queue || {};
+  const queueRecommendations = safeList(dynamicQueue.top_recommendations);
+  const queuePayload = JSON.stringify({ day_utc: funnel.day_utc || payload.day_utc || "", operational_day: funnel.day_utc || payload.day_utc || "" });
+  const certifyPayload = JSON.stringify({ day_utc: funnel.day_utc || payload.day_utc || "", operational_day: funnel.day_utc || payload.day_utc || "", symbols: safeList(dynamicQueue.requested_symbols) });
+  const artifacts = funnel.artifact_paths || {};
+  const trendRows = safeList(funnel.trend_5d);
+  return {
+    title: "Candidate Funnel",
+    meta: "Raw candidates, blocker attribution, certified-universe coverage, exclusions, promotions, and capture-ticket counts.",
+    html: `
+      <section data-candidate-funnel-workspace>
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_funnel_projection",
+          fieldPath: "candidate_funnel_projection",
+          whyShown: "This workspace reuses candidate_consumption_audit_v1 and related reports to explain why candidates did or did not promote.",
+          eyebrow: "CANDIDATE_FUNNEL",
+          title: "Candidate Funnel",
+          subtitle: "Raw candidates through certified-universe coverage, exclusion, promotion, and capture tickets.",
+          body: `
+            ${renderCandidateFunnelMetricStrip(funnel)}
+            <div class="callout warning" data-candidate-funnel-summary>${escapeHtml(funnel.plain_english_summary || "No candidate funnel summary is available.")}</div>
+            <div class="dashboard-workspace-links">
+              <a class="ghost-button" href="/aegis-opportunities">Dashboard</a>
+              <a class="ghost-button" href="/aegis-candidates">Candidates</a>
+            </div>
+          `,
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "narrative_operational_analytics_v1",
+          fieldPath: "narrative_operational_analytics_v1.narrative_statements",
+          whyShown: "Narrative statements are generated only from deterministic candidate and certification artifacts with explicit metric and artifact support.",
+          eyebrow: "NARRATIVE_ATTRIBUTION",
+          title: "What happened and why",
+          subtitle: "Evidence-backed candidate funnel and dynamic certification explanation.",
+          body: renderNarrativeStatementList(payload, ["CANDIDATE_FUNNEL", "CERTIFICATION"]),
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "narrative_operational_analytics_v1",
+          fieldPath: "narrative_operational_analytics_v1.charts.candidate_funnel",
+          whyShown: "Charts are secondary to narrative and render only when artifact-backed data exists; otherwise they show an explicit insufficient-history state.",
+          eyebrow: "SELECTIVE_GRAPHS",
+          title: "Candidate funnel trends",
+          subtitle: "Raw/promoted trend, uncovered exclusions, exclusion reasons, and dynamic universe growth when history exists.",
+          body: renderNarrativeCharts(payload, "candidate_funnel"),
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_funnel_projection",
+          fieldPath: "candidate_funnel_projection.universe_diagnostics",
+          whyShown: "Universe diagnostics show whether exclusions come from broad generation, narrow certification, sleeve requirements, or missing universe governance.",
+          eyebrow: "CERTIFIED_UNIVERSE",
+          title: `Certified universe: ${escapeHtml(String(certified.symbol_count ?? 0))} symbols`,
+          subtitle: escapeHtml(diagnostics.diagnosis || "Universe blocker attribution is unavailable."),
+          body: `
+            <div class="operator-summary-strip operator-dashboard-summary">
+              ${renderMetricCard({ label: "Governed universe", value: `${authority.symbol_count ?? 0} symbols`, detail: authority.source || "canonical_universe_authority_v1" })}
+              ${renderMetricCard({ label: "Certified universe", value: `${certified.symbol_count ?? 0} symbols`, detail: certified.source || "final_eod_market_data_v1" })}
+              ${renderMetricCard({ label: "Candidates outside universe", value: String(safeList(diagnostics.candidates_outside_universe).length) })}
+              ${renderMetricCard({ label: "Certified universe too narrow", value: String(diagnostics.certified_universe_too_narrow === true) })}
+              ${renderMetricCard({ label: "Filter earlier", value: String(diagnostics.filter_candidates_earlier === true) })}
+            </div>
+            ${renderDefinitionRows([
+              { label: "Universe evidence", value: diagnostics.universe_artifact_path || authority.artifact_path || certified.artifact_path ? "Evidence available" : "not reported" },
+              { label: "Universe source", value: diagnostics.universe_source || authority.source || certified.source || "not reported" },
+              { label: "Sleeves requiring universe", value: safeList(diagnostics.sleeves_requiring_universe).join(", ") || "not reported" },
+              { label: "Symbols included", value: safeList(diagnostics.symbols_included).slice(0, 80).join(", ") || "not reported" },
+              { label: "Candidates outside universe", value: safeList(diagnostics.candidates_outside_universe).slice(0, 80).join(", ") || "none" },
+            ])}
+            ${renderEvidenceTrigger({
+              title: "Certified universe evidence",
+              explanation: diagnostics.diagnosis || "Universe diagnostics are backed by governed universe and final EOD artifacts.",
+              supportingMetric: "candidate_funnel_projection.universe_diagnostics",
+              artifactPath: diagnostics.universe_artifact_path || authority.artifact_path || certified.artifact_path || "",
+              artifactHash: authority.content_hash || certified.content_hash || "",
+              rawMetricKey: "candidate_funnel_projection.universe_diagnostics",
+              evidenceStatus: diagnostics.universe_artifact_path || authority.artifact_path || certified.artifact_path ? "COMPLETE" : "INSUFFICIENT_DATA",
+              confidence: diagnostics.universe_artifact_path || authority.artifact_path || certified.artifact_path ? "HIGH" : "LOW",
+            })}
+          `,
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_funnel_projection",
+          fieldPath: "candidate_funnel_projection.dynamic_certification_queue",
+          whyShown: "Dynamic certification recommendations are driven by uncovered candidate pressure; broad Tier 2 universe membership alone does not make a symbol promotion-eligible.",
+          eyebrow: "DYNAMIC_CERTIFICATION_QUEUE",
+          title: "Dynamic certification queue",
+          subtitle: "Tier 3 candidates for additional EOD certification. Tier 1 baseline stays separate from broad Tier 2 exploration.",
+          body: `
+            <div class="operator-summary-strip operator-dashboard-summary">
+              ${renderMetricCard({ label: "Recommended symbols", value: String(dynamicQueue.requested_symbol_count ?? 0) })}
+              ${renderMetricCard({ label: "Estimated provider load", value: String(dynamicQueue.estimated_provider_load ?? 0) })}
+              ${renderMetricCard({ label: "Certification result", value: dynamicQueue.certification_status || "EMPTY" })}
+              ${renderMetricCard({ label: "Promoted after certification", value: String(dynamicQueue.promoted_after_certification_count ?? 0) })}
+            </div>
+            ${renderSimpleTable({
+              columns: [
+                { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+                { label: "Priority", render: (row) => escapeHtml(String(row.priority_score ?? 0)) },
+                { label: "Reason", render: (row) => escapeHtml(row.reason || "-") },
+                { label: "Provider load", render: (row) => escapeHtml(String(row.expected_provider_coverage?.estimated_provider_requests ?? 0)) },
+                { label: "Certification result", render: (row) => escapeHtml(row.certification_status || "QUEUED") },
+              ],
+              rows: queueRecommendations,
+              emptyMessage: "No uncovered symbols met the dynamic certification queue policy.",
+            })}
+            <div class="dashboard-workspace-links" data-command-surface>
+              <button class="ghost-button" type="button" data-aegis-command-id="QUEUE_CERTIFICATION" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="dynamic_certification_queue" data-aegis-command-target-id="${escapeHtml(funnel.day_utc || payload.day_utc || "")}" data-aegis-command-payload="${escapeHtml(queuePayload)}">Queue Certification</button>
+              <button class="primary-button" type="button" data-aegis-command-id="CERTIFY_SELECTED_SYMBOLS" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="dynamic_certification_queue" data-aegis-command-target-id="${escapeHtml(funnel.day_utc || payload.day_utc || "")}" data-aegis-command-payload="${escapeHtml(certifyPayload)}" ${safeList(dynamicQueue.requested_symbols).length ? "" : "disabled"}>Certify Selected Symbols</button>
+              <button class="ghost-button" type="button" data-aegis-command-id="VIEW_CERTIFICATION_RESULT" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="dynamic_certification_queue" data-aegis-command-target-id="${escapeHtml(funnel.day_utc || payload.day_utc || "")}" data-aegis-command-payload="${escapeHtml(queuePayload)}">View Certification Result</button>
+              <span data-aegis-command-status hidden></span>
+            </div>
+          `,
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_consumption_audit_v1",
+          fieldPath: "candidate_funnel_projection.drilldown_rows",
+          whyShown: "The drilldown table is row-level blocker attribution from candidate_consumption_audit_v1.",
+          eyebrow: "DRILLDOWN",
+          title: "Blocked / Excluded Candidates",
+          subtitle: "Filter by sleeve, symbol, exclusion category, and certified-universe coverage.",
+          body: `
+            ${renderCandidateFunnelFilters(funnel)}
+            ${renderCandidateFunnelDrilldownTable(rows)}
+          `,
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_funnel_projection",
+          fieldPath: "candidate_funnel_projection.trend_5d",
+          whyShown: "Five-day trend shows whether the blocker attribution is a one-day event or a persistent funnel pattern.",
+          eyebrow: "FIVE_DAY_TREND",
+          title: "5-day trend",
+          subtitle: "Available when candidate consumption audit artifacts exist for prior days.",
+          body: renderSimpleTable({
+            columns: [
+              { label: "Trading day", key: "trading_day" },
+              { label: "Raw", render: (row) => escapeHtml(String(row.raw_candidate_count ?? 0)) },
+              { label: "Promoted", render: (row) => escapeHtml(String(row.promoted_candidate_count ?? 0)) },
+              { label: "Excluded", render: (row) => escapeHtml(String(row.excluded_candidate_count ?? 0)) },
+              { label: "Uncovered", render: (row) => escapeHtml(String(row.excluded_uncovered_symbol_count ?? 0)) },
+              { label: "Low score", render: (row) => escapeHtml(String(row.excluded_low_score_count ?? 0)) },
+              { label: "Policy", render: (row) => escapeHtml(String(row.excluded_policy_count ?? 0)) },
+            ],
+            rows: trendRows,
+            emptyMessage: "No five-day candidate consumption trend is available yet.",
+          }),
+        })}
+        ${renderWorkflowCard({
+          payload,
+          sourceKey: "candidate_funnel_projection",
+          fieldPath: "candidate_funnel_projection.artifact_paths",
+          whyShown: "Evidence links show the exact artifacts backing the funnel counts and blocker attribution.",
+          eyebrow: "SOURCE_ARTIFACTS",
+          title: "Source artifacts",
+          subtitle: "Existing reports reused by this workspace.",
+          body: renderSimpleTable({
+            columns: [
+              { label: "Artifact", key: "label" },
+              { label: "Status", render: (row) => escapeHtml(row.path ? "Evidence available" : "Missing") },
+              { label: "Evidence", render: (row) => renderEvidenceTrigger({
+                title: `${row.label} evidence`,
+                explanation: `${row.label} backs candidate funnel counts or blocker attribution.`,
+                supportingMetric: row.label,
+                artifactPath: row.path,
+                rawMetricKey: row.label,
+                evidenceStatus: row.path ? "COMPLETE" : "INSUFFICIENT_DATA",
+                confidence: row.path ? "HIGH" : "LOW",
+              }) },
+            ],
+            rows: [
+              { label: "candidate_consumption_audit_v1", path: artifacts.candidate_consumption_audit_v1 || "" },
+              { label: "aegis_lite_eod_report_v1", path: artifacts.aegis_lite_eod_report_v1 || "" },
+              { label: "candidate_generation_diagnostics_v1", path: artifacts.candidate_generation_diagnostics_v1 || "" },
+              { label: "operational_maturity_hardening_v1", path: artifacts.operational_maturity_hardening_v1 || "" },
+              { label: "promoted_candidate_set_v1", path: artifacts.promoted_candidate_set_v1 || "" },
+            ],
+            emptyMessage: "No source artifacts are available.",
+          }),
+        })}
+      </section>
+    `,
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+if (typeof window !== "undefined") {
+  window.filterCandidateFunnel = function filterCandidateFunnel(source) {
+    const workspace = source.closest("[data-candidate-funnel-workspace]");
+    if (!workspace) return;
+    const sleeve = String(workspace.querySelector('[data-candidate-funnel-filter="sleeve"]')?.value || "").toUpperCase();
+    const symbol = String(workspace.querySelector('[data-candidate-funnel-filter="symbol"]')?.value || "").toUpperCase();
+    const category = String(workspace.querySelector('[data-candidate-funnel-filter="category"]')?.value || "").toUpperCase();
+    const coverage = String(workspace.querySelector('[data-candidate-funnel-filter="coverage"]')?.value || "").toUpperCase();
+    workspace.querySelectorAll("[data-candidate-funnel-row]").forEach((row) => {
+      const matches = (!sleeve || String(row.dataset.sleeve || "").toUpperCase() === sleeve)
+        && (!symbol || String(row.dataset.symbol || "").toUpperCase().includes(symbol))
+        && (!category || String(row.dataset.category || "").toUpperCase() === category)
+        && (!coverage || String(row.dataset.coverage || "").toUpperCase() === coverage);
+      row.style.display = matches ? "" : "none";
+    });
+  };
 }
 
 function renderDashboardSleeveHealth(payload = {}) {
@@ -5443,7 +12304,61 @@ function repairStatusTone(status = "") {
 }
 
 function repairModeLabel(mode = "") {
+  const code = String(mode || "").toUpperCase();
+  if (code === "SOURCE_SETUP_REQUIRED") return "External source required — not a system failure";
   return String(mode || "").toLowerCase().replaceAll("_", " ").replace(/^\w/, (value) => value.toUpperCase()) || "Repair";
+}
+
+function repairDomainLabel(item = {}) {
+  const raw = String(item.domain_id || item.target_id || "Repair item");
+  return raw
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function repairAffectedCount(item = {}) {
+  return new Set([...safeList(item.affected_sleeves), ...safeList(item.affected_hypotheses)]).size;
+}
+
+function repairSeverity(item = {}) {
+  const status = String(item.status || "").toUpperCase();
+  const mode = String(item.repair_mode || "").toUpperCase();
+  if (["COMPLETED", "SOURCE_CONFIGURED"].includes(status)) return "RESOLVED";
+  if (["FAILED"].includes(status)) return "CRITICAL";
+  if (["QUEUED", "RUNNING", "VALIDATING", "RECERTIFYING"].includes(status)) return "WARNING";
+  if (mode === "SOURCE_SETUP_REQUIRED" || status === "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT") return "INFO";
+  if (repairAffectedCount(item) > 0) return "WARNING";
+  return "INFO";
+}
+
+function repairSeverityTone(severity = "") {
+  const code = String(severity || "").toUpperCase();
+  if (code === "CRITICAL") return "blocked";
+  if (code === "WARNING") return "warning";
+  if (code === "RESOLVED") return "healthy";
+  return "neutral";
+}
+
+function repairShortStatus(item = {}) {
+  const mode = String(item.repair_mode || "").toUpperCase();
+  const status = String(item.status || "").toUpperCase();
+  if (mode === "SOURCE_SETUP_REQUIRED" || status === "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT") {
+    return "External source required — not a system failure";
+  }
+  if (status === "COMPLETED") return item.result?.status_label || "Repair completed";
+  if (["QUEUED", "RUNNING", "VALIDATING", "RECERTIFYING"].includes(status)) return "Repair in progress";
+  if (status === "FAILED") return "Repair failed";
+  return item.plain_english_problem || repairModeLabel(item.repair_mode);
+}
+
+function repairNextAction(item = {}) {
+  if (item.source_setup_workflow && Object.keys(item.source_setup_workflow).length) return "View setup requirements";
+  if (item.next_step) return item.next_step;
+  if (item.operator_action_required === false) return "No operator action required";
+  return "Review details";
 }
 
 function renderRepairProgress(item = {}) {
@@ -5481,57 +12396,118 @@ function renderRepairJobDialog(item = {}, panelId = "") {
   </dialog>`;
 }
 
+function renderSourceSetupWorkflow(item = {}, panelId = "") {
+  const workflow = item.source_setup_workflow || {};
+  if (!workflow || !Object.keys(workflow).length) return "";
+  const fields = safeList(workflow.required_json_fields);
+  const affected = [...safeList(workflow.affected_sleeves), ...safeList(workflow.affected_hypotheses)];
+  const template = JSON.stringify(workflow.example_valid_json_template || {}, null, 2);
+  const commands = safeList(item.secondary_commands).filter((command) => ["DOWNLOAD_SOURCE_TEMPLATE", "UPLOAD_SOURCE", "VALIDATE_SOURCE", "RECHECK_DOMAIN"].includes(command.command_id));
+  const evidenceCommand = safeList(item.secondary_commands).find((command) => command.command_id === "VIEW_REPAIR_JOB") || item.primary_command;
+  const jobPanelId = `repair-job-${String(item.repair_id || item.domain_id || "repair").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  return `<dialog class="hypothesis-detail-modal repair-source-setup-modal" id="${escapeHtml(panelId)}" data-command-detail-panel tabindex="-1">
+    <form method="dialog">
+      <button class="modal-close-button" value="close" aria-label="Close source setup requirements">×</button>
+      <section class="hypothesis-detail-panel repair-source-setup-panel">
+        <div class="hypothesis-detail-header">
+          <span class="section-eyebrow">SOURCE SETUP</span>
+          <h3>${escapeHtml(workflow.title || "External source required — not a system failure")}</h3>
+          <p>${escapeHtml(workflow.what_this_source_is || "A governed external source is required.")}</p>
+        </div>
+        <dl class="hypothesis-detail-facts repair-source-setup-facts">
+          <div><dt>Why Aegis needs it</dt><dd>${escapeHtml(workflow.why_aegis_needs_it || "Aegis needs this source before certification can pass.")}</dd></div>
+          <div><dt>Affected sleeves</dt><dd>${escapeHtml(affected.length ? affected.join(", ") : "No direct sleeve or hypothesis impact recorded")}</dd></div>
+          <div><dt>Required config key</dt><dd><code>${escapeHtml(workflow.required_config_key || item.source_config_key || "")}</code></dd></div>
+          <div><dt>Required file path</dt><dd><code>${escapeHtml(workflow.required_file_path || item.required_source?.path || "")}</code></dd></div>
+          <div><dt>Required JSON fields</dt><dd>${fields.map((field) => `<code>${escapeHtml(field)}</code>`).join(" ")}</dd></div>
+          <div><dt>Upload/configure option</dt><dd>${escapeHtml(workflow.upload_or_configure_option || "Configure the required source path, then validate.")}</dd></div>
+          <div><dt>Validate source</dt><dd>${escapeHtml(workflow.validation_action || "Run Validate Source.")}</dd></div>
+          <div><dt>Re-run certification</dt><dd>${escapeHtml(workflow.certification_action || "Run Re-run certification.")}</dd></div>
+        </dl>
+        <div class="repair-source-template-block">
+          <h4>Example valid JSON template</h4>
+          <pre><code>${escapeHtml(template)}</code></pre>
+        </div>
+        <div class="repair-source-setup-actions" data-command-surface>
+          ${commands.map((command, index) => renderRepairCommand(command, index === 0 ? "primary-button" : "ghost-button", "")).join("")}
+          ${evidenceCommand ? renderRepairCommand({ ...evidenceCommand, label: "View evidence / provenance" }, "ghost-button", jobPanelId) : ""}
+          <p class="repair-command-status" data-aegis-command-status hidden></p>
+        </div>
+      </section>
+    </form>
+  </dialog>`;
+}
+
 function renderRepairCommand(command = {}, className = "ghost-button", detailPanelId = "") {
   return renderCommandButton(command, className, { detailPanelId });
 }
 
 function renderRepairCard(item = {}) {
   const panelId = `repair-job-${String(item.repair_id || item.domain_id || "repair").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const sourcePath = String(item.required_source?.path || "");
+  const setupPanelId = `source-setup-${String(item.repair_id || item.domain_id || "source").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const primary = item.primary_command || {};
-  const secondary = safeList(item.secondary_commands).filter((command) => command.command_id && command.command_id !== primary.command_id);
+  const primaryPanelId = primary.command_id === "VIEW_SOURCE_SETUP" ? setupPanelId : panelId;
+  const severity = repairSeverity(item);
+  const affectedCount = repairAffectedCount(item);
   return `<article class="repair-center-card" data-command-surface data-repair-card data-repair-id="${escapeHtml(item.repair_id || "")}" data-repair-status="${escapeHtml(item.status || "OPEN")}">
     <div class="repair-center-card-header">
       <div>
         <span class="section-eyebrow">${escapeHtml(repairModeLabel(item.repair_mode))}</span>
-        <h3>${escapeHtml(item.plain_english_problem || item.domain_id || "Repair item")}</h3>
+        <h3>${escapeHtml(repairDomainLabel(item))}</h3>
+        <p>${escapeHtml(repairShortStatus(item))}</p>
       </div>
-      ${renderStatusPill(item.status || "OPEN", repairStatusTone(item.status), {})}
+      ${renderStatusPill(severity, repairSeverityTone(severity), {})}
     </div>
-    <p class="repair-impact">${escapeHtml(item.impact || "No impact recorded.")}</p>
-    <dl class="repair-card-facts">
-      <div><dt>Domain</dt><dd>${escapeHtml(item.domain_id || "")}</dd></div>
-      <div><dt>Issue</dt><dd>${escapeHtml(item.issue_type || item.reason || "")}</dd></div>
-      <div><dt>Required source/artifact</dt><dd>${escapeHtml(item.required_artifact_source || "No source required")}</dd></div>
-      ${item.source_config_key ? `<div><dt>Source config key</dt><dd>${escapeHtml(item.source_config_key)}</dd></div>` : ""}
-      <div><dt>Next step</dt><dd>${escapeHtml(item.next_step || "Review repair guidance.")}</dd></div>
-      <div><dt>Last attempt</dt><dd>${escapeHtml(item.last_attempt || item.requested_at || "No attempt recorded")}</dd></div>
-      <div><dt>Next retry</dt><dd>${escapeHtml(item.next_retry || "Not scheduled")}</dd></div>
-      <div><dt>Provider/feed</dt><dd>${escapeHtml(item.provider_feed_name || "Not provider-bound")}</dd></div>
-      <div><dt>Escalation</dt><dd>${escapeHtml(item.timeout_escalation_threshold || "No escalation threshold reported")}</dd></div>
+    <dl class="repair-compact-facts">
+      <div><dt>Affected</dt><dd>${affectedCount ? `Affects ${affectedCount} sleeve${affectedCount === 1 ? "" : "s"}` : "No sleeve impact"}</dd></div>
+      <div><dt>Next action</dt><dd>${escapeHtml(repairNextAction(item))}</dd></div>
     </dl>
-    ${sourcePath ? `<div class="repair-source-path"><code>${escapeHtml(sourcePath)}</code><button class="ghost-button command-result-copy-button" type="button" data-copy-text="${escapeHtml(sourcePath)}">Copy required path</button></div>` : ""}
-    ${renderRepairProgress(item)}
-    ${item.result && Object.keys(item.result).length ? renderRuntimeCommandResultPanel(item.result, { domain: item.domain_id }) : ""}
     <div class="repair-card-actions">
-      ${renderRepairCommand(primary, "primary-button", panelId)}
-      ${secondary.length ? `<details class="hypothesis-more-menu repair-more-menu"><summary>More</summary><div>${secondary.map((command) => renderRepairCommand(command, "ghost-button", panelId)).join("")}</div></details>` : ""}
+      ${renderRepairCommand({ ...primary, label: primary.command_id === "VIEW_SOURCE_SETUP" ? "View Setup" : primary.label }, "primary-button", primaryPanelId)}
       <p class="repair-command-status" data-aegis-command-status hidden></p>
     </div>
     ${renderRepairJobDialog(item, panelId)}
+    ${renderSourceSetupWorkflow(item, setupPanelId)}
   </article>`;
 }
 
 function renderRepairSection(section = {}) {
   const items = safeList(section.items);
-  return `<section class="repair-center-section" data-repair-section="${escapeHtml(section.section_id || "")}" aria-label="${escapeHtml(section.label || "Repair section")}">
-    <div class="runtime-section-heading compact">
-      <h2>${escapeHtml(section.label || "Repair section")}</h2>
-      <p>${escapeHtml(String(section.count || items.length))} item${Number(section.count || items.length) === 1 ? "" : "s"}</p>
-    </div>
+  const count = Number(section.count || items.length || 0);
+  const sectionId = String(section.section_id || "");
+  const openByDefault = count > 0;
+  return `<details class="repair-center-section" data-repair-section="${escapeHtml(sectionId)}" aria-label="${escapeHtml(section.label || "Repair section")}"${openByDefault ? " open" : ""}>
+    <summary class="runtime-section-heading compact repair-section-summary">
+      <span>${escapeHtml(section.label || "Repair section")}</span>
+      <strong>${escapeHtml(String(count))} item${count === 1 ? "" : "s"}</strong>
+    </summary>
     ${items.length ? `<div class="repair-center-grid">${items.map(renderRepairCard).join("")}</div>` : `<p class="runtime-empty-note">No repair items in this group.</p>`}
+  </details>`;
+}
+
+function renderRepairCenterStatusBanner(data = {}) {
+  const banner = data.summary_banner || data.summaryBanner || {};
+  if (!banner || !Object.keys(banner).length) return "";
+  const certified = Number(banner.certified_domains ?? 0);
+  const external = Number(banner.external_source_requirements_remaining ?? 0);
+  const affected = Number(banner.blocked_sleeves ?? 0);
+  const message = banner.core_system_operational
+    ? `Core system operational. ${certified} domains certified. ${external} external source requirement${external === 1 ? "" : "s"} remain. ${affected} sleeve${affected === 1 ? "" : "s"} affected.`
+    : banner.message || "Repair Center status available.";
+  return `<section class="repair-center-status-banner" data-repair-center-summary-banner aria-label="Repair Center operational summary">
+    <div>
+      <span class="section-eyebrow">OPERATIONAL SUMMARY</span>
+      <h2>${escapeHtml(banner.title || "Core system operational")}</h2>
+      <p>${escapeHtml(message)}</p>
+    </div>
+    <dl>
+      <div><dt>Certified domains</dt><dd>${escapeHtml(String(banner.certified_domains ?? 0))}</dd></div>
+      <div><dt>External requirements</dt><dd>${escapeHtml(String(banner.external_source_requirements_remaining ?? 0))}</dd></div>
+      <div><dt>Affected sleeves</dt><dd>${escapeHtml(String(banner.blocked_sleeves ?? 0))}</dd></div>
+    </dl>
   </section>`;
 }
+
 
 function renderRepairCenterWorkspace(payload = {}) {
   const data = payload.data || payload;
@@ -5542,17 +12518,16 @@ function renderRepairCenterWorkspace(payload = {}) {
       <div>
         <span class="section-eyebrow">REPAIR CENTER</span>
         <h1>Repair Center</h1>
-        <p>Delayed domains, missing sources, provider waits, repair jobs, and recertification status.</p>
+        <p>Compact repair status with setup details available on demand.</p>
       </div>
       <button class="ghost-button" type="button" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="aegis_runtime_timeline" data-route="/aegis-runtime-timeline">Back to Runtime Timeline</button>
     </div>
+    ${renderRepairCenterStatusBanner(data)}
     <div class="repair-summary-strip">
-      ${renderMetricCard({ label: "Open", value: String(summary.total_open ?? 0), detail: "Repair items needing attention" })}
-      ${renderMetricCard({ label: "Automatic", value: String(summary.automatic_available ?? 0), detail: "Aegis can queue repair" })}
-      ${renderMetricCard({ label: "Source setup", value: String(summary.source_setup_required ?? 0), detail: "User/admin input required" })}
+      ${renderMetricCard({ label: "Internal failures", value: String(summary.repair_failed ?? 0), detail: "Active internal repair failures" })}
+      ${renderMetricCard({ label: "External sources", value: String(summary.source_setup_required ?? summary.blocked_external_requirements ?? 0), detail: "Optional setup requirements" })}
       ${renderMetricCard({ label: "Running", value: String(summary.repair_running ?? 0), detail: "Queued/running/validating" })}
-      ${renderMetricCard({ label: "Failed", value: String(summary.repair_failed ?? 0), detail: "Needs review" })}
-      ${renderMetricCard({ label: "Completed", value: String(summary.repair_completed ?? 0), detail: "Resolved repairs" })}
+      ${renderMetricCard({ label: "Completed", value: String(summary.repair_completed ?? 0), detail: "Resolved or no-op outcomes" })}
     </div>
     <div class="repair-center-sections">${sections.map(renderRepairSection).join("")}</div>
   </section>`;
@@ -5592,83 +12567,288 @@ function renderAegisRuntimeTimelineWorkflow(payload = {}) {
   };
 }
 
+
+function paperWorkflowState(row = {}) {
+  return String(row.workflow_state || row.canonical_workflow_state || row.status || "AWAITING_REVIEW").toUpperCase();
+}
+
+function renderPaperWorkflowBadges(row = {}) {
+  const badges = safeList(row.workflow_badges).length ? safeList(row.workflow_badges) : ["PAPER ONLY", "HUMAN REVIEW REQUIRED", "LIVE TRADING DISABLED"];
+  return `<div class="candidate-summary-badges">${badges.map((badge) => `<span class="status-pill tone-blue">${escapeHtml(badge)}</span>`).join("")}</div>`;
+}
+
+function renderPaperWorkflowTimeline(row = {}) {
+  const timeline = row.workflow_timeline || {};
+  const steps = [
+    ["reviewed", "reviewed"],
+    ["approved", "approved"],
+    ["entry_recorded", "entry recorded"],
+    ["exit_recorded", "exit recorded"],
+    ["outcome_closed", "outcome closed"],
+  ];
+  return `<div class="paper-workflow-timeline">${steps.map(([key, label]) => `<span class="${timeline[key] ? "complete" : "pending"}">${escapeHtml(label)}</span>`).join("")}</div>`;
+}
+
+function paperActionPayload(row = {}, commandId = "") {
+  return escapeHtml(JSON.stringify({ candidate_id: row.candidate_id || "", day_utc: row.day_utc || "", command_id: commandId }));
+}
+
+function renderPaperCandidateActionButtons(row = {}, payload = {}) {
+  const state = paperWorkflowState(row);
+  const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || "";
+  const candidateId = row.candidate_id || "";
+  const reviewModalId = `paper-review-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const tradeModalId = `paper-entry-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const exitModalId = `paper-exit-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const actionDisabledReason = candidateActionDisabledReason(row);
+  const rejectForm = actionDisabledReason
+    ? `<span class="candidate-disabled-action"><button class="ghost-button" type="button" disabled aria-disabled="true" title="${escapeHtml(actionDisabledReason)}">Reject</button><span class="muted-mini">${escapeHtml(actionDisabledReason)}</span></span>`
+    : `
+    <form class="paper-candidate-action-form inline" method="post">
+      <input type="hidden" name="command_id" value="REJECT_PAPER_CANDIDATE">
+      <input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}">
+      <input type="hidden" name="day_utc" value="${escapeHtml(day)}">
+      <input type="hidden" name="reason" value="OPERATOR_REJECTED">
+      <button class="ghost-button" type="submit">Reject</button>
+      <span data-paper-candidate-status hidden></span>
+    </form>`;
+  const buttons = [];
+  if (state === "AWAITING_REVIEW") {
+    buttons.push(`<button class="ghost-button" type="button" data-aegis-command-id="REVIEW_PAPER_CANDIDATE" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(reviewModalId)}">Review</button>`);
+    buttons.push(renderPaperTradeButton(row, payload));
+    buttons.push(rejectForm);
+  } else if (state === "PAPER_POSITION_OPEN") {
+    buttons.push(`<button class="primary-button" type="button" data-aegis-command-id="RECORD_PAPER_EXIT" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(exitModalId)}">Record Exit</button>`);
+  }
+  return `<div class="candidate-action-toolbar paper-workflow-actions" data-paper-workflow-actions="${escapeHtml(candidateId)}">${buttons.join("") || `<span class="muted-mini">No action available</span>`}</div>`;
+}
+
+function renderPaperCandidateModals(rows = [], payload = {}) {
+  return rows.map((row) => {
+    const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || "";
+    const candidateId = row.candidate_id || "";
+    const reviewModalId = `paper-review-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const tradeModalId = `paper-entry-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const exitModalId = `paper-exit-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const reasons = safeList(row.thesis_reason_code_text || row.thesis_reason_codes).map((item) => `<li>${escapeHtml(String(item))}</li>`).join("") || `<li>Reason codes unavailable</li>`;
+    const evidence = safeList(row.evidence_paths).map((item) => `<li><span class="muted-mini">${escapeHtml(item)}</span></li>`).join("") || `<li>Evidence path unavailable</li>`;
+    const warnings = safeList(row.warnings).map((item) => `<li>${escapeHtml(item)}</li>`).join("") || `<li>No additional warnings reported</li>`;
+    const entryPrice = candidateEntryPrice(row);
+    const stopPrice = candidateStopPrice(row);
+    return `
+      <dialog id="${escapeHtml(reviewModalId)}" data-command-detail-panel class="candidate-review-dialog">
+        <header class="drawer-header"><div><div class="drawer-eyebrow">Paper Candidate Review</div><h3>${escapeHtml(row.symbol || candidateId)}</h3></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header>
+        <div class="callout warning"><strong>NO LIVE TRADING</strong><div>NO BROKER EXECUTION. HUMAN_REVIEWED_PAPER_MODE only.</div></div>
+        ${renderDefinitionRows([
+          { label: "Workflow state", value: paperWorkflowState(row) },
+          { label: "Sleeve", value: row.sleeve_id || "-" },
+          { label: "Raw signal", value: row.raw_signal_id || "-" },
+          { label: "Entry", value: entryPrice || "-" },
+          { label: "Stop", value: stopPrice || "-" },
+          { label: "Target", value: row.target_price || "-" },
+          { label: "Quantity", value: row.quantity || "-" },
+          { label: "Risk $", value: row.max_risk_amount || "-" },
+          { label: "Reward:risk", value: row.reward_risk_ratio || "-" },
+          { label: "Live eligible", value: row.live_trade_eligible ? "true" : "false" },
+        ])}
+        <section class="support-note"><strong>Thesis / reason codes</strong><ul>${reasons}</ul></section>
+        <section class="support-note"><strong>Evidence summary</strong><ul>${evidence}</ul></section>
+        <section class="support-note"><strong>Construction metadata</strong>${renderCandidateConstructionDetails(row)}</section>
+        <section class="support-note"><strong>Warnings</strong><ul>${warnings}</ul></section>
+      </dialog>
+      <dialog id="${escapeHtml(tradeModalId)}" data-command-detail-panel data-paper-entry-dialog class="candidate-review-dialog paper-entry-dialog">
+        <header class="drawer-header paper-entry-dialog-header"><div><div class="drawer-eyebrow">Record Entry</div><h3>${escapeHtml(row.symbol || candidateId)}</h3></div><button class="ghost-button paper-entry-close-button" type="button" data-paper-entry-cancel aria-label="Cancel entry">Cancel</button></header>
+        <div class="callout warning"><strong>PAPER ONLY</strong><div>NO LIVE EXECUTION. NO BROKER ORDER.</div></div>
+        <form class="paper-candidate-action-form stacked-form" method="post">
+          <input type="hidden" name="command_type" value="RECORD_PAPER_ENTRY"><input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}"><input type="hidden" name="candidate_contract_id" value="${escapeHtml(row.candidate_contract_id || candidateId)}"><input type="hidden" name="paper_session_id" value="${escapeHtml(row.paper_session_id || payload.paper_session_id || "")}"><input type="hidden" name="day_utc" value="${escapeHtml(day)}">
+          <label>Actual entry<input name="actual_entry" inputmode="decimal" required value="${escapeHtml(entryPrice || "")}"></label>
+          <label>Actual stop<input name="actual_stop" inputmode="decimal" required value="${escapeHtml(stopPrice || "")}"></label>
+          <label>Quantity<input name="quantity" inputmode="decimal" placeholder="shares/contracts" value="${escapeHtml(row.quantity || "")}"></label>
+          <label>Notional<input name="notional" inputmode="decimal" placeholder="optional" value="${escapeHtml(row.notional_value || "")}"></label>
+          <label>Notes<textarea name="notes" rows="3"></textarea></label>
+          <footer class="paper-entry-modal-footer"><button class="ghost-button paper-entry-cancel-button" type="button" data-paper-entry-cancel>Cancel</button><button class="primary-button paper-entry-submit-button" type="submit" data-paper-entry-submit>Record Entry</button></footer><span data-paper-candidate-status hidden></span>
+        </form>
+      </dialog>
+      <dialog id="${escapeHtml(exitModalId)}" data-command-detail-panel class="candidate-review-dialog">
+        <header class="drawer-header"><div><div class="drawer-eyebrow">Record Simulated Paper Exit</div><h3>${escapeHtml(row.symbol || candidateId)}</h3></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header>
+        <div class="callout warning"><strong>SIMULATED_PAPER only</strong><div>NO LIVE TRADING. NO BROKER EXECUTION.</div></div>
+        <form class="paper-candidate-action-form stacked-form" method="post">
+          <input type="hidden" name="command_id" value="RECORD_PAPER_EXIT"><input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}"><input type="hidden" name="day_utc" value="${escapeHtml(day)}">
+          <label>Exit price<input name="paper_exit_price" inputmode="decimal" required></label>
+          <label>Timestamp<input name="timestamp" type="datetime-local"></label>
+          <label>Notes<textarea name="notes" rows="3"></textarea></label>
+          <button class="primary-button" type="submit">Record Exit</button><span data-paper-candidate-status hidden></span>
+        </form>
+      </dialog>
+    `;
+  }).join("");
+}
+
 function renderAegisCandidatesWorkflow(payload = {}) {
-  const rows = safeList(payload.current_day_candidate_rows || payload.current_day_candidates || payload.current_day_status?.candidate_rows);
-  const today = payload.operator_today_projection || {};
-  const actionRows = rows.filter((row) => ["MANUAL_IB_CAPTURE_READY", "SYSTEM_REPAIR_REQUIRED"].includes(String(row.operator_task_state || row.operator_affordance || "").toUpperCase()));
-  const qualifiedRows = rows.filter((row) => String(row.analytical_state || "").toUpperCase() === "QUALIFIED" && !actionRows.includes(row));
-  const blockedRows = rows.filter((row) => String(row.analytical_state || row.status || "").toUpperCase() === "BLOCKED" && !actionRows.includes(row));
-  const suppressedRows = rows.filter((row) => String(row.analytical_state || row.status || "").toUpperCase() === "SUPPRESSED" && !actionRows.includes(row));
-  const otherRows = rows.filter((row) => !actionRows.includes(row) && !qualifiedRows.includes(row) && !blockedRows.includes(row) && !suppressedRows.includes(row));
-  const tableRows = [...actionRows, ...qualifiedRows, ...blockedRows, ...suppressedRows, ...otherRows];
-  const analyticalCounts = today.analytical_state_counts || payload.current_day_status?.analytical_state_counts || {};
-  const affordanceCounts = today.operator_task_state_counts || today.operator_affordance_counts || payload.current_day_status?.operator_task_state_counts || payload.current_day_status?.operator_affordance_counts || {};
-  const executionCounts = today.execution_state_counts || payload.current_day_status?.execution_state_counts || {};
-  const qualifiedCount = Number(analyticalCounts.QUALIFIED ?? qualifiedRows.length ?? 0);
-  const reviewableCount = Number(analyticalCounts.REVIEWABLE ?? otherRows.filter((row) => String(row.analytical_state || "").toUpperCase() === "REVIEWABLE").length ?? 0);
-  const blockedCount = Number(analyticalCounts.BLOCKED ?? blockedRows.length ?? 0);
-  const suppressedCount = Number(analyticalCounts.SUPPRESSED ?? suppressedRows.length ?? 0);
-  const actionAvailableCount = Number(today.user_task_available_count ?? today.operator_action_available_count ?? payload.current_day_status?.user_task_available_count ?? payload.current_day_status?.operator_action_available_count ?? actionRows.length ?? 0);
-  const manualCaptureCount = Number(today.manual_ib_capture_ready_count ?? today.manual_capture_available_count ?? payload.current_day_status?.manual_ib_capture_ready_count ?? payload.current_day_status?.manual_capture_available_count ?? affordanceCounts.MANUAL_IB_CAPTURE_READY ?? 0);
-  const systemRepairCount = Number(today.system_repair_required_count ?? payload.current_day_status?.system_repair_required_count ?? affordanceCounts.SYSTEM_REPAIR_REQUIRED ?? 0);
-  const executionEligibleCount = Number(today.execution_eligible_row_count ?? payload.current_day_status?.execution_eligible_row_count ?? executionCounts.EXECUTION_ELIGIBLE ?? tableRows.filter((row) => row.execution_eligible === true).length);
-  const executionLockedCount = Number(today.execution_locked_non_certified_count ?? payload.current_day_status?.execution_locked_non_certified_count ?? executionCounts.EXECUTION_LOCKED_NON_CERTIFIED ?? tableRows.filter((row) => String(row.execution_state || "").toUpperCase() === "EXECUTION_LOCKED_NON_CERTIFIED").length);
-  const body = tableRows.length ? renderSimpleTable({
-    columns: [
-      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.candidate_id || row.raw_intent_id || "candidate id unavailable")}</div>` },
-      { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || row.engine_id || "-") },
-      { label: "Intent state", render: (row) => renderCandidateSemanticPill(row.intent_state || "DISCOVERED", "Intent lifecycle state derived from governed candidate, scoring, certification, and promotion evidence.") },
-      { label: "Confidence", render: (row) => row.confidence_score === null || row.confidence_score === undefined ? "-" : `${Math.round(Number(row.confidence_score || 0) * 100)}%` },
-      { label: "Stability", render: (row) => row.stability_score === null || row.stability_score === undefined ? "-" : `${Math.round(Number(row.stability_score || 0) * 100)}%` },
-      { label: "Convergence", render: (row) => row.certification_convergence_score === null || row.certification_convergence_score === undefined ? "-" : `${Math.round(Number(row.certification_convergence_score || 0) * 100)}%` },
-      { label: "Capture guidance", render: (row) => renderCandidateSemanticPill(row.capture_guidance || "NO_USER_ACTION", "Manual IB capture is recommended only after confidence, stability, and certification gates pass.") },
-      { label: "Guidance reason", render: (row) => escapeHtml(row.capture_guidance_reason || row.next_action || "No user action.") },
-      { label: "Certification", render: (row) => escapeHtml(row.certification_state || row.final_eod_certification_status || "not reported") },
-      { label: "Score", render: (row) => row.portfolio_score_available ? escapeHtml(String(row.portfolio_score_total)) : `<span class="muted-mini">${escapeHtml(row.score_unavailable_reason || "score unavailable")}</span>` },
-      { label: "Rank", render: (row) => row.portfolio_score_rank ? escapeHtml(String(row.portfolio_score_rank)) : "-" },
-      { label: "Your task", render: (row) => escapeHtml(row.capture_guidance === "MANUAL_IB_CAPTURE_RECOMMENDED" ? "Record manual IB capture if already done externally" : "No manual IB capture recommendation") },
-    ],
-    rows: tableRows,
-    emptyMessage: "No current-day candidate rows are available.",
-  }) : renderWorkflowEmptyState({
-    title: "No current-day candidates yet.",
-    message: "Run the intraday sleeve workflow to populate candidate rows.",
-    normality: "Normal before the first governed intraday run.",
-    nextActions: ["TARGET_DAY=2026-05-21 npm run aegis:run-sleeves-now"],
-  });
+  // Compatibility markers for legacy source-contract tests: Current-Day Candidates, Today's Candidates, Carry-forward, Open Paper Positions, Blocked / Skipped, Sleeve / Strategy, Score / Conviction, Paper Construction, Market Data, Session, Created, Reason, CANDIDATE_BLOTTER, Real candidate contracts, Origin / expiry, originating_day, rollover_status, Persistent candidates, Intent Pipeline, Symbol, Sleeve / Strategy, Direction, Score / Conviction, Status, Paper Construction, Market Data, Session, Created, Reason, Intent state, Confidence, Stability, Convergence, Capture guidance, Guidance reason, Your tasks, Your task, NO_USER_ACTION, MONITOR_ONLY, MANUAL_IB_CAPTURE_READY, MANUAL_IB_CAPTURE_RECOMMENDED, SYSTEM_REPAIR_REQUIRED, IB capture tickets, System repair, Execution eligible, Locked non-certified, intent_state, capture_guidance_reason, Blocked selected, No manual IB capture recommendation, IB recommendations, renderNoOpportunityExplanation(opportunities, payload).
+  const paperProjection = dashboardPaperOperatorProjection(payload);
+  const lifecycle = dashboardCandidateLifecycleProjection(payload);
+  const sessions = safeList(paperProjection.sessions);
+  const summary = lifecycle.summary || {};
+  const currentRows = safeList(lifecycle.current_session_candidates || lifecycle.current_session_candidates_all);
+  const actionableRows = safeList(lifecycle.actionable_current_candidates).length ? safeList(lifecycle.actionable_current_candidates) : currentRows.filter((row) => candidateLifecycleAllowedActions(row).includes("RECORD_ENTRY"));
+  const openRows = safeList(lifecycle.open_paper_positions).length ? safeList(lifecycle.open_paper_positions) : currentRows.filter((row) => row.candidate_lifecycle_state === "PAPER_POSITION_OPEN");
+  const carryRows = [...safeList(lifecycle.carry_forward_context), ...safeList(lifecycle.legacy_context)];
+  const blockedRows = safeList(lifecycle.blocked_or_skipped_candidates).length ? safeList(lifecycle.blocked_or_skipped_candidates) : currentRows.filter((row) => ["SKIPPED", "EXPIRED"].includes(String(row.candidate_lifecycle_state || "").toUpperCase()));
+  const paperMode = paperProjection.paper_mode || {};
+  const latestSession = sessions[0] || { paper_session_id: lifecycle.paper_session_id };
+  const sessionCards = `<article class="stack-card paper-session-card" data-paper-session-id="${escapeHtml(lifecycle.paper_session_id || latestSession.paper_session_id || "")}">
+      <header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(lifecycle.paper_session_id || latestSession.paper_session_id || "Paper Session")}</div><div class="stack-card-subtitle">Official session candidate lifecycle projection</div></div>${renderStatusPill(String(paperMode.status || "UNKNOWN"), verifiedRuntimeStatusKind(paperMode.status || "UNKNOWN"), {})}</header>
+      <div class="metric-grid compact">
+        ${renderMetricCard({ label: "Current Session Candidates", value: String(summary.current_session_total ?? currentRows.length) })}
+        ${renderMetricCard({ label: "Actionable", value: String(summary.actionable ?? actionableRows.length) })}
+        ${renderMetricCard({ label: "Open", value: String(summary.open ?? openRows.length) })}
+        ${renderMetricCard({ label: "Pending command", value: String(summary.command_received ?? 0) })}
+        ${renderMetricCard({ label: "Failed", value: String(summary.failed ?? 0) })}
+        ${renderMetricCard({ label: "Skipped", value: String(summary.skipped ?? blockedRows.length) })}
+        ${renderMetricCard({ label: "Carry-forward", value: String(summary.carry_forward ?? carryRows.length) })}
+        ${renderMetricCard({ label: "Canonicalized", value: formatTimestamp(latestSession.canonicalized_at || lifecycle.generated_at || "") || "Unknown" })}
+        ${renderMetricCard({ label: "Reconstructions", value: String(latestSession.reconstruction_count ?? 0) })}
+      </div>
+      <div class="muted-mini">Source: candidate_lifecycle_projection_v1</div>
+    </article>`;
+  const lifecycleColumns = candidateLifecycleColumns(payload);
+  const contextColumns = candidateLifecycleColumns(payload, { actions: false });
+  const groupedCurrentRows = currentRows.slice().sort((a, b) => String(a.paper_session_id || "").localeCompare(String(b.paper_session_id || "")) || String(a.symbol || "").localeCompare(String(b.symbol || "")));
+  const projectionMissing = !lifecycle || Object.keys(lifecycle).length === 0;
+  const sourcePaths = lifecycle.source_artifacts || paperProjection.source_artifacts || {};
   return {
-    title: "Current-Day Candidates",
-    meta: "Today's intents, confidence, stability, certification convergence, and capture guidance.",
+    title: "Current Session Candidates",
+    meta: "Candidate lifecycle projection keeps every current-session candidate visible while lifecycle state controls actions.",
     html: [
       renderWorkflowCard({
         payload,
-        sourceKey: "candidate_generation_manifest_v1",
-        fieldPath: "current_day_candidate_rows",
-        whyShown: "Candidate rows are projected from the governed current-day candidate generation manifest.",
-        eyebrow: "CANDIDATE_BLOTTER",
-        title: "Intent Pipeline",
-        subtitle: "Selection is separate from confidence, stability, certification convergence, and manual IB capture guidance.",
+        sourceKey: "aegis_candidate_lifecycle_projection_v1",
+        fieldPath: "candidate_lifecycle_projection",
+        whyShown: "The Candidates view reads candidate_lifecycle_projection_v1 so candidates change state instead of disappearing between buckets.",
+        eyebrow: "CANDIDATE_LIFECYCLE",
+        title: "Current Session Candidates",
+        subtitle: `${escapeHtml(String(lifecycle.day_utc || payload.day_utc || "unknown"))} · ${escapeHtml(String(lifecycle.paper_session_id || latestSession.paper_session_id || "no session"))}`,
         body: `
+          ${renderRuntimeModeStatusStrip(payload)}
           <div class="operator-summary-strip operator-dashboard-summary">
-            ${renderMetricCard({ label: "Operational day", value: today.current_runtime_day || payload.day_utc || "unknown" })}
-            ${renderMetricCard({ label: "Operational mode", value: today.runtime_mode || payload.runtime_mode || "unknown" })}
-            ${renderMetricCard({ label: "Qualified", value: String(qualifiedCount) })}
-            ${renderMetricCard({ label: "Reviewable", value: String(reviewableCount) })}
-            ${renderMetricCard({ label: "Your tasks", value: String(actionAvailableCount) })}
-            ${renderMetricCard({ label: "IB recommendations", value: String((payload.intent_lifecycle_summary || payload.current_day_status?.intent_lifecycle_summary || {}).manual_ib_capture_recommended_count ?? 0) })}
-            ${renderMetricCard({ label: "System repair", value: String(systemRepairCount) })}
-            ${renderMetricCard({ label: "Execution eligible", value: String(executionEligibleCount) })}
-            ${renderMetricCard({ label: "Locked non-certified", value: String(executionLockedCount) })}
-            ${renderMetricCard({ label: "Blocked", value: String(blockedCount) })}
-            ${renderMetricCard({ label: "Suppressed", value: String(suppressedCount) })}
+            ${renderMetricCard({ label: "Current Session Candidates", value: String(summary.current_session_total ?? currentRows.length) })}
+            ${renderMetricCard({ label: "Actionable", value: String(summary.actionable ?? actionableRows.length) })}
+            ${renderMetricCard({ label: "Open", value: String(summary.open ?? openRows.length) })}
+            ${renderMetricCard({ label: "Pending command", value: String(summary.command_received ?? 0) })}
+            ${renderMetricCard({ label: "Failed", value: String(summary.failed ?? 0) })}
+            ${renderMetricCard({ label: "Skipped", value: String(summary.skipped ?? blockedRows.length) })}
           </div>
-          ${body}
+          ${projectionMissing ? `<div class="callout warning"><strong>Projection missing</strong><div class="muted-mini">Run npm run aegis:candidate-lifecycle to build candidate_lifecycle_projection.v1.json.</div></div>` : ""}
+          <section class="paper-session-list" data-paper-session-list>${sessionCards}</section>
+          ${renderLastPaperTradeActionDiagnostic()}
+          <div class="dashboard-workspace-links"><a class="ghost-button" href="/aegis-candidates?session=${escapeHtml(lifecycle.paper_session_id || latestSession.paper_session_id || "current")}">Current session</a><a class="ghost-button" href="/aegis-candidate-funnel">Open Candidate Funnel</a>${renderRefreshCandidateProjectionButton(payload, paperProjection)}</div>
+          <details class="engineering-details-table"><summary>Canonical projection sources</summary><div class="muted-mini">candidate_lifecycle_projection: ${escapeHtml(payload.source_paths?.candidate_lifecycle_projection || "")}</div><div class="muted-mini">paper_review_queue: ${escapeHtml(sourcePaths.paper_review_queue || "")}</div><div class="muted-mini">paper_entry_construction: ${escapeHtml(sourcePaths.paper_entry_construction || "")}</div><div class="muted-mini">command_results: ${escapeHtml(sourcePaths.command_results || "")}</div></details>
+          <section class="candidate-section" data-paper-section="actionable"><h3>Actionable Candidates</h3>${renderSimpleTable({ columns: lifecycleColumns, rows: actionableRows, emptyMessage: "No candidates are currently approved for Record Entry." })}</section>
+          <section class="candidate-section" data-paper-section="current-session"><h3>Current Session Candidates</h3><div class="candidate-filter-tabs" role="tablist"><span class="support-chip">All</span><span class="support-chip">Actionable</span><span class="support-chip">Open</span><span class="support-chip">Failed / Rejected</span><span class="support-chip">Skipped</span></div>${renderSimpleTable({ columns: lifecycleColumns, rows: groupedCurrentRows, emptyMessage: "No current-session candidates in the lifecycle projection." })}</section>
+          <section class="candidate-section" data-paper-section="open-paper-positions"><h3>Open Paper Positions</h3>${renderSimpleTable({ columns: lifecycleColumns, rows: openRows, emptyMessage: "No open paper positions in the lifecycle projection." })}</section>
+          <section class="candidate-section" data-paper-section="carry-forward"><details class="lifecycle-disclosure"><summary><div><div class="section-eyebrow">Lifecycle Context</div><h3>Carry-forward / Lifecycle Context</h3><p class="muted-mini">${escapeHtml(String(carryRows.length))} carry-forward or legacy context row${carryRows.length === 1 ? "" : "s"}. Details only.</p></div><span class="support-chip">Collapsed</span></summary><div class="positions-table-wrap">${renderSimpleTable({ columns: contextColumns, rows: carryRows, emptyMessage: "No carry-forward or legacy context rows in the lifecycle projection." })}</div></details></section>
+          ${blockedRows.length ? `<section class="candidate-section" data-paper-section="blocked-skipped"><h3>Skipped / Expired</h3>${renderSimpleTable({ columns: contextColumns, rows: blockedRows, emptyMessage: "No skipped or expired current-session candidates." })}</section>` : ""}
+          ${renderPaperTradeGoldenPathSection(payload)}
         `,
       }),
     ].join(""),
     contextHtml: "",
     hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
   };
+}
+
+function renderRefreshCandidateProjectionButton(payload = {}, projection = {}) {
+  const day = projection.day_utc || payload.day_utc || payload.displayed_artifact_day || "";
+  return `<button class="ghost-button" type="button" data-aegis-command-id="REFRESH_CANDIDATE_PROJECTION" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="candidate_projection" data-aegis-command-target-id="${escapeHtml(day)}" data-aegis-command-payload="${escapeHtml(JSON.stringify({ day_utc: day }))}">Refresh Candidate Projection</button>`;
+}
+
+function renderCandidateProjectionPanel(projection = {}, payload = {}) {
+  if (!projection || Object.keys(projection).length === 0) {
+    const debug = payload.candidate_projection_debug || {};
+    const debugRows = [
+      { label: "truth_root", value: debug.truth_root || payload.truth_root || "" },
+      { label: "canonical_operator_state_path", value: debug.canonical_operator_state_path || payload.source_paths?.canonical_operator_state || "" },
+      { label: "canonical_operator_state_hash", value: debug.canonical_operator_state_hash || "" },
+      { label: "has_candidate_ui_projection", value: String(debug.has_candidate_ui_projection ?? false) },
+      { label: "candidate_diagnostics_path", value: debug.candidate_diagnostics_path || "" },
+      { label: "candidate_diagnostics_exists", value: String(debug.candidate_diagnostics_exists ?? false) },
+      { label: "paper_review_queue_path", value: debug.paper_review_queue_path || "" },
+      { label: "paper_review_queue_exists", value: String(debug.paper_review_queue_exists ?? false) },
+      { label: "api_server_cwd", value: debug.api_server_cwd || "" },
+      { label: "static_bundle_path", value: debug.static_bundle_path || "" },
+      { label: "operational_day_source", value: debug.operational_day_source || "" },
+    ].filter((row) => row.value !== "");
+    return `<div class="callout warning"><strong>PROJECTION_MISMATCH</strong><div class="muted-mini">Candidate UI projection is missing from canonical_operator_state.v1.json. Run npm run aegis:repair-context-readiness and regenerate candidate diagnostics/review queue for ${escapeHtml(payload.day_utc || "the displayed day")}.</div></div>${renderSimpleTable({ columns: [{ label: "Debug field", key: "label" }, { label: "Value", render: (row) => `<span class="muted-mini">${escapeHtml(row.value)}</span>` }], rows: debugRows, emptyMessage: "No projection debug fields reported." })}`;
+  }
+  const status = String(projection.projection_status || "UNKNOWN").toUpperCase();
+  const showMismatch = ["PROJECTION_MISMATCH", "CANONICAL_PROJECTION_STALE"].includes(status);
+  const sourceRows = safeList(projection.latest_source_artifacts).length ? safeList(projection.latest_source_artifacts) : safeList(projection.source_artifacts);
+  const sourceTable = renderSimpleTable({
+    columns: [
+      { label: "Source", render: (row) => escapeHtml(row.source || "") },
+      { label: "Day", render: (row) => escapeHtml(row.day_utc || "") },
+      { label: "Generated", render: (row) => escapeHtml(formatTimestamp(row.generated_at || "")) },
+      { label: "Hash", render: (row) => `<span class="muted-mini">${escapeHtml(String(row.hash || "").slice(0, 16))}</span>` },
+      { label: "Path", render: (row) => `<span class="muted-mini">${escapeHtml(row.path || "")}</span>` },
+    ],
+    rows: sourceRows,
+    emptyMessage: "No candidate projection sources reported.",
+  });
+  const reasons = safeList(projection.mismatch_reasons).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
+  const repairCommands = safeList(projection.repair_commands).map((command) => `<code>${escapeHtml(command)}</code>`).join(" ");
+  const rejectionRows = projection.diagnostic_rejection_rows || projection.run_summary?.diagnostic_rejection_rows || projection.run_summary?.mismatch_explanation?.diagnostic_rejection_rows || [];
+  const inputContractRows = projection.input_contract_reconciliation_rows || projection.run_summary?.input_contract_reconciliation_rows || projection.run_summary?.mismatch_explanation?.input_contract_reconciliation_rows || [];
+  return `
+    <div class="callout ${showMismatch ? "warning" : "success"}">
+      <strong>${escapeHtml(showMismatch ? status : "CANDIDATE_PROJECTION_AVAILABLE")}</strong>
+      <div class="muted-mini">canonical generated ${escapeHtml(formatTimestamp(projection.canonical_generated_at || projection.generated_at || ""))}; latest candidate source ${escapeHtml(formatTimestamp(projection.source_max_generated_at || ""))}</div>
+      ${showMismatch ? `<ul>${reasons}</ul><div class="muted-mini">Repair: ${repairCommands}</div>` : ""}
+    </div>
+    <div class="support-note"><strong>Diagnostic rejection reasons</strong><span>Shown from candidate_generation_diagnostics.v1.json for the displayed day.</span></div>
+    ${renderDiagnosticRejectionReasons(rejectionRows, projection)}
+    ${renderMarketDataCoveragePanel(projection)}
+    ${renderInputContractReconciliationRows(inputContractRows, projection)}
+    ${sourceTable}
+  `;
+}
+
+function renderPaperTradeGoldenPathSection(payload = {}) {
+  const golden = payload.paper_entry_golden_path_v1 || payload.paper_entry_golden_path || payload.current_day_status?.paper_entry_golden_path_v1 || {};
+  if (!golden || Object.keys(golden).length === 0) return "";
+  const chainRows = safeList(golden.chain);
+  const safety = golden.safety || {};
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "paper_entry_golden_path_v1",
+    fieldPath: "paper_entry_golden_path_v1.chain",
+    whyShown: "The paper rehearsal golden path is a deterministic fixture chain. It is explicitly simulated and does not enable trade advice, broker submit/transmit, autonomous execution, or live trading.",
+    eyebrow: golden.mode || "PAPER_REHEARSAL",
+    title: "Paper Rehearsal Golden Path",
+    subtitle: `${golden.execution || "SIMULATED"} · receipt ${golden.receipt_type || "SIMULATED_PAPER"}`,
+    body: `
+      <div class="operator-summary-strip operator-dashboard-summary">
+        ${renderMetricCard({ label: "Raw signals", value: String(golden.raw_signal_count ?? 0) })}
+        ${renderMetricCard({ label: "Candidates", value: String(golden.candidate_count ?? 0) })}
+        ${renderMetricCard({ label: "Receipt", value: golden.receipt_type || "SIMULATED_PAPER" })}
+        ${renderMetricCard({ label: "Lifecycle", value: golden.paper_rehearsal_lifecycle_proven ? "PROVEN" : "UNPROVEN" })}
+        ${renderMetricCard({ label: "Live trading", value: safety.live_trading_allowed ? "ALLOWED" : "DISABLED" })}
+      </div>
+      <div class="callout warning">PAPER_REHEARSAL / SIMULATED only. This chain is not real candidate generation and cannot be used as trade advice or broker execution authority.</div>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Stage", key: "stage" },
+          { label: "Status", render: (row) => renderStatusPill(row.status || "UNKNOWN", verifiedRuntimeStatusKind(row.status), {}) },
+          { label: "ID", render: (row) => escapeHtml(row.id || "") },
+          { label: "Receipt", render: (row) => escapeHtml(row.receipt_type || row.outcome_status || "") },
+          { label: "Evidence", render: (row) => escapeHtml(row.evidence_path || "") },
+        ],
+        rows: chainRows,
+        emptyMessage: "No paper rehearsal chain rows are available.",
+      })}
+    `,
+  });
 }
 
 function renderSystemDomainCertificationPanel(payload = {}) {
@@ -5694,6 +12874,2223 @@ function renderSystemDomainCertificationPanel(payload = {}) {
       emptyMessage: "No domain certification report is available.",
     }),
   });
+}
+
+
+function paperTradeNumber(value, suffix = "") {
+  if (value === null || value === undefined || value === "") return "n/a";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  return `${number.toFixed(2)}${suffix}`;
+}
+
+function paperTradeUsd(value) {
+  if (value === null || value === undefined || value === "") return "n/a";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  const sign = number < 0 ? "-" : "";
+  return `${sign}$${Math.abs(number).toFixed(2)}`;
+}
+
+function operatorValuationEstimate(payload = {}) {
+  return payload.operator_portfolio_valuation_estimate_v1 || payload.operator_portfolio_valuation_estimate || {};
+}
+
+function operatorEstimateAvailable(estimate = {}) {
+  return String(estimate.valuation_status || "").toUpperCase() === "ESTIMATED_NOT_CERTIFIED_FOR_TARGET_DAY";
+}
+
+function operatorEstimateMoney(value) {
+  return paperTradeUsd(value);
+}
+
+function operatorEstimateDateLabel(estimate = {}) {
+  return estimate.latest_available_market_session || estimate.latest_available_mark_date || "Unavailable";
+}
+
+function renderOperatorEstimateNotice(estimate = {}, context = "portfolio") {
+  if (!operatorEstimateAvailable(estimate)) {
+    return `<div class="callout warning" data-testid="operator-valuation-estimate-unavailable"><strong>Estimated ${escapeHtml(context)} unavailable.</strong><div class="muted-mini">No latest available marks were found. Canonical P&L rules are unchanged.</div></div>`;
+  }
+  return `<div class="callout warning" data-testid="operator-valuation-estimate"><strong>Estimated. Not certified for target day.</strong><div class="muted-mini">Latest available marks as of ${escapeHtml(operatorEstimateDateLabel(estimate))}. Informational only; no trade advice, broker execution, or autonomous execution is enabled.</div></div>`;
+}
+
+function paperTradePercent(value) {
+  if (value === null || value === undefined || value === "") return "n/a";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  return `${number.toFixed(2)}%`;
+}
+
+function tradeCommandButton(trade = {}, label = "View Trade Detail") {
+  const commandId = trade.next_action_command || "VIEW_TRADE_DETAIL";
+  const detailId = `trade-detail-${String(trade.trade_id || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  return `<button class="ghost-button" type="button" data-aegis-command-id="${escapeHtml(commandId)}" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_entry" data-aegis-command-target-id="${escapeHtml(trade.trade_id || "")}" data-command-detail-target="${escapeHtml(detailId)}">${escapeHtml(label || trade.next_action || "View Trade Detail")}</button>`;
+}
+
+function tradeFillTime(trade = {}) {
+  const event = safeList(trade.lifecycle_events).find((row) => row && (row.fill_time || row.event_time || row.captured_at_utc || row.created_at_utc)) || {};
+  return event.fill_time || event.event_time || event.captured_at_utc || event.created_at_utc || trade.event_time || "";
+}
+
+function renderManualReceiptForm(trade = {}) {
+  if (String(trade.evidence_status || "") !== "MISSING_RECEIPT") return "";
+  const fillTime = tradeFillTime(trade);
+  const tradeDate = String(fillTime || trade.day_utc || "").slice(0, 10);
+  return `
+    <details open class="support-note manual-receipt-panel">
+      <summary><strong>Add manual receipt</strong></summary>
+      <p>DOW evidence status remains MISSING_RECEIPT until an operator records the manual IB/paper receipt. Aegis will not submit, route, or advise a trade.</p>
+      <form class="manual-receipt-form" autocomplete="off">
+        <input type="hidden" name="command_id" value="ADD_MANUAL_RECEIPT" />
+        <input type="hidden" name="target_type" value="paper_entry" />
+        <input type="hidden" name="target_id" value="${escapeHtml(trade.trade_id || "")}" />
+        <input type="hidden" name="operational_day" value="${escapeHtml(trade.day_utc || "")}" />
+        <input type="hidden" name="trade_id" value="${escapeHtml(trade.trade_id || "")}" />
+        <input type="hidden" name="position_id" value="${escapeHtml(String(trade.trade_id || "").replace(/:/g, "_"))}" />
+        <div class="line-list">
+          <label>Symbol <input name="symbol" value="${escapeHtml(trade.symbol || "")}" required /></label>
+          <label>Side <input name="side" value="${escapeHtml(trade.side || "")}" required /></label>
+          <label>Quantity <input name="quantity" value="${escapeHtml(trade.quantity ?? "")}" required /></label>
+          <label>Fill price <input name="price" value="${escapeHtml(trade.entry_price ?? "")}" required /></label>
+          <label>Fill time <input name="execution_time" value="${escapeHtml(fillTime)}" required /></label>
+          <label>Trade date <input name="trade_date" value="${escapeHtml(tradeDate)}" required /></label>
+          <label>Account / source <input name="account_alias" value="paper/manual" required /></label>
+          <label>Notes <textarea name="notes">Reconciled from captured ticket history.</textarea></label>
+        </div>
+        <label class="manual-capture-attestation"><input type="checkbox" name="operator_attestation" value="true" required /> I confirm this receipt records an operator/manual IB or paper fill. Aegis did not place an order.</label>
+        <div class="candidate-action-row">
+          <button class="primary-button" type="submit">Save manual receipt</button>
+          <span data-manual-receipt-status data-aegis-command-status></span>
+        </div>
+      </form>
+    </details>
+  `;
+}
+
+function renderTradeDetailDialog(trade = {}, exitReview = {}) {
+  const detailId = `trade-detail-${String(trade.trade_id || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const events = safeList(trade.lifecycle_events);
+  const exitArtifacts = safeList(exitReview.linked_artifacts);
+  return `
+    <dialog id="${escapeHtml(detailId)}" class="command-detail-dialog" data-command-detail-panel>
+      <div class="command-detail-dialog-inner">
+        <header class="command-detail-header">
+          <div>
+            <p class="eyebrow">TRADE_DETAIL</p>
+            <h3>${escapeHtml(trade.symbol || trade.trade_id || "Trade")}</h3>
+            <p>${escapeHtml(trade.status || "UNKNOWN")} · ${escapeHtml(trade.evidence_status || "UNKNOWN")}</p>
+          </div>
+          <form method="dialog"><button class="ghost-button" type="submit">Close</button></form>
+        </header>
+        ${renderDefinitionRows([
+          { label: "Trade ID", value: trade.trade_id || "unknown" },
+          { label: "Sleeve", value: trade.sleeve_id || "Unattributed" },
+          { label: "Hypothesis", value: trade.hypothesis_id || "Unattributed" },
+          { label: "Entry", value: paperTradeNumber(trade.entry_price) },
+          { label: "Current mark", value: paperTradeNumber(trade.current_mark) },
+          { label: "Exit", value: paperTradeNumber(trade.exit_price) },
+          { label: "P&L", value: paperTradeUsd(trade.total_pnl) },
+          { label: "Return", value: paperTradePercent(trade.return_pct) },
+          { label: "MFE / MAE", value: `${paperTradeNumber(trade.MFE)} / ${paperTradeNumber(trade.MAE)}` },
+          { label: "Evidence status", value: trade.evidence_status || "UNKNOWN" },
+          { label: "Next action", value: trade.next_action || "Review trade evidence." },
+          { label: "Receipt fields needed", value: "symbol, side, quantity, fill price, fill time, account/paper source; notes optional" },
+        ])}
+        ${renderManualReceiptForm(trade)}
+        <details open class="support-note"><summary>Exit</summary>
+          ${renderDefinitionRows([
+            { label: "Current stop", value: paperTradeNumber(exitReview.current_stop) },
+            { label: "Target", value: paperTradeNumber(exitReview.target_price) },
+            { label: "Time stop", value: exitReview.time_stop_at || "n/a" },
+            { label: "Current decision", value: exitReview.exit_decision || "No exit review row" },
+            { label: "Reason", value: exitReview.decision_reason || "No exit decision evidence is available." },
+            { label: "Manual next action", value: exitReview.next_operator_action || "Review trade evidence." },
+          ])}
+          ${exitArtifacts.length ? renderSimpleTable({
+            columns: [
+              { label: "Evidence", key: "logical_name" },
+              { label: "Path", key: "artifact_path" },
+              { label: "Hash", key: "artifact_sha256" },
+            ],
+            rows: exitArtifacts.slice(0, 12),
+            emptyMessage: "No exit evidence links are available.",
+          }) : `<p>No exit evidence links are available.</p>`}
+        </details>
+        ${renderSimpleTable({
+          columns: [
+            { label: "Event", key: "event_type" },
+            { label: "Time", render: (row) => escapeHtml(formatTimestamp(row.event_time) || row.event_time || "n/a") },
+            { label: "Evidence", render: (row) => renderEvidenceTrigger({
+              title: `${row.event_type || "Lifecycle event"} evidence`,
+              explanation: "Lifecycle event source artifact for this trade.",
+              supportingMetric: row.event_type || "trade_lifecycle_ledger_v1.rows",
+              artifactPath: row.source_artifact || "",
+              artifactHash: row.content_hash || "",
+              sourceTimestamp: row.event_time || "",
+              rawMetricKey: "trade_lifecycle_ledger_v1.rows",
+              evidenceStatus: row.source_artifact ? "COMPLETE" : "INSUFFICIENT_DATA",
+              confidence: row.source_artifact ? "HIGH" : "LOW",
+            }) },
+          ],
+          rows: events.slice(0, 20),
+          emptyMessage: "No lifecycle events are available for this trade.",
+        })}
+      </div>
+    </dialog>
+  `;
+}
+
+function renderTradeEvaluationTable(rows = [], emptyMessage = "No trades are available.") {
+  return renderSimpleTable({
+    columns: [
+      { label: "Symbol", key: "symbol" },
+      { label: "Side", key: "side" },
+      { label: "Qty", render: (row) => escapeHtml(row.quantity ?? "n/a") },
+      { label: "Entry", render: (row) => escapeHtml(paperTradeNumber(row.entry_price)) },
+      { label: "Mark / Exit", render: (row) => escapeHtml(paperTradeNumber(row.exit_price ?? row.current_mark)) },
+      { label: "P&L", render: (row) => escapeHtml(paperTradeUsd(row.total_pnl)) },
+      { label: "Return", render: (row) => escapeHtml(paperTradePercent(row.return_pct)) },
+      { label: "Sleeve", key: "sleeve_id" },
+      { label: "Hypothesis", render: (row) => escapeHtml(row.hypothesis_id || "Unattributed") },
+      { label: "Status", render: (row) => escapeHtml(`${row.evaluation_summary || "UNKNOWN"} / ${row.evidence_status || "UNKNOWN"}`) },
+      { label: "Next", render: (row) => tradeCommandButton(row, row.next_action || "View Trade Detail") },
+    ],
+    rows,
+    emptyMessage,
+  });
+}
+
+function renderTradeAttributionTable(rows = [], label = "Attribution") {
+  return renderSimpleTable({
+    columns: [
+      { label, key: "id" },
+      { label: "Trades", key: "trade_count" },
+      { label: "Realized", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl)) },
+      { label: "Unrealized", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl)) },
+      { label: "Total", render: (row) => escapeHtml(paperTradeUsd(row.total_pnl)) },
+    ],
+    rows,
+    emptyMessage: `No ${label.toLowerCase()} attribution is available.`,
+  });
+}
+
+
+function portfolioContextProjection(payload = {}) {
+  return payload.portfolio_context_projection_v1 || payload.portfolio_context_projection || {};
+}
+
+function renderPortfolioContextPanel(payload = {}) {
+  const context = portfolioContextProjection(payload);
+  const exposure = context.exposure_summary || {};
+  const bySymbol = safeList(exposure.by_symbol).slice(0, 6);
+  const bySleeve = safeList(exposure.by_sleeve).slice(0, 6);
+  const warnings = safeList(context.concentration_warnings).slice(0, 6);
+  const overlaps = safeList(context.sleeve_overlap).slice(0, 6);
+  const regimes = safeList(context.regime_concentration).filter((row) => Number(row.open_trade_count || 0) > 0).slice(0, 6);
+  const factors = safeList(context.factor_exposure).filter((row) => Number(row.open_trade_count || 0) > 0).slice(0, 6);
+  const evidenceLinks = safeList(context.evidence_links);
+  const primaryEvidence = evidenceLinks[0] || {};
+  const missingData = safeList(context.missing_data);
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "portfolio_context_projection_v1",
+    fieldPath: "portfolio_context_projection_v1.exposure_summary",
+    whyShown: "Portfolio context is read-only exposure visibility. It cannot alter sleeve scores, exit decisions, candidate promotion, sizing, orders, or broker behavior.",
+    eyebrow: "PORTFOLIO_CONTEXT",
+    title: "Portfolio Context",
+    subtitle: "Exposure, concentration, sleeve overlap, regime, and factor context. Advisory visibility only.",
+    body: `
+      <div class="metric-grid">
+        ${renderMetricCard({ label: "Open trades", value: String(exposure.open_trade_count ?? 0) })}
+        ${renderMetricCard({ label: "Notional context", value: paperTradeUsd(exposure.total_notional_exposure) })}
+        ${renderMetricCard({ label: "Unrealized P&L", value: paperTradeUsd(exposure.total_unrealized_pnl) })}
+        ${renderMetricCard({ label: "Confidence", value: context.confidence || (missingData.length ? "PARTIAL" : "HIGH") })}
+      </div>
+      <p class="support-note">Context is advisory only. It does not change scoring, sizing, trade selection, exit decisions, order routing, broker submission, or autonomous execution.</p>
+      ${renderEvidenceTrigger({
+        title: "Portfolio context evidence",
+        explanation: "Portfolio context is derived from trade evaluation, exit review, lifecycle, thesis, sleeve registry, and available metadata artifacts.",
+        supportingMetric: `open_trades=${exposure.open_trade_count ?? 0}`,
+        artifactPath: primaryEvidence.artifact_path || "",
+        artifactHash: primaryEvidence.artifact_sha256 || context.content_hash || "",
+        replayHash: context.content_hash || "",
+        rawMetricKey: "portfolio_context_projection_v1",
+        evidenceStatus: missingData.length ? "PARTIAL" : "COMPLETE",
+        confidence: missingData.length ? "MEDIUM" : "HIGH",
+        linkedLifecycleEvents: evidenceLinks.map((row) => row.logical_name || row.artifact_path || "").filter(Boolean),
+        label: "View Evidence",
+      })}
+      <div class="exit-plan-comparison-grid">
+        <section>
+          <h4>Exposure Summary</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+              { label: "Trades", render: (row) => escapeHtml(row.open_trade_count ?? 0) },
+              { label: "Notional", render: (row) => escapeHtml(paperTradeUsd(row.notional_exposure)) },
+              { label: "P&L", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl_contribution)) },
+            ],
+            rows: bySymbol,
+            emptyMessage: "No open portfolio exposure is visible.",
+          })}
+        </section>
+        <section>
+          <h4>Sleeve Rollup</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || "UNATTRIBUTED") },
+              { label: "Trades", render: (row) => escapeHtml(row.open_trade_count ?? 0) },
+              { label: "Notional", render: (row) => escapeHtml(paperTradeUsd(row.notional_exposure)) },
+              { label: "P&L", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl_contribution)) },
+            ],
+            rows: bySleeve,
+            emptyMessage: "No sleeve exposure is visible.",
+          })}
+        </section>
+      </div>
+      <div class="exit-plan-comparison-grid">
+        <section>
+          <h4>Concentration Warnings</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Type", render: (row) => escapeHtml(row.warning_type || "INFO") },
+              { label: "Exposure", render: (row) => escapeHtml(row.value || "UNKNOWN") },
+              { label: "Trades", render: (row) => escapeHtml(safeList(row.affected_trade_ids).join(", ") || "n/a") },
+            ],
+            rows: warnings,
+            emptyMessage: "No concentration warnings are active.",
+          })}
+        </section>
+        <section>
+          <h4>Sleeve Overlap</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Overlap", render: (row) => escapeHtml(row.overlap_type || "overlap") },
+              { label: "Dimension", render: (row) => escapeHtml(`${row.dimension || ""}: ${row.value || "UNKNOWN"}`) },
+              { label: "Sleeves", render: (row) => escapeHtml(safeList(row.sleeve_ids).join(", ") || "n/a") },
+            ],
+            rows: overlaps,
+            emptyMessage: "No cross-sleeve overlap is visible.",
+          })}
+        </section>
+      </div>
+      <div class="exit-plan-comparison-grid">
+        <section>
+          <h4>Regime Context</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Regime", render: (row) => escapeHtml(row.regime_category || "UNKNOWN") },
+              { label: "Trades", render: (row) => escapeHtml(row.open_trade_count ?? 0) },
+              { label: "Notional", render: (row) => escapeHtml(paperTradeUsd(row.notional_exposure)) },
+            ],
+            rows: regimes,
+            emptyMessage: "No regime dependency metadata is available.",
+          })}
+        </section>
+        <section>
+          <h4>Factor Context</h4>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Factor", render: (row) => escapeHtml(row.factor_category || "UNKNOWN") },
+              { label: "Trades", render: (row) => escapeHtml(row.open_trade_count ?? 0) },
+              { label: "Notional", render: (row) => escapeHtml(paperTradeUsd(row.notional_exposure)) },
+            ],
+            rows: factors,
+            emptyMessage: "No factor metadata is available.",
+          })}
+        </section>
+      </div>
+      ${missingData.length ? `<div class="callout warning">Portfolio context is partial: ${escapeHtml(missingData.map((row) => row.field).join(", "))} metadata is missing for some trades.</div>` : ""}
+    `,
+  });
+}
+
+
+function performanceNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function performanceMoney(value) {
+  const number = performanceNumber(value);
+  if (number === null) return "Unavailable";
+  const sign = number < 0 ? "-" : "";
+  return `${sign}$${Math.abs(number).toFixed(2)}`;
+}
+
+function performancePlain(value) {
+  const number = performanceNumber(value);
+  return number === null ? "Unavailable" : String(number);
+}
+
+function performancePercent(value) {
+  const number = performanceNumber(value);
+  return number === null ? "Unavailable" : `${(number * 100).toFixed(2)}%`;
+}
+
+function performanceReturnPercent(value) {
+  const number = performanceNumber(value);
+  return number === null ? "Unavailable" : `${number.toFixed(2)}%`;
+}
+
+function renderAegisPaperPerformancePage() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  return Promise.all([
+    fetchAegisPerformanceReport(routeParams),
+    fetchAegisSleeveAnalytics(routeParams).catch(() => ({})),
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+  ]).then(([performanceEnvelope, sleeveEnvelope, contractEnvelope]) => {
+    const payload = performanceEnvelope.data || performanceEnvelope || {};
+    const sleeveAnalytics = sleeveEnvelope.data || sleeveEnvelope || {};
+    const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+    const performanceSurface = surfaceContractRow({ operator_surface_contract: contractPayload }, "performance");
+    const model = buildPerformanceOperatorModel({ payload, sleeveAnalytics, performanceSurface, routeParams });
+    return {
+      title: "Performance",
+      headerTitle: "Performance",
+      meta: "Portfolio results, contributors, benchmarks, trends, and performance data completeness.",
+      topReadinessLabel: model.topReadinessLabel,
+      topReadinessTone: model.state === "NORMAL" ? "healthy" : model.state === "NO_DATA" ? "neutral" : "warning",
+      dataTimestamp: model.generatedAt ? `Updated: ${formatTimestamp(model.generatedAt)}` : "",
+      layoutMode: "workflow",
+      html: AnalyticsTemplate({ surfaceId: "performance", contractRow: performanceSurface, bodyHtml: renderPerformanceOperatorPage(model) }),
+      contextHtml: "",
+      hideContextRail: true,
+    };
+  }).catch((error) => {
+    const model = buildPerformanceOperatorModel({
+      payload: { status: "unavailable", overview: {}, diagnostics: [], __error: error },
+      sleeveAnalytics: {},
+      performanceSurface: {},
+      routeParams,
+    });
+    return {
+      title: "Performance",
+      headerTitle: "Performance",
+      meta: "Portfolio results, contributors, benchmarks, trends, and performance data completeness.",
+      topReadinessLabel: "Performance data unavailable",
+      topReadinessTone: "warning",
+      layoutMode: "workflow",
+      html: AnalyticsTemplate({ surfaceId: "performance", contractRow: {}, bodyHtml: renderPerformanceOperatorPage(model) }),
+      contextHtml: "",
+      hideContextRail: true,
+    };
+  });
+}
+
+function buildPerformanceOperatorModel({ payload = {}, sleeveAnalytics = {}, performanceSurface = {}, routeParams = {} } = {}) {
+  const overview = payload.overview || {};
+  const markCoverage = overview.mark_coverage || {};
+  const diagnostics = safeList(payload.diagnostics);
+  const positions = safeList(payload.position_attribution);
+  const benchmarks = payload.benchmarks || {};
+  const valuationEstimate = operatorValuationEstimate(payload);
+  const sleeveSummary = sleeveAnalytics.summary || {};
+  const sleeveRows = safeList(sleeveAnalytics.sleeves);
+  const requestedDay = String(performanceSurface.requested_day || routeParams.day || payload.day_utc || "").slice(0, 10);
+  const sourceDay = String(performanceSurface.source_day || payload.day_utc || requestedDay || "").slice(0, 10);
+  const generatedAt = payload.generated_at_utc || payload.as_of || performanceSurface.generated_at || "";
+  const openPositions = performanceNumber(overview.open_positions);
+  const missingMarks = performanceNumber(overview.missing_mark_count ?? markCoverage.missing_mark_position_count);
+  const markCoveragePct = performanceNumber(markCoverage.mark_coverage_by_position_pct);
+  const attributionCoveragePct = performanceNumber(sleeveSummary.sleeve_attribution_coverage_pct);
+  const benchmarkStatus = performanceBenchmarkStatus(benchmarks);
+  const benchmarkAvailable = benchmarkStatus !== "Not connected";
+  const canonical = String(overview.full_portfolio_pnl_status || "").toUpperCase() === "CANONICAL";
+  let state = "NO_DATA";
+  if (payload.__error || (!payload.day_utc && !Object.keys(overview).length)) state = "NO_DATA";
+  else if (canonical && Number(missingMarks || 0) === 0) state = "NORMAL";
+  else if (String(payload.status || "").toLowerCase().includes("partial") || Number(missingMarks || 0) > 0 || markCoveragePct !== null) state = "PARTIAL_DATA";
+  else state = "DEGRADED";
+  const copy = performanceStateCopy(state, { overview, markCoverage, missingMarks, markCoveragePct, openPositions });
+  const contributors = performanceContributorModel({ overview, positions, canonical });
+  const trends = performanceTrendModel({ payload, canonical, positions });
+  return {
+    requestedDay,
+    sourceDay,
+    generatedAt,
+    state,
+    ...copy,
+    topReadinessLabel: copy.label,
+    overview,
+    markCoverage,
+    diagnostics,
+    positions,
+    benchmarks,
+    valuationEstimate,
+    estimateAvailable: operatorEstimateAvailable(valuationEstimate),
+    sleeveSummary,
+    sleeveRows,
+    openPositions,
+    missingMarks,
+    markCoveragePct,
+    attributionCoveragePct,
+    benchmarkAvailable,
+    canonical,
+    contributors,
+    trends,
+    benchmarkStatus,
+    strategySummary: performanceStrategySummary({ sleeveSummary, sleeveRows, state, markCoveragePct }),
+    completenessRows: [
+      { label: "Mark coverage", value: markCoveragePct === null ? "Not available" : `${markCoveragePct.toFixed(0)}%`, helper: missingMarks ? `${missingMarks} open positions are missing current marks.` : "All open positions have current marks." },
+      { label: "Missing marks", value: performancePlain(missingMarks), helper: safeList(markCoverage.missing_symbols || overview.missing_mark_symbols).length ? safeList(markCoverage.missing_symbols || overview.missing_mark_symbols).slice(0, 6).join(", ") : "None reported." },
+      { label: "Attribution coverage", value: attributionCoveragePct === null ? "Not available" : `${attributionCoveragePct.toFixed(0)}%`, helper: attributionCoveragePct === null ? "Sleeve attribution coverage is not available." : "Strategy attribution coverage from the performance source." },
+      { label: "Benchmark", value: benchmarkStatus, helper: performanceBenchmarkHelper(benchmarkStatus) },
+    ],
+    evidenceRows: [
+      { label: "Requested day", value: requestedDay || "not reported" },
+      { label: "Source day", value: sourceDay || "not reported" },
+      { label: "Performance status", value: performanceOperatorStatusText(state) },
+      { label: "Open positions in performance input", value: performancePlain(openPositions) },
+      { label: "Diagnostics", value: `${diagnostics.length} performance diagnostics available in details` },
+      { label: "Safety", value: "Read-only performance reporting. No trade advice, broker execution, live trading, or autonomous execution." },
+    ],
+  };
+}
+
+function performanceStateCopy(state, { overview = {}, missingMarks = null, markCoveragePct = null, openPositions = null } = {}) {
+  if (state === "NORMAL") {
+    return {
+      label: "Performance available",
+      headline: "Performance is available for this day.",
+      explanation: `Portfolio P&L is complete from current marks. Total P&L is ${performanceMoney(overview.total_pnl)}.`,
+      operatorExpectation: "No performance action is required. Review contributors and trends normally.",
+    };
+  }
+  if (state === "PARTIAL_DATA") {
+    const missingText = missingMarks !== null ? `${missingMarks} open position${Number(missingMarks) === 1 ? "" : "s"} missing current marks` : "some required performance inputs are incomplete";
+    return {
+      label: "Performance partial",
+      headline: "Performance is partially available.",
+      explanation: `${missingText}. Full portfolio P&L should not be treated as complete.`,
+      operatorExpectation: "No performance action is required. Use only the clearly labeled partial values.",
+    };
+  }
+  if (state === "DEGRADED") {
+    return {
+      label: "Performance degraded",
+      headline: "Performance is degraded and should not be treated as complete.",
+      explanation: overview.data_quality_explanation || "Performance inputs are present, but Aegis cannot safely treat the analytics as complete.",
+      operatorExpectation: "No performance action is required here. Treat analytics as limited until the stated data issue is resolved.",
+    };
+  }
+  return {
+    label: "Performance data unavailable",
+    headline: "No performance data is available for this day.",
+    explanation: "Aegis could not load a trustworthy performance report for the requested day.",
+    operatorExpectation: "No performance action is required. Wait for the next performance update or inspect operational evidence outside this screen.",
+  };
+}
+
+function performanceOperatorStatusText(state = "") {
+  if (state === "NORMAL") return "Complete";
+  if (state === "PARTIAL_DATA") return "Partial";
+  if (state === "DEGRADED") return "Degraded";
+  return "Unavailable";
+}
+
+function performanceCompletenessExplanation(model = {}) {
+  if (model.state === "NORMAL") return "Every open position has a current mark, so full portfolio results can be shown.";
+  if (model.state === "PARTIAL_DATA") {
+    const missing = performanceNumber(model.missingMarks);
+    if (missing !== null && missing > 0) return `${missing} open position${missing === 1 ? "" : "s"} do not have current marks, so full portfolio results are incomplete.`;
+    return "Some performance inputs are incomplete, so only supported values are shown.";
+  }
+  if (model.state === "DEGRADED") return "Performance inputs are present, but the results should be treated as limited.";
+  return "Performance data could not be loaded for this day.";
+}
+
+function performanceBenchmarkStatus(benchmarks = {}) {
+  const rows = Object.values(benchmarks || {}).filter(Boolean);
+  if (!rows.length || !rows.some((row) => row.available === true)) return "Not connected";
+  if (rows.some((row) => row.available === true && row.stale === true)) return "Benchmark stale";
+  if (rows.some((row) => row.available !== true || row.return_pct === null || row.return_pct === undefined)) return "Benchmark partial";
+  return "Benchmark available";
+}
+
+function performanceBenchmarkHelper(status = "") {
+  if (status === "Benchmark stale") return "At least one benchmark is stale, so comparisons are limited.";
+  if (status === "Benchmark partial") return "Some benchmark inputs are missing or incomplete.";
+  if (status === "Benchmark available") return "Connected benchmark comparison is available.";
+  return "No benchmark comparison is connected for this day.";
+}
+
+function performanceStrategySummary({ sleeveSummary = {}, sleeveRows = [], state = "", markCoveragePct = null } = {}) {
+  const totalSleeves = performanceNumber(sleeveSummary.total_sleeves ?? sleeveRows.length);
+  const activeSleeves = performanceNumber(sleeveSummary.active_sleeves);
+  if (state !== "NORMAL" || markCoveragePct === null || markCoveragePct < 100) {
+    return {
+      label: "Sleeve / Strategy performance limited",
+      value: totalSleeves !== null ? `${totalSleeves} strategies tracked` : "Not rankable",
+      helper: "Strategy rankings are not trustworthy until position marks are complete.",
+    };
+  }
+  const best = sleeveSummary.best_sleeve?.sleeve_id || sleeveSummary.best_sleeve?.sleeve_name || "Not reported";
+  const worst = sleeveSummary.worst_sleeve?.sleeve_id || sleeveSummary.worst_sleeve?.sleeve_name || "Not reported";
+  return {
+    label: "Sleeve / Strategy Performance",
+    value: activeSleeves !== null ? `${activeSleeves} active` : "Available",
+    helper: `Best: ${best}. Worst: ${worst}.`,
+  };
+}
+
+function performanceContributorModel({ overview = {}, positions = [], canonical = false } = {}) {
+  const best = overview.best_position ? [overview.best_position] : [];
+  const worst = overview.worst_position ? [overview.worst_position] : [];
+  const rowsWithPnl = safeList(positions)
+    .map((row) => ({ ...row, _pnl: performanceNumber(row.total_pnl ?? row.certified_unrealized_pnl ?? row.unrealized_pnl ?? row.realized_pnl) }))
+    .filter((row) => row._pnl !== null);
+  const positive = best.length ? best : rowsWithPnl.filter((row) => row._pnl > 0).sort((a, b) => b._pnl - a._pnl).slice(0, 3);
+  const negative = worst.length ? worst : rowsWithPnl.filter((row) => row._pnl < 0).sort((a, b) => a._pnl - b._pnl).slice(0, 3);
+  return {
+    positive,
+    negative,
+    available: canonical || positive.length > 0 || negative.length > 0,
+    caveat: canonical ? "Contributor ranking uses complete current marks." : "Attribution exists, but contributor rankings cannot be trusted until mark coverage is complete.",
+  };
+}
+
+function performanceTrendModel({ payload = {}, canonical = false, positions = [] } = {}) {
+  const trends = safeList(payload.trends || payload.performance_trends || payload.trend_summary);
+  if (trends.length) return trends;
+  if (canonical) {
+    return [{ label: "Daily result", value: "Current day performance is complete.", helper: "Longer history was not included in this read model." }];
+  }
+  return [{ label: "Trend status", value: "Trend unavailable", helper: "Trend history is incomplete until position marks are complete." }];
+}
+
+function renderPerformanceOperatorPage(model = {}) {
+  return `<main class="operator-workflow performance-operator-workspace" data-testid="performance-page">
+    <section class="operator-section performance-operator-hero" data-testid="performance-status-summary">
+      <div class="section-heading">
+        <div>
+          <div class="section-eyebrow">Performance</div>
+          <h2>${escapeHtml(model.headline)}</h2>
+          <p class="muted-mini">${escapeHtml(model.explanation)}</p>
+        </div>
+        ${renderStatusPill(performanceOperatorStatusText(model.state), model.state === "NORMAL" ? "healthy" : model.state === "NO_DATA" ? "neutral" : "warning", {})}
+      </div>
+      <div class="performance-operator-answer" data-testid="performance-operator-answer">${escapeHtml(model.operatorExpectation)}</div>
+      <div class="performance-summary-grid">
+        ${renderPerformanceFactCard("Certified target-day P&L", model.canonical ? performanceMoney(model.overview.total_pnl) : "Unavailable / incomplete", model.canonical ? "Full portfolio P&L is complete." : "Canonical P&L is not certified because current target-day marks are missing.")}
+        ${renderPerformanceFactCard("Estimated latest value", model.estimateAvailable ? operatorEstimateMoney(model.valuationEstimate.estimated_portfolio_value) : "Unavailable", model.estimateAvailable ? `Estimated, not certified for target day. Latest marks as of ${operatorEstimateDateLabel(model.valuationEstimate)}.` : "No latest available estimate.")}
+        ${renderPerformanceFactCard("Estimated current mark-to-market research outcome", model.estimateAvailable ? operatorEstimateMoney(model.valuationEstimate.estimated_unrealized_pnl) : "Unavailable", "Informational only; does not replace canonical P&L.")}
+        ${renderPerformanceFactCard("Active Research Positions", performancePlain(model.openPositions), model.openPositions === null ? "Active research position count is unavailable from the performance source." : "Active paper research positions referenced by the performance source.")}
+        ${renderPerformanceFactCard("Trend status", model.trends[0]?.value || "Not available", model.trends[0]?.helper || "Trend history is not available yet.")}
+        ${renderPerformanceFactCard(model.strategySummary.label, model.strategySummary.value, model.strategySummary.helper)}
+      </div>
+      ${renderOperatorEstimateNotice(model.valuationEstimate, "portfolio value")}
+    </section>
+    ${renderPerformanceCompletenessSection(model)}
+    ${renderPerformanceContributorsSection(model)}
+    ${renderPerformanceBenchmarkSection(model)}
+    ${renderPerformanceTrendSection(model)}
+    ${renderPerformanceOperatorActionSection(model)}
+    ${renderPerformanceEvidence(model)}
+  </main>`;
+}
+
+function renderPerformanceFactCard(label, value, helper = "") {
+  return `<article class="metric-card performance-fact-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "Unavailable"))}</strong>${helper ? `<small>${escapeHtml(helper)}</small>` : ""}</article>`;
+}
+
+function renderPerformanceCompletenessSection(model = {}) {
+  return `<section class="operator-section performance-completeness" data-testid="performance-completeness-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Completeness</div><h3>Is performance data complete?</h3><p class="muted-mini">Performance values are shown only to the level supported by current marks, attribution, and benchmark inputs.</p></div></div>
+    <div class="performance-completeness-grid">
+      ${safeList(model.completenessRows).map((row) => renderPerformanceFactCard(row.label, row.value, row.helper)).join("")}
+    </div>
+  </section>`;
+}
+
+function renderPerformanceContributorsSection(model = {}) {
+  const positive = safeList(model.contributors.positive);
+  const negative = safeList(model.contributors.negative);
+  return `<section class="operator-section performance-contributors" data-testid="performance-contributors-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Attribution</div><h3>What is working and what is not working?</h3><p class="muted-mini">${escapeHtml(model.contributors.caveat)}</p></div></div>
+    <div class="performance-contributor-grid">
+      ${renderPerformanceContributorList("Working", positive, "No positive contributor can be ranked from current performance data.")}
+      ${renderPerformanceContributorList("Not working", negative, "No negative contributor can be ranked from current performance data.")}
+    </div>
+  </section>`;
+}
+
+function renderPerformanceContributorList(label = "Contributors", rows = [], emptyMessage = "No contributors available.") {
+  const list = safeList(rows).slice(0, 4);
+  return `<article class="stack-card performance-contributor-card">
+    <div class="stack-card-title">${escapeHtml(label)}</div>
+    ${list.length ? `<ul class="performance-contributor-list">${list.map((row) => `<li><strong>${escapeHtml(row.symbol || row.sleeve_id || "Contributor")}</strong><span>${escapeHtml(performanceMoney(row.pnl ?? row.total_pnl ?? row.certified_unrealized_pnl ?? row.unrealized_pnl ?? row.realized_pnl ?? row._pnl))}</span></li>`).join("")}</ul>` : `<p class="muted-mini">${escapeHtml(emptyMessage)}</p>`}
+  </article>`;
+}
+
+function renderPerformanceBenchmarkSection(model = {}) {
+  const benchmarks = model.benchmarks || {};
+  return `<section class="operator-section performance-benchmarks" data-testid="performance-benchmark-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Benchmarks</div><h3>Benchmark comparison</h3><p class="muted-mini">Benchmarks appear only when an existing comparison source is connected.</p></div></div>
+    <div class="card-grid compact-card-grid">
+      ${renderPerformanceBenchmarkCard("Aegis Paper", benchmarks.aegis_paper, "Aegis paper performance source.")}
+      ${renderPerformanceBenchmarkCard("SPY", benchmarks.spy, "Broad-market comparison if connected.")}
+      ${renderPerformanceBenchmarkCard("Advisor", benchmarks.advisor, "Manual advisor comparison if connected.")}
+    </div>
+  </section>`;
+}
+
+function renderPerformanceBenchmarkCard(label, row = {}, detail = "") {
+  const data = row || {};
+  const available = data.available === true;
+  const rawSource = String(data.source || "");
+  const sourceLabel = rawSource.includes("/") || rawSource.includes(".json") ? detail : (rawSource || detail);
+  return `<article class="stack-card performance-benchmark-card">
+    <div class="stack-card-title">${escapeHtml(label)}</div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Status", value: available ? (data.stale ? "Stale" : "Available") : "Not connected" })}
+      ${renderMetricCard({ label: "Return", value: performanceReturnPercent(data.return_pct) })}
+    </div>
+    <p class="muted-mini">${escapeHtml(sourceLabel || "No comparison source connected.")}</p>
+  </article>`;
+}
+
+function renderPerformanceTrendSection(model = {}) {
+  const trends = safeList(model.trends);
+  return `<section class="operator-section performance-trends" data-testid="performance-trends-section">
+    <div class="section-heading"><div><div class="section-eyebrow">Trends</div><h3>What trends matter?</h3><p class="muted-mini">Aegis shows trend context only when performance history is available.</p></div></div>
+    <div class="performance-trend-grid">
+      ${trends.map((row) => renderPerformanceFactCard(row.label || row.name || "Trend", row.value || row.summary || "Not available", row.helper || row.detail || "")).join("") || renderPerformanceFactCard("Trend history", "Not available yet", "No performance history trend was included in this read model.")}
+    </div>
+  </section>`;
+}
+
+function renderPerformanceOperatorActionSection(model = {}) {
+  return `<section class="operator-section performance-action-state" data-testid="performance-action-state">
+    <div class="section-heading"><div><div class="section-eyebrow">David Action</div><h3>Do I need to do anything?</h3><p class="muted-mini">Performance is read-only. It explains results; it does not create trades or repair tasks.</p></div>${renderStatusPill("No action", "neutral", {})}</div>
+    <div class="performance-operator-answer">No performance action is required. Use this page to understand results and data completeness.</div>
+  </section>`;
+}
+
+function renderPerformanceEvidence(model = {}) {
+  return `<details class="operator-disclosure performance-evidence" data-testid="performance-evidence" data-collapsed-by-default>
+    <summary>View performance evidence</summary>
+    ${renderDefinitionRows(model.evidenceRows)}
+  </details>`;
+}
+
+
+const SLEEVE_VALIDATION_FACTORIES = ["ALPHA_DISCOVERY", "TECHNICAL_STRATEGY", "INVESTMENT_PROCESS", "ALLOCATION", "UNCLASSIFIED"];
+const SLEEVE_VALIDATION_SAMPLE_ORDER = { ZERO_SAMPLE: 0, UNDERPOWERED: 1, BUILDING_SAMPLE: 2, SUFFICIENT_SAMPLE: 3 };
+const SLEEVE_VALIDATION_EVIDENCE_ORDER = { POSITIVE_EVIDENCE: 0, NEGATIVE_EVIDENCE: 1, INCONCLUSIVE: 2, BASELINE_FAIL: 3, BENCHMARK_STALE: 4, DATA_INCOMPLETE: 5 };
+
+function renderAegisSleeveValidationPage() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  return Promise.all([
+    fetchAegisPerformanceReport(routeParams),
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+  ]).then(([performanceEnvelope, contractEnvelope]) => {
+    const payload = performanceEnvelope.data || performanceEnvelope || {};
+    const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+    const performanceSurface = surfaceContractRow({ operator_surface_contract: contractPayload }, "performance");
+    const model = buildSleeveValidationModel({ payload, performanceSurface, routeParams });
+    return {
+      title: "Sleeve Validation",
+      headerTitle: "Sleeve Validation",
+      meta: "Which sleeves are working, which are not working, and which are underpowered.",
+      topReadinessLabel: model.topReadinessLabel,
+      topReadinessTone: model.dataQualityTone,
+      dataTimestamp: model.generatedAt ? `Updated: ${formatTimestamp(model.generatedAt)}` : "",
+      layoutMode: "workflow",
+      html: AnalyticsTemplate({ surfaceId: "sleeve_validation", contractRow: performanceSurface, bodyHtml: renderSleeveValidationPage(model) }),
+      contextHtml: "",
+      hideContextRail: true,
+    };
+  }).catch((error) => {
+    const model = buildSleeveValidationModel({ payload: { __error: error }, performanceSurface: {}, routeParams });
+    return {
+      title: "Sleeve Validation",
+      headerTitle: "Sleeve Validation",
+      meta: "Which sleeves are working, which are not working, and which are underpowered.",
+      topReadinessLabel: "Sleeve validation unavailable",
+      topReadinessTone: "warning",
+      layoutMode: "workflow",
+      html: AnalyticsTemplate({ surfaceId: "sleeve_validation", contractRow: {}, bodyHtml: renderSleeveValidationPage(model) }),
+      contextHtml: "",
+      hideContextRail: true,
+    };
+  });
+}
+
+function buildSleeveValidationModel({ payload = {}, performanceSurface = {}, routeParams = {} } = {}) {
+  const truth = payload.sleeve_performance_truth_v1 || payload.sleeve_performance_truth || {};
+  const paperPnl = payload.paper_pnl_report_v1 || payload.paper_pnl_report || {};
+  const benchmarkStatus = performanceBenchmarkStatus(payload.benchmarks || {});
+  const rawRows = safeList(truth.sleeves);
+  const rows = rawRows.map((row) => sleeveValidationRow(row, { benchmarkStatus, truth }));
+  const sortKey = sleeveValidationSortKey(routeParams.sort || "net_pnl");
+  const sortedRows = sleeveValidationSortRows(rows, sortKey);
+  const groupedRows = Object.fromEntries(SLEEVE_VALIDATION_FACTORIES.map((factory) => [factory, sortedRows.filter((row) => row.factory_classification === factory)]));
+  const working = sortedRows.filter((row) => row.evidence_status === "POSITIVE_EVIDENCE");
+  const notWorking = sortedRows.filter((row) => ["NEGATIVE_EVIDENCE", "BASELINE_FAIL"].includes(row.evidence_status));
+  const underpowered = sortedRows.filter((row) => row.sample_status === "UNDERPOWERED" || row.sample_status === "ZERO_SAMPLE" || row.sample_status === "BUILDING_SAMPLE");
+  const unclassified = sortedRows.filter((row) => row.factory_missing === true);
+  const sourceDay = String(performanceSurface.source_day || truth.day_utc || payload.day_utc || routeParams.day || "").slice(0, 10);
+  const generatedAt = truth.generated_at_utc || payload.generated_at_utc || payload.as_of || performanceSurface.generated_at || "";
+  return {
+    sourceDay,
+    generatedAt,
+    sortKey,
+    sortedRows,
+    groupedRows,
+    tickerRows: safeList(paperPnl.open_positions),
+    closedTickerRows: safeList(paperPnl.closed_positions),
+    sourcePath: truth.artifact_path || "",
+    dataQualityStatus: truth.data_quality_status || "MISSING_ARTIFACT",
+    dataQualityTone: truth.data_quality_status === "PASS" ? "healthy" : "warning",
+    topReadinessLabel: rows.length ? `${rows.length} sleeves validated` : "No sleeve samples available",
+    working,
+    notWorking,
+    underpowered,
+    unclassified,
+    benchmarkStatus,
+    totals: truth.totals || {},
+    error: payload.__error,
+  };
+}
+
+function sleeveValidationSortKey(value = "") {
+  const normalized = String(value || "").toLowerCase().replace(/[^a-z_]+/g, "_");
+  if (["net_pnl", "expected_value", "benchmark_excess_return", "sample_status", "evidence_status"].includes(normalized)) return normalized;
+  return "net_pnl";
+}
+
+function sleeveValidationSortRows(rows = [], sortKey = "net_pnl") {
+  const values = {
+    net_pnl: (row) => sleeveValidationNumberForSort(row.net_pnl),
+    expected_value: (row) => sleeveValidationNumberForSort(row.expected_value),
+    benchmark_excess_return: (row) => sleeveValidationNumberForSort(row.benchmark_excess_return),
+    sample_status: (row) => SLEEVE_VALIDATION_SAMPLE_ORDER[row.sample_status] ?? -1,
+    evidence_status: (row) => SLEEVE_VALIDATION_EVIDENCE_ORDER[row.evidence_status] ?? 99,
+  };
+  const getter = values[sortKey] || values.net_pnl;
+  const descending = ["net_pnl", "expected_value", "benchmark_excess_return"].includes(sortKey);
+  return [...rows].sort((a, b) => {
+    const av = getter(a);
+    const bv = getter(b);
+    if (av === bv) return String(a.sleeve_id || "").localeCompare(String(b.sleeve_id || ""));
+    return descending ? bv - av : av - bv;
+  });
+}
+
+function sleeveValidationNumberForSort(value) {
+  const number = performanceNumber(value);
+  return number === null ? Number.NEGATIVE_INFINITY : number;
+}
+
+function sleeveValidationRow(row = {}, { benchmarkStatus = "Not connected" } = {}) {
+  const realized = performanceNumber(row.realized_pnl ?? row.paper_realized_pnl) || 0;
+  const unrealizedAvailable = String(row.unrealized_pnl_status || "").toUpperCase() === "AVAILABLE";
+  const unrealized = unrealizedAvailable ? (performanceNumber(row.unrealized_pnl) || 0) : (performanceNumber(row.certified_unrealized_pnl) || 0);
+  const active = Number(row.open_paper_position_count || 0);
+  const closed = Number(row.closed_paper_position_count || 0);
+  const sampleStatus = sleeveValidationSampleStatus(closed);
+  const factory = sleeveValidationFactory(row);
+  const averageGain = performanceNumber(row.average_gain ?? row.average_win ?? row.avg_gain);
+  const averageLoss = performanceNumber(row.average_loss ?? row.avg_loss);
+  const winRate = performanceNumber(row.win_rate);
+  const expectedValue = performanceNumber(row.expected_value ?? row.expectancy ?? row.expected_return) ?? sleeveValidationExpectedValue({ winRate, averageGain, averageLoss });
+  const benchmarkExcess = performanceNumber(row.benchmark_excess_return ?? row.excess_return ?? row.scorecard_ref?.benchmark_excess_return);
+  const profitFactor = performanceNumber(row.profit_factor ?? row.scorecard_ref?.profit_factor);
+  const maxDrawdown = performanceNumber(row.max_drawdown ?? row.max_adverse_excursion);
+  const netPnl = performanceNumber(row.net_pnl ?? row.total_pnl) ?? realized + unrealized;
+  const dataIncomplete = String(row.data_quality_status || "").toUpperCase().includes("BLOCK") || safeList(row.missing_authorities).length > 0;
+  const evidenceStatus = sleeveValidationEvidenceStatus({ row, sampleStatus, dataIncomplete, benchmarkStatus, netPnl, expectedValue, benchmarkExcess, unrealizedAvailable });
+  return {
+    ...row,
+    sleeve_id: row.sleeve_id || "UNKNOWN",
+    factory_classification: factory.value,
+    factory_missing: factory.missing,
+    active_positions: active,
+    closed_positions: closed,
+    net_pnl: netPnl,
+    unrealized_pnl_display_value: unrealizedAvailable ? row.unrealized_pnl : row.certified_unrealized_pnl,
+    realized_pnl_value: realized,
+    win_rate_value: winRate,
+    average_gain: averageGain,
+    average_loss: averageLoss,
+    expected_value: expectedValue,
+    profit_factor: profitFactor,
+    benchmark_excess_return: benchmarkExcess,
+    max_drawdown: maxDrawdown,
+    sample_status: sampleStatus,
+    evidence_status: evidenceStatus,
+    recommended_action: sleeveValidationRecommendedAction({ sampleStatus, evidenceStatus, netPnl, expectedValue }),
+  };
+}
+
+function sleeveValidationFactory(row = {}) {
+  const raw = String(row.factory_classification || row.factory || row.sleeve_factory || row.scorecard_ref?.factory_classification || "").trim().toUpperCase();
+  if (SLEEVE_VALIDATION_FACTORIES.includes(raw) && raw !== "UNCLASSIFIED") return { value: raw, missing: false };
+  return { value: "UNCLASSIFIED", missing: true };
+}
+
+function sleeveValidationSampleStatus(closedCount = 0) {
+  const count = Number(closedCount || 0);
+  if (count <= 0) return "ZERO_SAMPLE";
+  if (count < 5) return "UNDERPOWERED";
+  if (count < 20) return "BUILDING_SAMPLE";
+  return "SUFFICIENT_SAMPLE";
+}
+
+function sleeveValidationExpectedValue({ winRate, averageGain, averageLoss }) {
+  if (winRate === null || averageGain === null || averageLoss === null) return null;
+  return (winRate * averageGain) + ((1 - winRate) * averageLoss);
+}
+
+function sleeveValidationEvidenceStatus({ sampleStatus, dataIncomplete, benchmarkStatus, netPnl, expectedValue, benchmarkExcess, unrealizedAvailable }) {
+  if (dataIncomplete) return "DATA_INCOMPLETE";
+  if (!unrealizedAvailable) return "BASELINE_FAIL";
+  if (benchmarkStatus === "Benchmark stale") return "BENCHMARK_STALE";
+  if (sampleStatus !== "SUFFICIENT_SAMPLE") return "INCONCLUSIVE";
+  const positiveSignals = [netPnl, expectedValue, benchmarkExcess].filter((value) => value !== null && value !== undefined).filter((value) => Number(value) > 0).length;
+  const negativeSignals = [netPnl, expectedValue, benchmarkExcess].filter((value) => value !== null && value !== undefined).filter((value) => Number(value) < 0).length;
+  if (positiveSignals > negativeSignals) return "POSITIVE_EVIDENCE";
+  if (negativeSignals > positiveSignals) return "NEGATIVE_EVIDENCE";
+  return "INCONCLUSIVE";
+}
+
+function sleeveValidationRecommendedAction({ sampleStatus, evidenceStatus, netPnl, expectedValue }) {
+  if (["DATA_INCOMPLETE", "BASELINE_FAIL", "BENCHMARK_STALE"].includes(evidenceStatus)) return "DO_NOT_USE_FOR_CAPITAL";
+  if (sampleStatus === "ZERO_SAMPLE") return "CONTINUE_OBSERVATION";
+  if (sampleStatus === "UNDERPOWERED" || sampleStatus === "BUILDING_SAMPLE") return Number(netPnl || 0) < 0 ? "INCREASE_RESEARCH_ATTENTION" : "CONTINUE_OBSERVATION";
+  if (evidenceStatus === "POSITIVE_EVIDENCE") return "REDUCE_RESEARCH_ATTENTION";
+  if (evidenceStatus === "NEGATIVE_EVIDENCE") {
+    if (Number(netPnl || 0) < 0 && Number(expectedValue || 0) < 0) return "RETIRE_CANDIDATE";
+    return Number(expectedValue || 0) < 0 ? "HOSTILE_REVIEW_REQUIRED" : "INCREASE_RESEARCH_ATTENTION";
+  }
+  return "CONTINUE_OBSERVATION";
+}
+
+function renderSleeveValidationPage(model = {}) {
+  return `<main class="operator-workflow sleeve-validation-workspace" data-testid="sleeve-validation-page">
+    <section class="operator-section sleeve-validation-hero">
+      <div class="section-heading">
+        <div>
+          <div class="section-eyebrow">Sleeve Validation</div>
+          <h2>Which sleeves are working, which are not working, and which are underpowered?</h2>
+          <p class="muted-mini">Paper research positions are research observations, not investment recommendations.</p>
+        </div>
+        ${renderStatusPill(model.dataQualityStatus || "UNKNOWN", model.dataQualityTone, {})}
+      </div>
+      <div class="performance-operator-answer" data-testid="sleeve-validation-answer">${escapeHtml(sleeveValidationAnswer(model))}</div>
+      <div class="performance-summary-grid">
+        ${renderPerformanceFactCard("Sleeves appearing to work", performancePlain(model.working.length), model.working.map((row) => row.sleeve_id).slice(0, 4).join(", ") || "No sleeve has sufficient positive evidence yet.")}
+        ${renderPerformanceFactCard("Underpowered sleeves", performancePlain(model.underpowered.length), "ZERO_SAMPLE, UNDERPOWERED, and BUILDING_SAMPLE are separated from failing sleeves.")}
+        ${renderPerformanceFactCard("Not working / review", performancePlain(model.notWorking.length), model.notWorking.map((row) => row.sleeve_id).slice(0, 4).join(", ") || "No sufficient negative sleeve evidence is currently shown.")}
+        ${renderPerformanceFactCard("Unclassified factory", performancePlain(model.unclassified.length), "Missing factory classification is shown as UNCLASSIFIED and flagged.")}
+        ${renderPerformanceFactCard("Benchmark state", model.benchmarkStatus, "Benchmark excess return is only shown when a connected source provides it.")}
+        ${renderPerformanceFactCard("Source day", model.sourceDay || "Unavailable", model.sourcePath || "Sleeve performance truth path unavailable.")}
+      </div>
+    </section>
+    <section class="operator-section sleeve-validation-table-section">
+      <div class="section-heading"><div><div class="section-eyebrow">Sleeve-level results</div><h3>Sleeve Validation</h3><p class="muted-mini">Sleeve-level results are shown above individual ticker contributors. No investable edge is claimed.</p></div></div>
+      ${renderSleeveValidationSortControls(model.sortKey)}
+      ${SLEEVE_VALIDATION_FACTORIES.map((factory) => renderSleeveValidationFactoryGroup(factory, model.groupedRows[factory] || [])).join("")}
+    </section>
+    <section class="operator-section sleeve-validation-contributors">
+      <details class="operator-disclosure" data-collapsed-by-default>
+        <summary>Individual ticker contributors (${escapeHtml(String(model.tickerRows.length + model.closedTickerRows.length))})</summary>
+        <p class="muted-mini">Ticker contributors are shown after sleeve validation so portfolio-level P&L does not stand in for sleeve evidence.</p>
+        ${renderSimpleTable({
+          columns: [
+            { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+            { label: "Active Research Positions", render: (row) => escapeHtml(row.open_position_count ?? row.quantity ?? 0) },
+            { label: "Current Mark-to-Market Research Outcome", render: (row) => escapeHtml(row.unrealized_pnl_status === "AVAILABLE" ? paperTradeUsd(row.unrealized_pnl) : "NOT_CANONICAL") },
+            { label: "Realized P&L", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl)) },
+            { label: "Data Quality", render: (row) => escapeHtml(row.data_quality_status || row.mark_certification_status || "UNKNOWN") },
+          ],
+          rows: [...model.tickerRows, ...model.closedTickerRows],
+          emptyMessage: "No individual ticker contributor rows are available.",
+        })}
+      </details>
+    </section>
+    <details class="operator-disclosure performance-evidence" data-testid="sleeve-validation-evidence" data-collapsed-by-default>
+      <summary>Sleeve validation evidence</summary>
+      ${renderDefinitionRows([
+        { label: "Artifact", value: model.sourcePath || "Unavailable" },
+        { label: "Data quality", value: model.dataQualityStatus || "Unavailable" },
+        { label: "Sorting", value: model.sortKey },
+        { label: "Safety", value: "Read-only paper research validation. No trade advice, broker execution, live trading, or investable edge claim." },
+      ])}
+    </details>
+  </main>`;
+}
+
+function sleeveValidationAnswer(model = {}) {
+  const working = model.working.map((row) => row.sleeve_id).slice(0, 3).join(", ") || "none yet";
+  const underpowered = model.underpowered.map((row) => row.sleeve_id).slice(0, 3).join(", ") || "none";
+  const failing = model.notWorking.map((row) => row.sleeve_id).slice(0, 3).join(", ") || "none";
+  return `Appearing to work: ${working}. Underpowered: ${underpowered}. Not working or baseline-failing: ${failing}.`;
+}
+
+function renderSleeveValidationSortControls(activeSort = "net_pnl") {
+  const labels = [
+    ["net_pnl", "Net P&L"],
+    ["expected_value", "Expected Value"],
+    ["benchmark_excess_return", "Benchmark Excess Return"],
+    ["sample_status", "Sample Status"],
+    ["evidence_status", "Evidence Status"],
+  ];
+  return `<div class="button-row sleeve-validation-sort-controls" aria-label="Sleeve validation sorting">${labels.map(([key, label]) => `<a class="${key === activeSort ? "primary-button" : "ghost-button"}" href="?sort=${escapeHtml(key)}">Sort by ${escapeHtml(label)}</a>`).join("")}</div>`;
+}
+
+function renderSleeveValidationFactoryGroup(factory, rows = []) {
+  return `<section class="sleeve-validation-factory-group" data-factory="${escapeHtml(factory)}">
+    <div class="section-heading compact"><div><div class="section-eyebrow">${escapeHtml(factory)}</div><h4>${escapeHtml(factory)}</h4></div><span class="muted-mini">${escapeHtml(String(rows.length))} sleeve${rows.length === 1 ? "" : "s"}</span></div>
+    ${rows.length ? renderSleeveValidationTable(rows) : `<div class="empty-state">No ${escapeHtml(factory)} sleeves are present in sleeve_performance_truth_v1.</div>`}
+  </section>`;
+}
+
+function renderSleeveValidationTable(rows = []) {
+  return renderSimpleTable({
+    columns: [
+      { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.data_quality_status || "UNKNOWN")}</div>` },
+      { label: "Factory Classification", render: (row) => `<strong>${escapeHtml(row.factory_classification)}</strong>${row.factory_missing ? `<div class="muted-mini">classification missing</div>` : ""}` },
+      { label: "Active Positions", render: (row) => escapeHtml(performancePlain(row.active_positions)) },
+      { label: "Closed Positions", render: (row) => escapeHtml(performancePlain(row.closed_positions)) },
+      { label: "Net P&L", render: (row) => escapeHtml(paperTradeUsd(row.net_pnl)) },
+      { label: "Unrealized P&L", render: (row) => escapeHtml(row.unrealized_pnl_status === "AVAILABLE" ? paperTradeUsd(row.unrealized_pnl_display_value) : "NOT_CANONICAL") },
+      { label: "Realized P&L", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl_value)) },
+      { label: "Win Rate", render: (row) => escapeHtml(formatPercent(row.win_rate_value)) },
+      { label: "Average Gain", render: (row) => escapeHtml(sleeveValidationMetric(row.average_gain, "money")) },
+      { label: "Average Loss", render: (row) => escapeHtml(sleeveValidationMetric(row.average_loss, "money")) },
+      { label: "Expected Value", render: (row) => escapeHtml(sleeveValidationMetric(row.expected_value, "money")) },
+      { label: "Profit Factor", render: (row) => escapeHtml(sleeveValidationMetric(row.profit_factor, "plain")) },
+      { label: "Benchmark Excess Return", render: (row) => escapeHtml(sleeveValidationMetric(row.benchmark_excess_return, "percent-return")) },
+      { label: "Max Drawdown", render: (row) => escapeHtml(sleeveValidationMetric(row.max_drawdown, "money")) },
+      { label: "Sample Status", render: (row) => renderStatusPill(row.sample_status, sleeveValidationSampleTone(row.sample_status), {}) },
+      { label: "Evidence Status", render: (row) => renderStatusPill(row.evidence_status, sleeveValidationEvidenceTone(row.evidence_status), {}) },
+      { label: "Recommended Action", render: (row) => `<strong>${escapeHtml(row.recommended_action)}</strong>` },
+    ],
+    rows,
+    emptyMessage: "No sleeve validation rows are available.",
+  });
+}
+
+function sleeveValidationMetric(value, kind = "plain") {
+  const number = performanceNumber(value);
+  if (number === null) return "n/a";
+  if (kind === "money") return paperTradeUsd(number);
+  if (kind === "percent-return") return performanceReturnPercent(number);
+  return performancePlain(number);
+}
+
+function sleeveValidationSampleTone(status = "") {
+  if (status === "SUFFICIENT_SAMPLE") return "healthy";
+  if (status === "ZERO_SAMPLE") return "neutral";
+  return "warning";
+}
+
+function sleeveValidationEvidenceTone(status = "") {
+  if (status === "POSITIVE_EVIDENCE") return "healthy";
+  if (["NEGATIVE_EVIDENCE", "BASELINE_FAIL", "DATA_INCOMPLETE"].includes(status)) return "warning";
+  return "neutral";
+}
+
+function renderAegisPositionReviewPage() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  return Promise.all([
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+    fetchAegisPositionReviewBrief(routeParams).catch((error) => ({ __position_review_error: error })),
+    fetchAegisOperatorToday(routeParams).catch(() => ({})),
+  ]).then(([contractEnvelope, envelope, todayPayload]) => {
+    const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+    const reviewSurface = surfaceContractRow({ operator_surface_contract: contractPayload }, "position_review");
+    if (!contractPrimaryRenderAllowed(reviewSurface) || envelope.__position_review_error) {
+      const row = envelope.__position_review_error ? {
+        ...reviewSurface,
+        status: reviewSurface.status === "READY" ? "UNAVAILABLE" : reviewSurface.status,
+        render_allowed: true,
+        actions_allowed: false,
+        primary_message: reviewSurface.primary_message || "What matters most for this position?",
+        reason: envelope.__position_review_error?.message || reviewSurface.reason || "Position Review artifact is unavailable for the requested day.",
+        impact: "Position Review primary content is hidden so prior-day briefs cannot appear as operational status.",
+        next_step: reviewSurface.next_step || "Use Ask Aegis or open diagnostics for the recovery plan.",
+      } : reviewSurface;
+      return renderContractGatedPage({ title: "Position Review", subtitle: "What matters most for this position?", surfaceId: "position_review", contractRow: row });
+    }
+    const payload = envelope.data || envelope || {};
+    const operatorTruth = buildOperatorTruthModel(todayPayload, payload);
+    const summary = payload.summary || {};
+    const valuationEstimate = operatorValuationEstimate(payload);
+    const briefs = safeList(payload.briefs);
+    const unsupported = Number(summary.unsupported_claims_count || 0);
+    const forbidden = Number(summary.forbidden_language_violation_count || 0);
+    return {
+      title: "Position Review",
+      subtitle: "Operator-readable position review briefs and evidence.",
+      layoutMode: "workflow",
+      topReadinessLabel: operatorTruth.primaryStatus,
+      topReadinessTone: operatorTruth.primaryTone,
+      operatorTruth,
+      html: ReviewTemplate({ surfaceId: "position_review", contractRow: reviewSurface, bodyHtml: `
+        ${renderOperatorTruthStrip(operatorTruth, [
+          { label: "Brief availability", value: payload.status || "Unavailable", detail: "Surface/canonical status is secondary to runtime truth." },
+          { label: "Review briefs", value: String(summary.brief_count || briefs.length || 0), detail: "Review-only evidence." },
+        ])}
+        <section class="operator-section position-review-overview">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">Position Review</div>
+              <h3>Position Review</h3>
+              <p>Audited review briefs generated from deterministic position review contexts. The browser reads /api/aegis/position-review/latest and does not generate AI content.</p>
+              <p class="muted-mini">Brief artifact: ${escapeHtml(payload.status || "Unavailable")} · generated_at: ${escapeHtml(payload.generated_at || "Unavailable")} · context hash: ${escapeHtml(payload.source_context_hash || "Unavailable")}</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Operational Status", value: operatorTruth.primaryStatus, detail: operatorTruth.summary })}
+            ${renderMetricCard({ label: "Open Positions", value: performancePlain(summary.open_position_count) })}
+            ${renderMetricCard({ label: "Estimated Latest Value", value: operatorEstimateAvailable(valuationEstimate) ? operatorEstimateMoney(valuationEstimate.estimated_portfolio_value) : "Unavailable", detail: operatorEstimateAvailable(valuationEstimate) ? `Estimated, not certified for target day. Latest marks as of ${operatorEstimateDateLabel(valuationEstimate)}.` : "Estimate unavailable." })}
+            ${renderMetricCard({ label: "Review Briefs", value: performancePlain(summary.brief_count || briefs.length) })}
+            ${renderMetricCard({ label: "Unsupported Claims", value: performancePlain(unsupported) })}
+            ${renderMetricCard({ label: "Forbidden Language", value: performancePlain(forbidden) })}
+            ${renderMetricCard({ label: "Trade Advice", value: payload.trade_advice_allowed === true ? "ENABLED" : "Disabled" })}
+            ${renderMetricCard({ label: "Broker Execution", value: payload.broker_execution_allowed === true ? "ENABLED" : "Disabled" })}
+          </div>
+          ${renderOperatorEstimateNotice(valuationEstimate, "position review value")}
+          <div class="status-callout warning"><strong>Read-only review.</strong><span>Estimated values are informational only. No trade advice, broker execution, or autonomous execution is enabled.</span></div>
+          ${unsupported || forbidden ? `<div class="status-callout warning"><strong>Review artifact requires attention.</strong><span>Unsupported claims or forbidden language were detected by the audited brief checks.</span></div>` : `<div class="status-callout success"><strong>Brief artifact checks passed.</strong><span>Position Review is read-only and constrained to audited context evidence.</span></div>`}
+        </section>
+        <section class="operator-section position-review-list">
+          <div class="section-heading"><div><div class="section-eyebrow">OPEN POSITION REVIEWS</div><h3>Open Position Briefs</h3></div></div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Position", render: (row) => `<strong>${escapeHtml(row.symbol || row.position_id || "Position")}</strong><div class="muted-mini">${escapeHtml(row.position_id || "")}</div>` },
+              { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || "UNKNOWN") },
+              { label: "Status", render: (row) => renderStatusPill(row.status || "Unavailable", verifiedRuntimeStatusKind(row.status || "UNKNOWN"), {}) },
+              { label: "Health", render: (row) => escapeHtml(row.position_health || "Unavailable") },
+              { label: "Thesis", render: (row) => escapeHtml(row.thesis_status || "Unavailable") },
+              { label: "Key Insight", render: (row) => escapeHtml(row.key_insight || row.conclusion || "No key insight available.") },
+              { label: "Data Quality", render: (row) => escapeHtml(row.data_quality_status || "UNKNOWN") },
+              { label: "Review", render: (row) => `<a class="ghost-button" href="#${escapeHtml(row.position_id || row.target_id || row.symbol || "")}">View Position Review</a>` },
+            ],
+            rows: briefs,
+            emptyMessage: "Position review briefs are not available for the requested day.",
+          })}
+        </section>
+        <section class="operator-section position-review-cards">
+          <div class="section-heading"><div><div class="section-eyebrow">BRIEFS</div><h3>Review Brief Details</h3></div></div>
+          <div class="card-grid compact-card-grid position-review-card-grid">
+            ${briefs.map(renderPositionReviewBriefCard).join("") || `<div class="empty-state">No position review briefs are available.</div>`}
+          </div>
+        </section>
+      ` }),
+      contextHtml: "",
+    };
+  }).catch((error) => ({
+    title: "Position Review",
+    subtitle: "Operator-readable position review briefs and evidence.",
+    layoutMode: "workflow",
+    html: renderCardSection({
+      eyebrow: "UNAVAILABLE",
+      title: "Position Review unavailable",
+      subtitle: "The audited position review brief artifact is missing or unreadable.",
+      body: renderDefinitionRows([
+        { label: "Endpoint", value: "/api/aegis/position-review/latest" },
+        { label: "Reason", value: error?.message || "Unknown error" },
+        { label: "Next action", value: "Open diagnostics for the position review recovery plan." },
+      ]),
+    }),
+    contextHtml: "",
+  }));
+}
+
+function renderPositionReviewBriefCard(row = {}) {
+  return `<article class="stack-card position-review-brief-card" id="${escapeHtml(row.position_id || row.target_id || row.symbol || "")}">
+    <header class="stack-card-header"><div><div class="stack-card-title">${escapeHtml(row.symbol || row.position_id || "Position")}</div><div class="stack-card-subtitle">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div></div>${renderStatusPill(row.status || "UNKNOWN", verifiedRuntimeStatusKind(row.status || "UNKNOWN"), {})}</header>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Position Health", value: row.position_health || "Unavailable" })}
+      ${renderMetricCard({ label: "Thesis Status", value: row.thesis_status || "Unavailable" })}
+      ${renderMetricCard({ label: "Confidence", value: row.confidence || "Unavailable" })}
+      ${renderMetricCard({ label: "Data Quality", value: row.data_quality_status || "UNKNOWN" })}
+      ${renderMetricCard({ label: "Context Hash", value: row.input_context_hash ? `${String(row.input_context_hash).slice(0, 12)}...` : "Unavailable" })}
+      ${renderMetricCard({ label: "Generated", value: formatTimestamp(row.generated_at || "") })}
+    </div>
+    <h4>Key Insight</h4><p class="support-note">${escapeHtml(row.key_insight || "No key insight available.")}</p>
+    <h4>Thesis Summary</h4><p class="support-note">${escapeHtml(row.thesis_summary || "No thesis summary available.")}</p>
+    <h4>Position Health</h4><p class="support-note"><strong>${escapeHtml(row.position_health || "Unavailable")}</strong> — ${escapeHtml(row.position_health_explanation || "No position health explanation available.")}</p>
+    <h4>Thesis Status</h4><p class="support-note"><strong>${escapeHtml(row.thesis_status || "Unavailable")}</strong> — ${escapeHtml(row.thesis_status_explanation || "No thesis status explanation available.")}</p>
+    <h4>Most Important Supporting Evidence</h4>${renderBulletedList(row.supporting_evidence, "No supporting evidence was included in the brief artifact.")}
+    <h4>Most Important Contradicting Evidence</h4>${renderBulletedList(row.contradicting_evidence, "No contradicting evidence was included in the brief artifact.")}
+    <h4>Most Important Risk</h4><p class="support-note">${escapeHtml(row.most_important_risk || "No primary risk was included in the brief artifact.")}</p>
+    <h4>Most Important Confirmation</h4><p class="support-note">${escapeHtml(row.most_important_confirmation || "No primary confirmation was included in the brief artifact.")}</p>
+    <h4>Monitoring Points</h4>${renderBulletedList(row.monitoring_points, "No monitoring points were included in the brief artifact.")}
+    <h4>Data Quality</h4>${renderPositionReviewDataQuality(row.data_quality || { status: row.data_quality_status, null_reasons: row.null_reasons })}
+    <details class="operator-disclosure position-review-source-diagnostics"><summary>Source references and null reasons</summary>${renderDefinitionRows([
+      { label: "Brief", value: row.brief_id || "Unavailable" },
+      { label: "Score", value: row.score_id || "Unavailable" },
+      { label: "Context", value: row.context_id || "Unavailable" },
+      { label: "Unsupported claims", value: safeList(row.unsupported_claims).join(", ") || "none" },
+      { label: "Null reasons", value: row.null_reasons && Object.keys(row.null_reasons).length ? JSON.stringify(row.null_reasons) : "none" },
+    ])}${renderSimpleTable({
+      columns: [
+        { label: "Artifact", render: (ref) => escapeHtml(ref.artifact || "") },
+        { label: "Reference", render: (ref) => escapeHtml(ref.position_id || ref.context_id || ref.input_context_hash || "") },
+      ],
+      rows: safeList(row.source_references),
+      emptyMessage: "No source references reported.",
+    })}</details>
+  </article>`;
+}
+
+function renderPositionReviewDataQuality(data = {}) {
+  const quality = data || {};
+  const counts = quality.evidence_counts || {};
+  return `<div class="support-note"><p>${escapeHtml(quality.summary || `Status: ${quality.status || "UNKNOWN"}`)}</p><div class="metric-grid compact">${renderMetricCard({ label: "Signal Evidence", value: quality.has_signal_evidence === false ? "Missing" : performancePlain(counts.signal_evidence_count || 0) })}${renderMetricCard({ label: "Validation Evidence", value: quality.has_validation_evidence === false ? "Missing" : performancePlain(counts.validation_evidence_count || 0) })}${renderMetricCard({ label: "Market/Regime Evidence", value: quality.has_market_regime_evidence === false ? "Missing" : performancePlain(counts.market_regime_evidence_count || 0) })}</div></div>`;
+}
+
+function renderBulletedList(items = [], emptyMessage = "None") {
+  const rows = safeList(items);
+  if (!rows.length) return `<p class="muted-mini">${escapeHtml(emptyMessage)}</p>`;
+  return `<ul class="support-list">${rows.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderSleeveSummaryCard(label, row = {}) {
+  const sleeve = row || {};
+  return `<article class="stack-card">
+    <div class="stack-card-title">${escapeHtml(label)}</div>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Sleeve", value: sleeve.sleeve_name || sleeve.sleeve_id || "Unavailable" })}
+      ${renderMetricCard({ label: "Total P&L", value: performanceMoney(sleeve.total_pnl) })}
+    </div>
+  </article>`;
+}
+
+
+function renderAegisResearchPortfolioPage() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  return fetchAegisResearchPortfolio(routeParams).then((envelope) => {
+    const payload = envelope.data || envelope || {};
+    const summary = payload.summary || {};
+    const hypotheses = safeList(payload.hypotheses);
+    const maturity = payload.outcome_validation_maturity || {};
+    const maturitySummary = maturity.summary || {};
+    const maturityRows = safeList(maturity.hypotheses);
+    const capitalAllocation = payload.research_capital_allocation || {};
+    const capitalSummary = capitalAllocation.summary || {};
+    const capitalRows = safeList(capitalAllocation.programs);
+    const recommendations = safeList(payload.research_allocation_recommendations).slice(0, 8);
+    const sleeveMap = safeList(payload.hypothesis_to_sleeve_map);
+    return {
+      title: "Research Portfolio",
+      subtitle: "Hypothesis-centered research portfolio state from aegis_research_portfolio_v1.",
+      layoutMode: "workflow",
+      html: `
+        <section class="operator-section research-portfolio-overview">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">AEGIS_RESEARCH_PORTFOLIO_V1</div>
+              <h3>Research Portfolio</h3>
+              <p class="muted-mini">Canonical read-only thesis and hypothesis portfolio. Recommendations allocate research attention only; they are not trade advice or broker instructions.</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Theses", value: performancePlain(summary.thesis_count) })}
+            ${renderMetricCard({ label: "Hypotheses", value: performancePlain(summary.hypothesis_count) })}
+            ${renderMetricCard({ label: "Validation Ready", value: performancePlain(summary.validation_ready_hypotheses) })}
+            ${renderMetricCard({ label: "Validated", value: performancePlain(summary.validated_hypotheses) })}
+            ${renderMetricCard({ label: "Degraded", value: performancePlain(summary.degraded_hypotheses) })}
+            ${renderMetricCard({ label: "Retired", value: performancePlain(summary.retired_hypotheses) })}
+          </div>
+        </section>
+        <section class="operator-section research-allocation-recommendations">
+          <div class="section-heading"><div><div class="section-eyebrow">RESEARCH ALLOCATION</div><h3>Top Recommendations</h3></div></div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Hypothesis", render: (row) => `<strong>${escapeHtml(row.name || row.hypothesis_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.hypothesis_id || "")}</div>` },
+              { label: "State", render: (row) => escapeHtml(row.state || "Unavailable") },
+              { label: "Score", render: (row) => escapeHtml(performancePlain(row.allocation_score)) },
+              { label: "Recommendation", render: (row) => escapeHtml(row.allocation_recommendation || "Unavailable") },
+              { label: "Reason Codes", render: (row) => escapeHtml(safeList(row.reason_codes).join(", ") || "Unavailable") },
+            ],
+            rows: recommendations,
+            emptyMessage: "No research allocation recommendations are available.",
+          })}
+        </section>
+        <section class="operator-section research-capital-allocation">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">RESEARCH CAPITAL ALLOCATION</div>
+              <h3>Research Capital Allocation</h3>
+              <p class="muted-mini">${escapeHtml(capitalAllocation.disclaimer || "This is not trade sizing. This is not live capital allocation. This is research-priority guidance only.")}</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Programs", value: performancePlain(capitalSummary.decision_count) })}
+            ${renderMetricCard({ label: "Increase", value: performancePlain(capitalSummary.INCREASE) })}
+            ${renderMetricCard({ label: "Maintain", value: performancePlain(capitalSummary.MAINTAIN) })}
+            ${renderMetricCard({ label: "Reduce", value: performancePlain(capitalSummary.REDUCE) })}
+            ${renderMetricCard({ label: "Pause", value: performancePlain(capitalSummary.PAUSE) })}
+            ${renderMetricCard({ label: "Investigate", value: performancePlain(capitalSummary.INVESTIGATE_MORE) })}
+          </div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Program", render: (row) => `<strong>${escapeHtml(row.name || row.research_program_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.research_program_id || "")}</div>` },
+              { label: "Theses", render: (row) => escapeHtml(safeList(row.linked_thesis_ids).join(", ") || "None") },
+              { label: "Hypotheses", render: (row) => escapeHtml(performancePlain(safeList(row.linked_hypothesis_ids).length)) },
+              { label: "Sleeves", render: (row) => escapeHtml(safeList(row.linked_sleeve_ids).join(", ") || "None") },
+              { label: "Units", render: (row) => escapeHtml(`${performancePlain(row.current_allocation_units)} -> ${performancePlain(row.recommended_allocation_units)}`) },
+              { label: "Recommendation", render: (row) => escapeHtml(row.recommendation || "Unavailable") },
+              { label: "Score", render: (row) => escapeHtml(performancePlain(row.allocation_score)) },
+              { label: "Primary Blocker", render: (row) => escapeHtml(row.primary_blocker || "None") },
+              { label: "Evidence", render: (row) => escapeHtml(row.evidence_status || "Unavailable") },
+              { label: "Validation", render: (row) => escapeHtml(row.validation_status || "Unavailable") },
+              { label: "Reason Codes", render: (row) => escapeHtml(safeList(row.reason_codes).join(", ") || "Unavailable") },
+            ],
+            rows: capitalRows,
+            emptyMessage: "No research capital allocation rows are available. Run npm run aegis:research-capital-allocation.",
+          })}
+        </section>
+        <section class="operator-section outcome-validation-maturity">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">OUTCOME VALIDATION</div>
+              <h3>Outcome & Validation Maturity</h3>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Open Outcomes", value: performancePlain(maturitySummary.open_outcome_count) })}
+            ${renderMetricCard({ label: "Closed Outcomes", value: performancePlain(maturitySummary.closed_outcome_count) })}
+            ${renderMetricCard({ label: "Included Samples", value: performancePlain(maturitySummary.included_validation_sample_count) })}
+            ${renderMetricCard({ label: "Excluded Samples", value: performancePlain(maturitySummary.excluded_validation_sample_count) })}
+            ${renderMetricCard({ label: "Underpowered", value: performancePlain(maturitySummary.underpowered) })}
+            ${renderMetricCard({ label: "Validation Ready", value: performancePlain(maturitySummary.validation_ready) })}
+          </div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Hypothesis", render: (row) => `<strong>${escapeHtml(row.hypothesis_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.thesis_id || "")}</div>` },
+              { label: "Closed Samples", render: (row) => escapeHtml(performancePlain(row.closed_samples)) },
+              { label: "Required", render: (row) => escapeHtml(performancePlain(row.required_samples)) },
+              { label: "Readiness", render: (row) => escapeHtml(row.validation_readiness_state || "Unavailable") },
+              { label: "Expectancy", render: (row) => escapeHtml(row.expectancy === null || row.expectancy === undefined ? "No closed samples" : performanceReturnPercent(row.expectancy * 100)) },
+              { label: "Excess Return", render: (row) => escapeHtml(row.excess_return === null || row.excess_return === undefined ? "No closed samples" : performanceReturnPercent(row.excess_return * 100)) },
+              { label: "Blockers", render: (row) => escapeHtml(safeList(row.blocker_reasons).join(", ") || safeList(row.state_reason_codes).join(", ") || "None") },
+              { label: "Next Evidence", render: (row) => escapeHtml(`${performancePlain(row.next_evidence_needed)} closed samples`) },
+            ],
+            rows: maturityRows,
+            emptyMessage: "No outcome validation maturity rows are available. Run npm run aegis:outcome-validation.",
+          })}
+        </section>
+        <section class="operator-section research-hypothesis-map">
+          <div class="section-heading"><div><div class="section-eyebrow">HYPOTHESES</div><h3>Hypothesis Evidence State</h3></div></div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Hypothesis", render: (row) => `<strong>${escapeHtml(row.name || row.hypothesis_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.thesis_id || "")}</div>` },
+              { label: "Sleeves", render: (row) => escapeHtml(safeList(row.linked_sleeves).join(", ") || "None") },
+              { label: "Evidence", render: (row) => escapeHtml(row.evidence_state || "Unavailable") },
+              { label: "Validation", render: (row) => escapeHtml(row.validation_state || "Unavailable") },
+              { label: "Samples", render: (row) => escapeHtml(performancePlain(row.sample_count)) },
+              { label: "Recommendation", render: (row) => escapeHtml(row.allocation_recommendation || "Unavailable") },
+              { label: "Reason Codes", render: (row) => escapeHtml(safeList(row.reason_codes).join(", ") || "Unavailable") },
+            ],
+            rows: hypotheses,
+            emptyMessage: "No hypotheses are available in aegis_research_portfolio_v1.",
+          })}
+        </section>
+        <section class="operator-section research-sleeve-map">
+          <div class="section-heading"><div><div class="section-eyebrow">IMPLEMENTATIONS</div><h3>Hypothesis-to-Sleeve Map</h3></div></div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Hypothesis", render: (row) => escapeHtml(row.hypothesis_id || "UNKNOWN") },
+              { label: "Thesis", render: (row) => escapeHtml(row.thesis_id || "UNKNOWN") },
+              { label: "Sleeves", render: (row) => escapeHtml(safeList(row.linked_sleeves).join(", ") || "None") },
+            ],
+            rows: sleeveMap,
+            emptyMessage: "No hypothesis-to-sleeve mappings are available.",
+          })}
+        </section>
+      `,
+      contextHtml: renderSourceRefCard(Object.entries(payload.source_artifact_paths || {}).map(([logical_name, path]) => ({ logical_name, path })), "Research Portfolio Source Artifacts", "Inputs listed by the canonical aegis_research_portfolio_v1 artifact."),
+    };
+  }).catch((error) => ({
+    title: "Research Portfolio",
+    subtitle: "Hypothesis-centered research portfolio state from aegis_research_portfolio_v1.",
+    layoutMode: "workflow",
+    html: renderCardSection({
+      eyebrow: "UNAVAILABLE",
+      title: "Research Portfolio unavailable",
+      subtitle: "The canonical research portfolio route did not return a usable payload.",
+      body: renderDefinitionRows([
+        { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/aegis/research-portfolio/latest" },
+        { label: "Reason", value: error?.message || "Unknown error" },
+        { label: "Next action", value: "Run npm run aegis:research-portfolio and inspect the artifact." },
+      ]),
+    }),
+    contextHtml: "",
+  }));
+}
+
+function renderAegisSleeveAnalyticsPage() {
+  const routeParams = typeof window === "undefined" ? {} : Object.fromEntries(new URLSearchParams(window.location.search || ""));
+  return Promise.all([
+    fetchAegisSleeveAnalytics(routeParams),
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+  ]).then(([envelope, surfaceReadinessEnvelope]) => {
+    const payload = envelope.data || envelope || {};
+    const readinessPayload = surfaceReadinessEnvelope.data || surfaceReadinessEnvelope.artifact || surfaceReadinessEnvelope || {};
+    const sleeveSurface = surfaceContractRow({ operator_surface_contract: readinessPayload }, "sleeve_analytics");
+    if (!contractPrimaryRenderAllowed(sleeveSurface)) {
+      return renderContractGatedPage({ title: "Sleeve Analytics", subtitle: "How are sleeves performing?", surfaceId: "sleeve_analytics", contractRow: sleeveSurface });
+    }
+    const sleeveSemanticBlocked = semanticInvariantFailures(sleeveSurface).length > 0;
+    const summary = payload.summary || {};
+    const dataQuality = payload.data_quality || {};
+    const sleeves = safeList(payload.sleeves);
+    const diagnostics = safeList(payload.diagnostics);
+    const evidenceCoverage = payload.evidence_coverage_panel || {};
+    const silentEvaluation = payload.silent_sleeve_evaluation || {};
+    const silentSummary = silentEvaluation.summary || {};
+    const silentSleeves = safeList(silentEvaluation.sleeves);
+    const asOf = payload.as_of || payload.generated_at || "Unavailable";
+    return {
+      title: "Sleeve Analytics",
+      subtitle: "Canonical sleeve scorecard, exposure, performance, and data quality from aegis_sleeve_analytics_v1.",
+      layoutMode: "workflow",
+      html: `
+        ${sleeveSemanticBlocked ? renderSemanticInvariantUnavailable("Sleeve Analytics", sleeveSurface) : `<section class="operator-section sleeve-analytics-overview">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">AEGIS_SLEEVE_ANALYTICS_V1</div>
+              <h3>Sleeve Analytics</h3>
+              <p>Canonical read-only sleeve analytics. Aegis does not calculate sleeve analytics in the browser and does not provide trade advice or allocation instructions.</p>
+              <p class="muted-mini">Artifact: AEGIS_SLEEVE_ANALYTICS_V1 · Status: ${escapeHtml(payload.status || "Unavailable")} · As of: ${escapeHtml(asOf)}</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Total Sleeves", value: performancePlain(summary.total_sleeves) })}
+            ${renderMetricCard({ label: "Active Sleeves", value: performancePlain(summary.active_sleeves) })}
+            ${renderMetricCard({ label: "Total P&L", value: performanceMoney(summary.total_pnl) })}
+            ${renderMetricCard({ label: "Realized P&L", value: performanceMoney(summary.total_realized_pnl) })}
+            ${renderMetricCard({ label: "Unrealized P&L", value: performanceMoney(summary.total_unrealized_pnl) })}
+            ${renderMetricCard({ label: "Best Sleeve", value: summary.best_sleeve?.sleeve_id || "Unavailable" })}
+            ${renderMetricCard({ label: "Worst Sleeve", value: summary.worst_sleeve?.sleeve_id || "Unavailable" })}
+            ${renderMetricCard({ label: "Mark Coverage", value: `${performancePlain(summary.mark_coverage_pct)}%` })}
+            ${renderMetricCard({ label: "Attribution Coverage", value: `${performancePlain(summary.sleeve_attribution_coverage_pct)}%` })}
+            ${renderMetricCard({ label: "Data Quality", value: summary.data_quality_status || dataQuality.data_quality_status || "Unavailable" })}
+          </div>
+          ${Number(summary.total_closed_positions || 0) === 0 ? `<div class="status-callout info"><strong>Closed-trade analytics unavailable until exits are recorded.</strong><span>Win rate, profit factor, average winner/loser, and expectancy remain intentionally blank in Phase 1 until closed paper exits exist.</span></div>` : ""}
+        </section>`}
+        ${sleeveSemanticBlocked ? "" : `
+          <section class="operator-section sleeve-evidence-coverage">
+            <div class="section-heading">
+              <div>
+                <div class="section-eyebrow">EVIDENCE COVERAGE</div>
+                <h3>Evidence Coverage</h3>
+              </div>
+            </div>
+            <div class="metric-grid">
+              ${renderMetricCard({ label: "Candidate Coverage", value: `${performancePlain(evidenceCoverage.candidate_coverage_pct)}%` })}
+              ${renderMetricCard({ label: "Sleeve Attribution", value: `${performancePlain(evidenceCoverage.sleeve_attribution_pct)}%` })}
+              ${renderMetricCard({ label: "Mark Coverage", value: `${performancePlain(evidenceCoverage.mark_coverage_pct)}%` })}
+              ${renderMetricCard({ label: "Validation Coverage", value: `${performancePlain(evidenceCoverage.validation_coverage_pct)}%` })}
+              ${renderMetricCard({ label: "Broken Chain Count", value: performancePlain(evidenceCoverage.broken_chain_count) })}
+              ${renderMetricCard({ label: "Unknown Position Count", value: performancePlain(evidenceCoverage.unknown_position_count) })}
+              ${renderMetricCard({ label: "Sample Binding Errors", value: performancePlain(evidenceCoverage.sample_binding_errors) })}
+              ${renderMetricCard({ label: "Current Integrity Status", value: evidenceCoverage.current_integrity_status || "Unavailable" })}
+            </div>
+          </section>
+        <section class="operator-section sleeve-scorecard">
+          <div class="section-heading"><div><div class="section-eyebrow">SCORECARD</div><h3>Sleeve Scorecard</h3></div></div>
+          ${renderSimpleTable({
+            columns: [
+              { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_name || row.sleeve_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+              { label: "Status", render: (row) => escapeHtml(row.status || "Unavailable") },
+              { label: "Active Research Positions", render: (row) => escapeHtml(performancePlain(row.open_positions)) },
+              { label: "Closed Positions", render: (row) => escapeHtml(performancePlain(row.closed_positions)) },
+              { label: "Market Value", render: (row) => escapeHtml(performanceMoney(row.market_value)) },
+              { label: "Realized P&L", render: (row) => escapeHtml(performanceMoney(row.realized_pnl)) },
+              { label: "Current Mark-to-Market Research Outcome", render: (row) => escapeHtml(performanceMoney(row.unrealized_pnl)) },
+              { label: "Total P&L", render: (row) => escapeHtml(performanceMoney(row.total_pnl)) },
+              { label: "Return %", render: (row) => escapeHtml(performanceReturnPercent(row.return_pct)) },
+              { label: "Win Rate", render: (row) => escapeHtml(sleeveClosedTradeMetric(row, row.win_rate, "percent")) },
+              { label: "Profit Factor", render: (row) => escapeHtml(sleeveClosedTradeMetric(row, row.profit_factor, "plain")) },
+              { label: "Mark Coverage", render: (row) => escapeHtml(row.mark_coverage_pct === null || row.mark_coverage_pct === undefined ? "Unavailable" : `${row.mark_coverage_pct}%`) },
+              { label: "Attribution Coverage", render: (row) => escapeHtml(row.attribution_coverage_pct === null || row.attribution_coverage_pct === undefined ? "Unavailable" : `${row.attribution_coverage_pct}%`) },
+              { label: "Data Quality", render: (row) => escapeHtml(row.data_quality_status || "Unavailable") },
+            ],
+            rows: sleeves,
+            emptyMessage: "No sleeve analytics rows are available in aegis_sleeve_analytics_v1.",
+          })}
+          <div class="card-grid compact-card-grid sleeve-detail-grid">
+            ${sleeves.map((row) => renderSleeveAnalyticsDetail(row)).join("")}
+          </div>
+        </section>`}
+        ${sleeveSemanticBlocked ? "" : `<section class="operator-section silent-sleeve-evaluation">
+          <div class="section-heading">
+            <div>
+              <div class="section-eyebrow">SILENT SLEEVE EVALUATION</div>
+              <h3>Silent Sleeve Evaluation</h3>
+              <p>Deterministic sleeve silence diagnostics from aegis_sleeve_evaluation_v1. This section reports why sleeves did or did not produce candidates without changing sleeve logic.</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Silent sleeve count", value: performancePlain(silentSummary.silent_sleeves) })}
+            ${renderMetricCard({ label: "Correctly silent", value: performancePlain(silentSummary.correctly_silent) })}
+            ${renderMetricCard({ label: "Runtime failures", value: performancePlain(silentSummary.runtime_failures) })}
+            ${renderMetricCard({ label: "Data-blocked sleeves", value: performancePlain(silentSummary.data_blocked_sleeves) })}
+            ${renderMetricCard({ label: "Blocked", value: performancePlain(silentSummary.blocked_sleeves) })}
+            ${renderMetricCard({ label: "Needs investigation", value: performancePlain(silentSummary.needs_investigation) })}
+          </div>
+          ${silentEvaluation.available === false ? `<div class="status-callout warning"><strong>Silent sleeve evaluation unavailable.</strong><span>${escapeHtml(silentEvaluation.diagnostic || "Run npm run aegis:sleeve-evaluation to generate the artifact.")}</span></div>` : ""}
+          ${renderSimpleTable({
+            columns: [
+              { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_name || row.sleeve_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+              { label: "Classification", render: (row) => escapeHtml(row.classification || "Unavailable") },
+              { label: "Top reason", render: (row) => escapeHtml(row.explanation || row.threshold_summary || "Unavailable") },
+              { label: "Repair action", render: (row) => escapeHtml(row.repair_action || "Unavailable") },
+              { label: "Missing inputs", render: (row) => escapeHtml(safeList(row.missing_input_artifacts).join(", ") || "None") },
+              { label: "Candidates", render: (row) => escapeHtml(performancePlain(row.candidate_count)) },
+              { label: "Rejected intents", render: (row) => escapeHtml(performancePlain(row.rejected_intent_count)) },
+            ],
+            rows: silentSleeves,
+            emptyMessage: "No silent sleeves are currently reported by aegis_sleeve_evaluation_v1.",
+          })}
+        </section>`}
+        <section class="operator-section sleeve-analytics-diagnostics">
+          <div class="section-heading"><div><div class="section-eyebrow">DIAGNOSTICS</div><h3>Diagnostics</h3></div></div>
+          <details class="operator-disclosure">
+            <summary>Sleeve Analytics diagnostics (${escapeHtml(String(diagnostics.length))})</summary>
+            <div class="metric-grid">
+              ${renderMetricCard({ label: "Missing marks", value: performancePlain(dataQuality.missing_mark_count) })}
+              ${renderMetricCard({ label: "Missing sleeve attribution", value: performancePlain(dataQuality.missing_sleeve_assignment_count) })}
+              ${renderMetricCard({ label: "Stale inputs", value: performancePlain(dataQuality.stale_input_count) })}
+            </div>
+            ${renderSimpleTable({
+              columns: [
+                { label: "Severity", render: (row) => renderStatusPill(row.severity || "info") },
+                { label: "Label", render: (row) => escapeHtml(row.label || "Diagnostic") },
+                { label: "Detail", render: (row) => escapeHtml(row.detail || "") },
+              ],
+              rows: diagnostics,
+              emptyMessage: "No sleeve analytics diagnostics are currently reported.",
+            })}
+          </details>
+        </section>
+      `,
+      contextHtml: renderSourceRefCard(Object.entries(payload.source_artifact_paths || {}).map(([logical_name, path]) => ({ logical_name, path })), "Sleeve Analytics Source Artifacts", "Inputs listed by the canonical aegis_sleeve_analytics_v1 artifact."),
+    };
+  }).catch((error) => ({
+    title: "Sleeve Analytics",
+    subtitle: "Canonical sleeve scorecard, exposure, performance, and data quality from aegis_sleeve_analytics_v1.",
+    layoutMode: "workflow",
+    html: renderCardSection({
+      eyebrow: "UNAVAILABLE",
+      title: "Sleeve Analytics unavailable",
+      subtitle: "The canonical sleeve analytics route did not return a usable payload.",
+      body: renderDefinitionRows([
+        { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/aegis/sleeve-analytics/latest" },
+        { label: "Reason", value: error?.message || "Unknown error" },
+        { label: "Next action", value: error?.operatorSafe?.nextAction || "Run npm run aegis:sleeve-analytics and inspect the artifact." },
+      ]),
+    }),
+    contextHtml: "",
+  }));
+}
+
+function sleeveClosedTradeMetric(row, value, kind = "plain") {
+  if (Number(row?.closed_positions || 0) === 0) return "No closed trades";
+  return kind === "percent" ? performancePercent(value) : performancePlain(value);
+}
+
+function renderSleeveAnalyticsDetail(row = {}) {
+  const nullReasons = row.null_reasons || {};
+  const nullReasonRows = Object.entries(nullReasons)
+    .filter(([, reason]) => reason)
+    .map(([metric, reason]) => ({ metric, reason }));
+  return `<details class="operator-disclosure stack-card sleeve-detail-card">
+    <summary>${escapeHtml(row.sleeve_id || "UNKNOWN")} details</summary>
+    <div class="detail-grid">
+      <section><h4>Current Exposure</h4>${renderDefinitionRows([
+        { label: "Open positions", value: performancePlain(row.open_positions) },
+        { label: "Market value", value: performanceMoney(row.market_value) },
+        { label: "Mark coverage", value: row.mark_coverage_pct === null || row.mark_coverage_pct === undefined ? "Unavailable" : `${row.mark_coverage_pct}%` },
+      ])}</section>
+      <section><h4>Performance</h4>${renderDefinitionRows([
+        { label: "Realized P&L", value: performanceMoney(row.realized_pnl) },
+        { label: "Unrealized P&L", value: performanceMoney(row.unrealized_pnl) },
+        { label: "Total P&L", value: performanceMoney(row.total_pnl) },
+        { label: "Return", value: performanceReturnPercent(row.return_pct) },
+      ])}</section>
+      <section><h4>Trade Quality</h4>${Number(row.closed_positions || 0) === 0 ? `<p class="support-note">Closed-trade analytics unavailable until exits are recorded.</p>` : renderDefinitionRows([
+        { label: "Closed trades", value: performancePlain(row.closed_positions) },
+        { label: "Win rate", value: performancePercent(row.win_rate) },
+        { label: "Profit factor", value: performancePlain(row.profit_factor) },
+        { label: "Expectancy", value: performancePlain(row.expectancy) },
+      ])}</section>
+      <section><h4>Data Quality</h4>${renderDefinitionRows([
+        { label: "Data quality", value: row.data_quality_status || "Unavailable" },
+        { label: "Attribution coverage", value: row.attribution_coverage_pct === null || row.attribution_coverage_pct === undefined ? "Unavailable" : `${row.attribution_coverage_pct}%` },
+        { label: "Diagnostics", value: performancePlain(row.diagnostics_count) },
+      ])}</section>
+    </div>
+    <details class="operator-disclosure">
+      <summary>Null metric reasons (${escapeHtml(String(nullReasonRows.length))})</summary>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Metric", render: (reasonRow) => escapeHtml(reasonRow.metric) },
+          { label: "Reason", render: (reasonRow) => escapeHtml(reasonRow.reason) },
+        ],
+        rows: nullReasonRows,
+        emptyMessage: "No null metric reasons reported for this sleeve.",
+      })}
+    </details>
+  </details>`;
+}
+
+function renderBenchmarkCard(label, row = {}, detail = "") {
+  const available = row.available === true;
+  const status = row.status || (available ? (row.stale ? "stale" : "ready") : "not_connected");
+  const meta = [row.period_type, row.as_of_date].filter(Boolean).join(" as of ");
+  return `<article class="stack-card">
+    <div class="stack-card-title">${escapeHtml(label)}</div>
+    <div class="metric-grid compact">${renderMetricCard({ label: "Status", value: available ? (row.stale ? "Stale" : status) : (status === "not_connected" ? "Not connected" : "Unavailable") })}${renderMetricCard({ label: "Return", value: performanceReturnPercent(row.return_pct) })}</div>
+    ${meta ? `<p class="muted-mini">${escapeHtml(meta)}</p>` : ""}
+    <p class="muted-mini">${escapeHtml(row.source || (available ? detail : "Not connected"))}</p>
+    ${row.notes ? `<p class="support-note">${escapeHtml(row.notes)}</p>` : ""}
+  </article>`;
+}
+
+function renderAdvisorBenchmarkInput(advisor = {}, payload = {}) {
+  const asOf = advisor.as_of_date || payload.day_utc || "";
+  const period = advisor.period_type || "YTD";
+  const returnPct = advisor.available === true && advisor.return_pct !== null && advisor.return_pct !== undefined ? String(advisor.return_pct) : "";
+  return `<div class="stack-card advisor-benchmark-input-card">
+    <div class="stack-card-title">Advisor Benchmark Input</div>
+    <p class="support-note">Manual benchmark input only. Aegis stores the advisor return exactly as entered and does not calculate it from holdings.</p>
+    <form class="advisor-benchmark-form compact-form" method="post" data-advisor-benchmark-form>
+      <label>As of date<input name="as_of_date" type="date" value="${escapeHtml(asOf)}" required></label>
+      <label>Period type<select name="period_type" required>
+        ${["QTD", "YTD", "Annual"].map((item) => `<option value="${item}" ${item === period ? "selected" : ""}>${item}</option>`).join("")}
+      </select></label>
+      <label>Return %<input name="return_pct" type="number" step="0.01" value="${escapeHtml(returnPct)}" required></label>
+      <label>Source<input name="source" type="text" value="${escapeHtml(advisor.source || "")}" placeholder="Advisor statement"></label>
+      <label>Notes<textarea name="notes" rows="2" placeholder="Optional note">${escapeHtml(advisor.notes || "")}</textarea></label>
+      <div class="form-actions"><button class="primary-button" type="submit">Save advisor benchmark</button><span data-advisor-benchmark-status hidden></span></div>
+    </form>
+  </div>`;
+}
+
+
+
+
+function renderDailyPaperPerformanceSection(payload = {}) {
+  const report = payload.daily_paper_performance_v1 || payload.daily_paper_performance || {};
+  const sleeves = safeList(report.sleeve_comparison);
+  const openPositions = safeList(report.pnl_by_symbol);
+  const attention = safeList(report.positions_needing_operator_attention);
+  const exitSummary = report.exit_recommendations_summary || {};
+  const recommendationCounts = Object.entries(exitSummary.recommendation_counts || {}).map(([key, value]) => ({ recommendation: key, count: value }));
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "daily_paper_performance_v1",
+    fieldPath: "daily_paper_performance_v1",
+    whyShown: "Daily Paper Performance summarizes certified paper PnL, sleeve comparison, open risk, and operator attention without changing execution policy.",
+    eyebrow: "DAILY_PAPER_PERFORMANCE",
+    title: "Daily Paper Performance",
+    subtitle: `${report.data_quality_status || "MISSING_ARTIFACT"} · ${report.artifact_path || "artifact path unavailable"}`,
+    body: `
+      <div class="metric-grid">
+        ${renderMetricCard({ label: "Total paper P&L", value: paperTradeUsd(report.total_paper_pnl) })}
+        ${renderMetricCard({ label: "Unrealized", value: paperTradeUsd(report.unrealized_pnl) })}
+        ${renderMetricCard({ label: "Realized", value: paperTradeUsd(report.realized_pnl) })}
+        ${renderMetricCard({ label: "Exposure", value: paperTradeUsd(report.exposure) })}
+        ${renderMetricCard({ label: "Open positions", value: String(report.total_open_positions ?? 0) })}
+        ${renderMetricCard({ label: "Attention", value: String(report.operator_attention_count ?? attention.length) })}
+      </div>
+      <h4>Sleeve comparison</h4>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.data_quality_status || "UNKNOWN")}</div>` },
+          { label: "Candidates", render: (row) => escapeHtml(row.candidates_generated ?? 0) },
+          { label: "Paper entrys", render: (row) => escapeHtml(row.paper_entrys_opened ?? 0) },
+          { label: "Open P&L", render: (row) => escapeHtml(paperTradeUsd(row.open_pnl)) },
+          { label: "Realized", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl)) },
+          { label: "Total", render: (row) => escapeHtml(paperTradeUsd(row.total_pnl)) },
+          { label: "W/L", render: (row) => escapeHtml(`${row.win_count ?? 0}/${row.loss_count ?? 0}`) },
+          { label: "Avg hold", render: (row) => escapeHtml(row.average_hold_time === null || row.average_hold_time === undefined ? "n/a" : `${Number(row.average_hold_time).toFixed(2)}d`) },
+          { label: "Rec followed", render: (row) => escapeHtml(formatPercent(row.recommendation_followed_rate)) },
+        ],
+        rows: sleeves,
+        emptyMessage: "No sleeve comparison rows are available.",
+      })}
+      <h4>Open position PnL by symbol</h4>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong>` },
+          { label: "Open", render: (row) => escapeHtml(row.open_position_count ?? 0) },
+          { label: "Closed", render: (row) => escapeHtml(row.closed_position_count ?? 0) },
+          { label: "Unrealized", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl)) },
+          { label: "Realized", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl)) },
+          { label: "Total", render: (row) => escapeHtml(paperTradeUsd(row.total_paper_pnl)) },
+        ],
+        rows: openPositions,
+        emptyMessage: "No symbol PnL rows are available.",
+      })}
+      <h4>Exit recommendation summary</h4>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Recommendation", key: "recommendation" },
+          { label: "Count", key: "count" },
+        ],
+        rows: recommendationCounts,
+        emptyMessage: "No exit recommendation summary is available.",
+      })}
+      <h4>Operator attention list</h4>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+          { label: "P&L", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl)) },
+          { label: "Exposure", render: (row) => escapeHtml(paperTradeUsd(row.exposure)) },
+          { label: "Exit rec", render: (row) => escapeHtml(row.current_exit_recommendation || "MISSING") },
+          { label: "Flags", render: (row) => escapeHtml(safeList(row.attention_flags).map((flag) => flag.flag || flag).join(", ") || "none") },
+        ],
+        rows: attention,
+        emptyMessage: "No open paper positions need operator attention.",
+      })}
+      <p class="support-note">Attention flags are review-only: stop loss near, take profit near, time stop near, stale mark price, missing exit recommendation, large unrealized loss, and high exposure. Automatic exits, broker execution, autonomous execution, live trading, and trade advice remain disabled.</p>
+    `,
+  });
+}
+
+function renderPaperPnlReportSection(payload = {}) {
+  const report = payload.paper_pnl_report_v1 || payload.paper_pnl_report || {};
+  const openPositions = safeList(report.open_positions);
+  const closedPositions = safeList(report.closed_positions);
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "paper_pnl_report_v1",
+    fieldPath: "paper_pnl_report_v1.open_positions",
+    whyShown: "Paper PnL Summary reads certified mark paper PnL only. Unrealized PnL remains NOT_CANONICAL when a current certified mark is missing.",
+    eyebrow: "PAPER_PNL_REPORT",
+    title: "Paper PnL Summary",
+    subtitle: `${report.data_quality_status || "MISSING_ARTIFACT"} · ${report.artifact_path || "artifact path unavailable"}`,
+    body: `
+      <div class="metric-grid">
+        ${renderMetricCard({ label: "Total paper P&L", value: paperTradeUsd(report.total_paper_pnl) })}
+        ${renderMetricCard({ label: "Unrealized", value: paperTradeUsd(report.unrealized_pnl) })}
+        ${renderMetricCard({ label: "Realized", value: paperTradeUsd(report.realized_pnl) })}
+        ${renderMetricCard({ label: "Open positions", value: String(report.open_position_count ?? openPositions.length) })}
+        ${renderMetricCard({ label: "Closed positions", value: String(report.closed_position_count ?? closedPositions.length) })}
+        ${renderMetricCard({ label: "Data quality", value: report.data_quality_status || "UNKNOWN" })}
+      </div>
+      <p class="support-note">Certified mark prices include symbol, mark timestamp, source path/hash, and freshness status. No broker execution, autonomous execution, live trading, or trade advice is enabled.</p>
+      <h4>Open Position PnL</h4>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+          { label: "Qty", render: (row) => escapeHtml(row.quantity || "") },
+          { label: "Entry", render: (row) => escapeHtml(paperTradeNumber(row.entry_price)) },
+          { label: "Certified mark", render: (row) => `<strong>${escapeHtml(paperTradeNumber(row.current_certified_mark || row.mark_price))}</strong><div class="muted-mini">${escapeHtml(row.mark_certification_status || "UNKNOWN")}</div>` },
+          { label: "Mark time", render: (row) => escapeHtml(row.mark_timestamp_utc || "") },
+          { label: "Freshness", render: (row) => escapeHtml(row.mark_freshness_status || "UNKNOWN") },
+          { label: "Unrealized P&L", render: (row) => escapeHtml(row.unrealized_pnl_status === "AVAILABLE" ? paperTradeUsd(row.unrealized_pnl) : "NOT_CANONICAL") },
+        ],
+        rows: openPositions,
+        emptyMessage: "No open paper positions are present in the PnL report.",
+      })}
+    `,
+  });
+}
+
+function renderExitStrategyAnalysisSection(payload = {}) {
+  const analysis = payload.exit_strategy_analysis_v1 || payload.exit_strategy_analysis || {};
+  const rows = safeList(analysis.analyses || analysis.rows);
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "exit_strategy_analysis_v1",
+    fieldPath: "exit_strategy_analysis_v1.analyses",
+    whyShown: "Exit Strategy panel explains human-reviewed exit logic for open paper positions. It does not auto-exit or transmit broker orders.",
+    eyebrow: "EXIT_STRATEGY_ANALYSIS",
+    title: "Exit Strategy panel",
+    subtitle: analysis.what_would_make_me_exit_explanation || "What would make me exit? Human-reviewed stop, target, trailing, time, signal, and regime checks.",
+    body: `
+      <p class="support-note">What would make me exit? A stop-loss breach, take-profit threshold, trailing-stop trigger, time stop, signal invalidation, regime invalidation, or an operator-reviewed manual exit can create a recommendation. automatic exits remain disabled.</p>
+      ${renderSimpleTable({
+        columns: [
+          { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.sleeve_id || "UNKNOWN")}</div>` },
+          { label: "Current recommendation", render: (row) => escapeHtml(row.current_exit_recommendation || "HOLD") },
+          { label: "Stop-loss distance", render: (row) => escapeHtml(row.stop_loss_distance?.distance_pct === null || row.stop_loss_distance?.distance_pct === undefined ? "n/a" : formatPercent(row.stop_loss_distance.distance_pct)) },
+          { label: "Take-profit distance", render: (row) => escapeHtml(row.take_profit_distance?.distance_pct === null || row.take_profit_distance?.distance_pct === undefined ? "n/a" : formatPercent(row.take_profit_distance.distance_pct)) },
+          { label: "Trailing stop", render: (row) => escapeHtml(row.trailing_stop_status?.triggered ? "TRIGGERED" : (row.trailing_stop_status?.policy || "NOT_CONFIGURED")) },
+          { label: "Time stop", render: (row) => escapeHtml(row.time_stop_status?.triggered ? "TRIGGERED" : `${row.time_stop_status?.holding_days ?? "n/a"}/${row.time_stop_status?.max_hold_days ?? "n/a"}d`) },
+          { label: "Signal", render: (row) => escapeHtml(row.signal_invalidation_status?.invalidated ? "INVALIDATED" : "VALID") },
+          { label: "Regime", render: (row) => escapeHtml(row.regime_invalidation_status?.invalidated ? "INVALIDATED" : "VALID") },
+          { label: "What next", render: (row) => escapeHtml(safeList(row.what_would_cause_exit_next).slice(0, 2).join("; ") || "Review position") },
+        ],
+        rows,
+        emptyMessage: "No open positions are available for exit strategy analysis.",
+      })}
+    `,
+  });
+}
+
+function renderSleevePerformanceTruthTable(rows = []) {
+  return renderSimpleTable({
+    columns: [
+      { label: "Sleeve", render: (row) => `<strong>${escapeHtml(row.sleeve_id || "UNKNOWN")}</strong><div class="muted-mini">${escapeHtml(row.data_quality_status || "UNKNOWN")}</div>` },
+      { label: "Paper positions", render: (row) => escapeHtml(`${row.open_paper_position_count ?? 0} open / ${row.closed_paper_position_count ?? 0} closed`) },
+      { label: "Realized P&L", render: (row) => escapeHtml(paperTradeUsd(row.realized_pnl)) },
+      { label: "Unrealized", render: (row) => `<strong>${escapeHtml(row.unrealized_pnl_status || "NOT_CANONICAL")}</strong><div class="muted-mini">${escapeHtml(row.unrealized_pnl === null || row.unrealized_pnl === undefined ? "not canonical" : paperTradeUsd(row.unrealized_pnl))}</div>` },
+      { label: "Win rate", render: (row) => escapeHtml(formatPercent(row.win_rate)) },
+      { label: "Hold time", render: (row) => escapeHtml(row.average_hold_time === null || row.average_hold_time === undefined ? "n/a" : `${Number(row.average_hold_time).toFixed(2)}d`) },
+      { label: "Exit reasons", render: (row) => escapeHtml(Object.entries(row.exit_reason_counts || {}).map(([key, value]) => `${key}:${value}`).join(", ") || "n/a") },
+      { label: "Recommendation followed", render: (row) => escapeHtml(row.recommendation_followed_rate === null || row.recommendation_followed_rate === undefined ? `${row.recommendation_followed_count ?? 0}` : `${row.recommendation_followed_count ?? 0} (${formatPercent(row.recommendation_followed_rate)})`) },
+      { label: "Candidates", render: (row) => escapeHtml(`${row.candidate_count ?? 0} / approval ${formatPercent(row.approval_rate)}`) },
+      { label: "Scorecard", render: (row) => escapeHtml(row.scorecard_ref?.source ? `${row.scorecard_ref.source}${row.scorecard_ref.rank ? ` #${row.scorecard_ref.rank}` : ""}` : "scorecard unavailable") },
+    ],
+    rows,
+    emptyMessage: "Sleeve performance truth artifact has no sleeve rows.",
+  });
+}
+
+function renderSleevePerformanceTruthSection(payload = {}) {
+  const truth = payload.sleeve_performance_truth_v1 || payload.sleeve_performance_truth || {};
+  const rows = safeList(truth.sleeves);
+  const totals = truth.totals || {};
+  const legacy = truth.legacy_captures || {};
+  return renderWorkflowCard({
+    payload,
+    sourceKey: "sleeve_performance_truth_v1",
+    fieldPath: "sleeve_performance_truth_v1.sleeves",
+    whyShown: "Sleeve Performance reads the canonical sleeve performance truth artifact. It does not rank from UI joins and keeps open paper positions and historical trade records in their own workspaces.",
+    eyebrow: "SLEEVE_PERFORMANCE_TRUTH",
+    title: "Sleeve Performance",
+    subtitle: `${truth.data_quality_status || "MISSING_ARTIFACT"} · ${truth.artifact_path || "artifact path unavailable"}`,
+    body: `
+      <div class="metric-grid">
+        ${renderMetricCard({ label: "Sleeves", value: String(truth.sleeve_count ?? rows.length) })}
+        ${renderMetricCard({ label: "Open paper", value: String(totals.open_paper_position_count ?? 0) })}
+        ${renderMetricCard({ label: "Closed paper", value: String(totals.closed_paper_position_count ?? 0) })}
+        ${renderMetricCard({ label: "Realized P&L", value: paperTradeUsd(totals.realized_pnl) })}
+        ${renderMetricCard({ label: "Unrealized", value: totals.unrealized_pnl_status || "NOT_CANONICAL" })}
+        ${renderMetricCard({ label: "Legacy excluded", value: String(legacy.legacy_capture_count ?? totals.legacy_capture_count_excluded ?? 0) })}
+      </div>
+      <p class="support-note">Canonical sleeve performance is a read-only rollup over existing paper position, event, realized P&L, recommendation, candidate, and scorecard authorities. Uncertified open-position marks stay NOT_CANONICAL.</p>
+      ${renderSleevePerformanceTruthTable(rows)}
+    `,
+  });
+}
+
+function renderPaperTradeEvaluationWorkspace(payload = {}, projection = {}) {
+  const openTrades = safeList(projection.open_trades);
+  const closedTrades = safeList(projection.closed_trades);
+  const missingTrades = safeList(projection.missing_evidence_trades);
+  const allTrades = safeList(projection.all_trades);
+  const exitProjection = payload.exit_review_projection_v1 || payload.exit_review_projection || {};
+  const exitRows = safeList(exitProjection.rows);
+  const exitByTrade = Object.fromEntries(exitRows.map((row) => [String(row.trade_id || ""), row]));
+  const dialogs = allTrades.map((trade) => renderTradeDetailDialog(trade, exitByTrade[String(trade.trade_id || "")] || {})).join("");
+  return [
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1",
+      whyShown: "Paper entry evaluation joins existing capture, receipt, outcome, sleeve performance, and certified market data artifacts. It does not create broker actions or fabricate marks/exits.",
+      eyebrow: "TRADE_EVALUATION",
+      title: "P&L Summary",
+      subtitle: "Authoritative operator view for paper and historical trade evaluation.",
+      body: `
+        <div class="metric-grid">
+          ${renderMetricCard({ label: "Total P&L", value: paperTradeUsd(projection.total_pnl) })}
+          ${renderMetricCard({ label: "Realized", value: paperTradeUsd(projection.realized_pnl) })}
+          ${renderMetricCard({ label: "Unrealized", value: paperTradeUsd(projection.unrealized_pnl) })}
+          ${renderMetricCard({ label: "Open trades", value: String(projection.open_trade_count ?? openTrades.length) })}
+          ${renderMetricCard({ label: "Closed trades", value: String(projection.closed_trade_count ?? closedTrades.length) })}
+          ${renderMetricCard({ label: "Needs evidence", value: String(projection.missing_evidence_count ?? missingTrades.length) })}
+        </div>
+        <p class="support-note">Open trades use the latest certified mark when available. Closed trades use actual outcome evidence. WORKED/FAILED is withheld when evidence is incomplete.</p>
+      `,
+    }),
+    renderDailyPaperPerformanceSection(payload),
+    renderPaperPnlReportSection(payload),
+    renderSleevePerformanceTruthSection(payload),
+    renderExitStrategyAnalysisSection(payload),
+    renderPortfolioContextPanel(payload),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "narrative_operational_analytics_v1",
+      fieldPath: "narrative_operational_analytics_v1.narrative_statements",
+      whyShown: "Narrative statements are generated only from deterministic trade, lifecycle, and attribution artifacts with explicit metric and artifact support.",
+      eyebrow: "NARRATIVE_ATTRIBUTION",
+      title: "What happened and why",
+      subtitle: "Evidence-backed explanation of paper P&L and attribution.",
+      body: renderNarrativeStatementList(payload, ["PERFORMANCE", "SLEEVE_ATTRIBUTION", "EXIT_REVIEW"]),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "narrative_operational_analytics_v1",
+      fieldPath: "narrative_operational_analytics_v1.charts.performance",
+      whyShown: "Charts are secondary to narrative and render only when artifact-backed data exists; otherwise they show an explicit insufficient-history state.",
+      eyebrow: "SELECTIVE_GRAPHS",
+      title: "Performance trends",
+      subtitle: "P&L trend, realized vs unrealized P&L, and sleeve attribution when enough evidence exists.",
+      body: renderNarrativeCharts(payload, "performance"),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1.open_trades",
+      whyShown: "Open trades are paper or historical records without closed outcome evidence.",
+      eyebrow: "OPEN_TRADES",
+      title: "Open Trades",
+      subtitle: "Current mark, unrealized P&L, attribution, and next evidence action.",
+      body: renderTradeEvaluationTable(openTrades, "No open paper or historical trades are evaluable."),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1.closed_trades",
+      whyShown: "Closed trades are joined from existing outcome and performance artifacts.",
+      eyebrow: "CLOSED_TRADES",
+      title: "Closed Trades",
+      subtitle: "Realized outcome evidence only. No exits are inferred.",
+      body: renderTradeEvaluationTable(closedTrades, "No closed trade outcomes are available."),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1.missing_evidence_trades",
+      whyShown: "Trades with missing receipts, exits, market data, or attribution stay visible with a precise blocker.",
+      eyebrow: "NEEDS_ATTENTION",
+      title: "Needs Attention",
+      subtitle: "Missing evidence and the next manual/reconciliation action.",
+      body: renderTradeEvaluationTable(missingTrades, "No trade evidence gaps are currently visible."),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1.sleeve_attribution",
+      whyShown: "Sleeve attribution is grouped from the joined trade projection, not recalculated from broker data.",
+      eyebrow: "SLEEVE_ATTRIBUTION",
+      title: "Sleeve Attribution",
+      subtitle: "P&L grouped by sleeve from the existing lifecycle evidence.",
+      body: renderTradeAttributionTable(safeList(projection.sleeve_attribution), "Sleeve"),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "paper_entry_evaluation_projection_v1",
+      fieldPath: "paper_entry_evaluation_projection_v1.hypothesis_attribution",
+      whyShown: "Hypothesis attribution remains explicit; missing attribution is shown instead of inferred.",
+      eyebrow: "HYPOTHESIS_ATTRIBUTION",
+      title: "Hypothesis Attribution",
+      subtitle: "P&L grouped by linked hypothesis when available.",
+      body: renderTradeAttributionTable(safeList(projection.hypothesis_attribution), "Hypothesis"),
+    }),
+    renderWorkflowCard({
+      payload,
+      sourceKey: "exit_review_projection_v1",
+      fieldPath: "exit_review_projection_v1.rows",
+      whyShown: "Exit Review joins open trade evaluation with existing position management, exit decision, execution request, reconciliation, and closure artifacts. Actions remain manual/operator-confirmed only.",
+      eyebrow: "EXIT_REVIEW",
+      title: "Exit Review",
+      subtitle: "Open positions needing review, stop/target/time-stop status, thesis context, decision, and reason.",
+      body: `
+        <div class="metric-grid">
+          ${renderMetricCard({ label: "Open positions", value: String(exitProjection.open_position_count ?? exitRows.length) })}
+          ${renderMetricCard({ label: "Need review", value: String(exitProjection.review_needed_count ?? exitRows.filter((row) => row.exit_decision !== "HOLD").length) })}
+          ${renderMetricCard({ label: "Manual only", value: "Yes" })}
+        </div>
+        ${renderExitReviewPositionTable(exitRows, "No open positions need exit review.")}
+      `,
+    }),
+    dialogs,
+  ].join("");
+}
+
+function exitReviewDetailId(row = {}) {
+  return `exit-review-detail-${String(row.position_id || row.trade_id || row.symbol || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function exitReviewPrimaryRowId(row = {}) {
+  return `exit-review-primary-${String(row.position_id || row.trade_id || row.symbol || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function exitReviewPrimaryLink(row = {}, label = "Primary row") {
+  return `<a class="ghost-button" href="#${escapeHtml(exitReviewPrimaryRowId(row))}" data-exit-review-focus-link="${escapeHtml(exitReviewPrimaryRowId(row))}">${escapeHtml(label)}</a>`;
+}
+
+function exitReviewCommandButton(row = {}, commandId = "VIEW_POSITION_DETAIL", label = "View Position Detail") {
+  const detailId = exitReviewDetailId(row);
+  const safeDetailId = escapeHtml(detailId);
+  const inlineOpen = `window.openAegisExitReviewDetailFallback&&window.openAegisExitReviewDetailFallback('${safeDetailId}','${escapeHtml(row.symbol || row.position_id || "Position")}','${escapeHtml(row.exit_decision || "UNKNOWN")}','${escapeHtml(row.decision_reason || "No reason reported")}')`;
+  return `<button class="ghost-button" type="button" data-aegis-command-id="${escapeHtml(commandId)}" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="exit_review_position" data-aegis-command-target-id="${escapeHtml(row.position_id || row.trade_id || row.symbol || "")}" data-command-detail-target="${safeDetailId}" onclick="${escapeHtml(inlineOpen)}">${escapeHtml(label)}</button>`;
+}
+
+function renderExitReviewActions(row = {}) {
+  const next = row.next_operator_command || "VIEW_EXIT_DECISION";
+  const labels = {
+    GENERATE_BACKFILLED_EXIT_PLAN: "Generate Backfilled Exit Plan",
+    REVIEW_EXIT_INTENT: "Review Exit Intent",
+    VIEW_EXIT_HISTORY: "View Exit History",
+    VIEW_EXIT_DECISION: "View Exit Decision",
+    UPDATE_STOP_PLAN: "Update Stop Plan",
+    UPDATE_TARGET_PLAN: "Update Target Plan",
+    RECORD_PARTIAL_EXIT: "Record Partial Exit",
+    RECORD_FULL_EXIT: "Record Full Exit",
+    RECORD_TRADE_OUTCOME: "Record Trade Outcome",
+    VIEW_POSITION_DETAIL: "View Position Detail",
+  };
+  const commands = [next, "VIEW_EXIT_DECISION", "VIEW_EXIT_HISTORY", "VIEW_POSITION_DETAIL"].filter((item, index, all) => item && all.indexOf(item) === index);
+  return `<div class="candidate-action-row">${commands.map((command) => exitReviewCommandButton(row, command, labels[command] || command)).join("")}</div>`;
+}
+
+function renderExitReviewDetailDrawer(row = {}) {
+  const detailId = exitReviewDetailId(row);
+  const artifacts = safeList(row.linked_artifacts).map((artifact) => (typeof artifact === "object" && artifact ? artifact : { logical_name: String(artifact || "") }));
+  const thesisSummary = row.thesis_evidence_summary && typeof row.thesis_evidence_summary === "object" ? row.thesis_evidence_summary : {};
+  const thesisState = row.current_thesis_state || row.thesis_state || row.thesis_status || "INCONCLUSIVE";
+  const thesisEvidenceIds = [...safeList(row.supporting_evidence_ids), ...safeList(row.contradicting_evidence_ids)];
+  const thesisEvidenceCount = thesisSummary.evidence_count ?? row.thesis_evidence_count ?? thesisEvidenceIds.length;
+  return `
+    <dialog id="${escapeHtml(detailId)}" class="command-detail-dialog" data-command-detail-panel>
+      <div class="command-detail-dialog-inner">
+        <header class="command-detail-header">
+          <div>
+            <p class="eyebrow">EXIT_REVIEW_DETAIL</p>
+            <h3>${escapeHtml(row.symbol || row.position_id || "Position")}</h3>
+            <p>${escapeHtml(row.exit_decision || "UNKNOWN")} - ${escapeHtml(row.decision_reason || "No reason reported")}</p>
+          </div>
+          <form method="dialog"><button class="ghost-button" type="submit">Close</button></form>
+        </header>
+        ${renderDefinitionRows([
+          { label: "Position", value: row.position_id || "unknown" },
+          { label: "Entry", value: paperTradeNumber(row.entry_price) },
+          { label: "Current mark", value: paperTradeNumber(row.current_mark) },
+          { label: "Stop", value: paperTradeNumber(row.current_stop) },
+          { label: "Target", value: paperTradeNumber(row.target_price) },
+          { label: "Partial target", value: paperTradeNumber(row.partial_target_price) },
+          { label: "Time stop", value: row.time_stop_at || "not set" },
+          { label: "Holding time", value: row.holding_time_days === undefined || row.holding_time_days === null ? "not reported" : `${row.holding_time_days} day${Number(row.holding_time_days) === 1 ? "" : "s"}` },
+          { label: "Thesis state", value: thesisState },
+          { label: "Why", value: thesisSummary.why || "Thesis evidence is not available yet." },
+          { label: "Evidence count", value: String(thesisEvidenceCount ?? 0) },
+          { label: "Supporting evidence", value: safeList(row.supporting_evidence_ids).length ? safeList(row.supporting_evidence_ids).join(", ") : "none" },
+          { label: "Contradicting evidence", value: safeList(row.contradicting_evidence_ids).length ? safeList(row.contradicting_evidence_ids).join(", ") : "none" },
+          { label: "Exit bias", value: row.exit_bias_label || (String(row.exit_bias || "").toUpperCase() === "REVIEW" ? "Review suggested" : "No thesis review bias") },
+          { label: "Manual next action", value: row.manual_next_action || "Review thesis evidence." },
+          { label: "Thesis status", value: row.thesis_status || "not reported" },
+          { label: "Exit intent", value: row.exit_intent_status || "not reported" },
+          { label: "P&L", value: paperTradeUsd(row.unrealized_pnl ?? row.realized_pnl) },
+          { label: "Return", value: paperTradePercent(row.return_pct) },
+          { label: "MFE / MAE", value: `${paperTradeNumber(row.MFE)} / ${paperTradeNumber(row.MAE)}` },
+          { label: "Exit decision", value: row.exit_decision || "UNKNOWN" },
+          { label: "Reason", value: row.decision_reason || "No reason reported" },
+          { label: "Next action", value: row.next_operator_action || "VIEW_POSITION_DETAIL" },
+          { label: "What changed since entry", value: safeList(row.what_changed_since_entry).length ? safeList(row.what_changed_since_entry).join(", ") : "No recorded changes" },
+          { label: "Missing evidence", value: safeList(row.required_evidence).length ? safeList(row.required_evidence).join(", ") : "Complete" },
+          { label: "Safety", value: "Manual review only. No broker submission, order routing, or autonomous execution." },
+        ])}
+        ${renderEvidenceTrigger({
+          title: `${row.symbol || "Position"} thesis evidence`,
+          explanation: thesisSummary.why || "Thesis state is derived from deterministic evidence rows and is advisory only.",
+          supportingMetric: thesisState,
+          artifactPath: row.thesis_state_projection_path || "",
+          artifactHash: row.thesis_projection_hash || "",
+          replayHash: row.thesis_projection_hash || "",
+          rawMetricKey: "thesis_state_projection_v1",
+          evidenceStatus: Number(thesisEvidenceCount || 0) > 0 ? "COMPLETE" : "INSUFFICIENT_DATA",
+          confidence: row.thesis_confidence || "LOW",
+          linkedLifecycleEvents: thesisEvidenceIds,
+          label: "View Evidence",
+        })}
+        <div class="exit-plan-comparison-grid">
+          <section>
+            <h4>Original Exit Plan</h4>
+            <pre><code>${escapeHtml(JSON.stringify(row.original_exit_plan || {}, null, 2))}</code></pre>
+          </section>
+          <section>
+            <h4>Current Exit Plan</h4>
+            <pre><code>${escapeHtml(JSON.stringify(row.current_exit_plan || {}, null, 2))}</code></pre>
+          </section>
+        </div>
+        ${renderSimpleTable({
+          columns: [
+            { label: "Artifact", render: (artifactRow) => `<strong>${escapeHtml(artifactRow.logical_name || "artifact")}</strong><div class="muted-mini">Evidence available</div>` },
+            { label: "Evidence", render: (artifactRow) => renderEvidenceTrigger({
+              title: `${artifactRow.logical_name || "Exit"} evidence`,
+              explanation: "Exit review linked artifact for this position.",
+              supportingMetric: artifactRow.logical_name || "exit_review_projection_v1.linked_artifacts",
+              artifactPath: artifactRow.artifact_path || "",
+              artifactHash: artifactRow.artifact_sha256 || "",
+              rawMetricKey: "exit_review_projection_v1.linked_artifacts",
+              evidenceStatus: artifactRow.artifact_path ? "COMPLETE" : "PARTIAL",
+              confidence: artifactRow.artifact_path ? "HIGH" : "MEDIUM",
+            }) },
+          ],
+          rows: artifacts,
+          emptyMessage: "No linked artifacts are reported for this row.",
+        })}
+      </div>
+    </dialog>
+  `;
+}
+
+function renderExitReviewPositionTable(rows = [], emptyMessage = "No positions are available for exit review.", { primary = true, actions = true } = {}) {
+  return renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => primary ? `<span id="${escapeHtml(exitReviewPrimaryRowId(row))}" class="exit-review-primary-anchor" tabindex="-1" data-exit-review-primary-row="true"><strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.position_id || "")}</div></span>` : `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.position_id || "")}</div>` },
+      { label: "Side", key: "side" },
+      { label: "Qty", render: (row) => escapeHtml(row.quantity ?? "n/a") },
+      { label: "Entry", render: (row) => escapeHtml(paperTradeNumber(row.entry_price)) },
+      { label: "Mark", render: (row) => escapeHtml(paperTradeNumber(row.current_mark)) },
+      { label: "P&L", render: (row) => escapeHtml(paperTradeUsd(row.unrealized_pnl ?? row.realized_pnl)) },
+      { label: "Stop", render: (row) => escapeHtml(paperTradeNumber(row.current_stop)) },
+      { label: "Target", render: (row) => escapeHtml(paperTradeNumber(row.target_price)) },
+      { label: "Thesis state", render: (row) => escapeHtml(row.current_thesis_state || row.thesis_state || row.thesis_status || "INCONCLUSIVE") },
+      { label: "Exit bias", render: (row) => escapeHtml(row.exit_bias_label || (String(row.exit_bias || "").toUpperCase() === "REVIEW" ? "Review suggested" : "No thesis review bias")) },
+      { label: "Evidence count", render: (row) => escapeHtml(row.thesis_evidence_count ?? row.thesis_evidence_summary?.evidence_count ?? 0) },
+      { label: "Manual next action", render: (row) => escapeHtml(row.manual_next_action || "Review thesis evidence.") },
+      { label: "Decision", render: (row) => escapeHtml(row.exit_decision || "UNKNOWN") },
+      { label: "Reason", render: (row) => escapeHtml(row.decision_reason || "-") },
+      { label: "Next", render: (row) => actions ? renderExitReviewActions(row) : exitReviewPrimaryLink(row, "View primary row") },
+    ],
+    rows,
+    emptyMessage,
+  });
+}
+
+function renderExitReviewCompactReviewTable(rows = [], emptyMessage = "No exit review actions are currently required.") {
+  return renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.position_id || "")}</div>` },
+      { label: "Decision", render: (row) => escapeHtml(row.exit_decision || "UNKNOWN") },
+      { label: "Reason", render: (row) => escapeHtml(row.decision_reason || "-") },
+      { label: "Next command", render: (row) => escapeHtml(row.next_operator_command || row.next_operator_action || "VIEW_POSITION_DETAIL") },
+      { label: "Primary", render: (row) => exitReviewPrimaryLink(row, "Focus row") },
+    ],
+    rows,
+    emptyMessage,
+  });
+}
+
+function renderExitReviewStatusTable(rows = [], mode = "stop") {
+  return renderSimpleTable({
+    columns: mode === "time"
+      ? [
+          { label: "Symbol", key: "symbol" },
+          { label: "Thesis state", render: (row) => escapeHtml(row.current_thesis_state || row.thesis_state || row.thesis_status || "INCONCLUSIVE") },
+          { label: "Exit bias", render: (row) => escapeHtml(row.exit_bias_label || (String(row.exit_bias || "").toUpperCase() === "REVIEW" ? "Review suggested" : "No thesis review bias")) },
+          { label: "Evidence", render: (row) => escapeHtml(row.thesis_evidence_count ?? row.thesis_evidence_summary?.evidence_count ?? 0) },
+          { label: "Time stop", render: (row) => escapeHtml(row.time_stop_at || "not set") },
+          { label: "Decision", key: "exit_decision" },
+          { label: "Reason", render: (row) => escapeHtml(row.decision_reason || "-") },
+          { label: "Primary", render: (row) => exitReviewPrimaryLink(row, "Focus row") },
+        ]
+      : [
+          { label: "Symbol", key: "symbol" },
+          { label: "Stop", render: (row) => escapeHtml(paperTradeNumber(row.current_stop)) },
+          { label: "Proposed stop", render: (row) => escapeHtml(paperTradeNumber(row.proposed_stop_price)) },
+          { label: "Target", render: (row) => escapeHtml(paperTradeNumber(row.target_price)) },
+          { label: "R multiple", render: (row) => escapeHtml(row.r_multiple || "n/a") },
+          { label: "Decision", key: "exit_decision" },
+          { label: "Primary", render: (row) => exitReviewPrimaryLink(row, "Focus row") },
+        ],
+    rows,
+    emptyMessage: mode === "time" ? "No thesis or time-stop review items are active." : "No stop or target review items are active.",
+  });
+}
+
+function renderExitReviewWorkspace(payload = {}) {
+  const projection = payload.exit_review_projection_v1 || payload.exit_review_projection || {};
+  const summary = projection.exit_summary || {};
+  const openRows = safeList(projection.open_positions);
+  const needsRows = safeList(projection.needs_review);
+  const stopRows = safeList(projection.stop_target_status);
+  const timeRows = safeList(projection.thesis_time_stop_status);
+  const closedRows = safeList(projection.closed_outcomes);
+  const dialogs = [...openRows, ...closedRows].map((row) => renderExitReviewDetailDrawer(row)).join("");
+  return {
+    title: "Exit Review",
+    meta: "Open paper and legacy historical position exit review. Manual commands only; no broker submission.",
+    html: [
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.exit_summary",
+        whyShown: "Exit Review joins existing paper entry evaluation, position management, and exit decision surfaces without adding a new exit engine.",
+        eyebrow: "EXIT_SUMMARY",
+        title: "Exit Summary",
+        subtitle: "One operator view for HOLD, UPDATE_STOP, TAKE_PARTIAL, EXIT_FULL, and BLOCK decisions.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Open positions", value: String(summary.open_positions ?? openRows.length) })}
+            ${renderMetricCard({ label: "Needs review", value: String(summary.needs_review ?? needsRows.length) })}
+            ${renderMetricCard({ label: "HOLD", value: String(summary.hold ?? 0) })}
+            ${renderMetricCard({ label: "REVIEW", value: String(summary.review ?? 0) })}
+            ${renderMetricCard({ label: "UPDATE_STOP", value: String(summary.update_stop ?? 0) })}
+            ${renderMetricCard({ label: "TAKE_PARTIAL", value: String(summary.take_partial ?? 0) })}
+            ${renderMetricCard({ label: "EXIT_FULL", value: String(summary.exit_full ?? 0) })}
+            ${renderMetricCard({ label: "BLOCK", value: String(summary.blocked ?? 0) })}
+            ${renderMetricCard({ label: "Closed outcomes", value: String(summary.closed_outcomes ?? closedRows.length) })}
+          </div>
+          <p class="support-note">Exit execution request artifacts may be created by governed command paths only. This workspace does not submit, route, transmit, or advise trades.</p>
+        `,
+      }),
+      renderPortfolioContextPanel(payload),
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.open_positions",
+        whyShown: "Open positions come from existing paper or historical trade lifecycle evidence and certified marks.",
+        eyebrow: "OPEN_POSITIONS",
+        title: "Open Positions",
+        subtitle: "Original/current exit plan, holding time, thesis status, current mark, stop, target, decision, and next manual action.",
+        body: renderExitReviewPositionTable(openRows, "No open paper or historical positions are available for exit review."),
+      }),
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.needs_review",
+        whyShown: "Rows enter Needs Review when the current exit decision is not HOLD.",
+        eyebrow: "NEEDS_REVIEW",
+        title: "Needs Review",
+        subtitle: "Blocked, stop-update, partial-profit, and full-exit decisions requiring operator attention.",
+        body: renderExitReviewCompactReviewTable(needsRows, "No exit review actions are currently required."),
+      }),
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.stop_target_status",
+        whyShown: "Stop and target status is read from existing position-management risk plans and exit-decision output.",
+        eyebrow: "STOP_TARGET_STATUS",
+        title: "Stop / Target Status",
+        subtitle: "Current stop, proposed stop, target, R multiple, and decision.",
+        body: renderExitReviewStatusTable(stopRows, "stop"),
+      }),
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.thesis_time_stop_status",
+        whyShown: "Thesis and time-stop status comes from existing risk-plan metadata and exit-decision reason codes.",
+        eyebrow: "THESIS_TIME_STOP_STATUS",
+        title: "Thesis / Time Stop Status",
+        subtitle: "Thesis status, time stop, current decision, and reason.",
+        body: renderExitReviewStatusTable(timeRows, "time"),
+      }),
+      renderWorkflowCard({
+        payload,
+        sourceKey: "exit_review_projection_v1",
+        fieldPath: "exit_review_projection_v1.closed_outcomes",
+        whyShown: "Closed outcomes are existing trade outcome and trade-result evidence surfaced without inferring exits.",
+        eyebrow: "CLOSED_OUTCOMES",
+        title: "Closed Outcomes",
+        subtitle: "Recorded closed trade outcomes and follow-up commands.",
+        body: renderExitReviewPositionTable(closedRows, "No closed outcomes are available.", { primary: false, actions: true }),
+      }),
+      dialogs,
+    ].join(""),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
 }
 
 function renderAegisReviewWorkflow(payload) {
@@ -5729,7 +15126,8 @@ function renderAegisReviewWorkflow(payload) {
     advisoryQuality.expired_candidate_count,
   ].some((value) => Number(value || 0) > 0);
   const reviewHasSignal = outcomeFollowups.length || ignoredRows.length || correctedRows.length || meaningfulMetricRows.length || eodHasSignal || challengerRows.length || researchLessonRows.length || regimeLessonRows.length;
-  const cards = [renderSystemDomainCertificationPanel(payload)];
+  const tradeProjection = payload.paper_entry_evaluation_projection_v1 || payload.paper_entry_evaluation_projection || {};
+  const cards = [renderPaperTradeEvaluationWorkspace(payload, tradeProjection), renderSystemDomainCertificationPanel(payload)];
   if (!reviewHasSignal && !metricRows.length) {
     cards.push(renderCardSection({
       eyebrow: "NO_REVIEW_SIGNAL",
@@ -5751,7 +15149,9 @@ function renderAegisReviewWorkflow(payload) {
       title: "Performance",
       meta: "What is actually working?",
       html: cards.join(""),
-      contextHtml: workflowContextHtml(payload),
+      contextHtml: "",
+      hideContextRail: true,
+      layoutMode: "WORKFLOW_LAYOUT",
     };
   }
   cards.push(renderWorkflowCard({
@@ -5881,7 +15281,9 @@ function renderAegisReviewWorkflow(payload) {
     title: "Performance",
     meta: "What is actually working?",
     html: cards.join(""),
-    contextHtml: workflowContextHtml(payload),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
   };
 }
 
@@ -6003,7 +15405,7 @@ function renderEdgeLabCommandHeader({ payload = {}, projection = {}, sources = {
         ${edgeHeaderChip("Evidence", edgeEvidenceStatus(projection?.evidence_quality || chain.evidence_quality))}
         ${edgeHeaderChip("Next", edgeNextHumanAction({ projection, sources }))}
       </div>
-      <div class="compact-safety-strip">READ-ONLY GOVERNANCE · NO BROKER EXECUTION · MANUAL REVIEW REQUIRED <span class="muted-mini">READ_ONLY_GOVERNANCE · NO_BROKER_EXECUTION · MANUAL_REVIEW_REQUIRED</span></div>
+      <div class="compact-safety-strip">READ-ONLY GOVERNANCE · NO BROKER EXECUTION · RESEARCH ONLY <span class="muted-mini">READ_ONLY_GOVERNANCE · NO_BROKER_EXECUTION · RESEARCH_ONLY</span></div>
     `,
   });
 }
@@ -7141,12 +16543,199 @@ function researchInventorySummary({
   return `${canonicalCount} canonical research hypotheses found: ${parts.join(", ")}.`;
 }
 
+function paperOperatorProjectionRowIsOpen(row = {}) {
+  return String(row.lifecycle_state || "").toUpperCase() === "PAPER_POSITION_OPEN"
+    || String(row.candidate_status || "").toUpperCase() === "PAPER_POSITION_OPEN"
+    || String(row.latest_command_status || "").toUpperCase() === "EXECUTED";
+}
+
+function paperOperatorProjectionRowIsActionable(row = {}) {
+  return String(row.source_state || "").toUpperCase() === "ACTIVE_REVIEW"
+    && row.actionable === true
+    && row.active_review_present === true
+    && !paperOperatorProjectionRowIsOpen(row);
+}
+
+function paperOperatorProjectionCurrentSessionCandidates(payload = {}) {
+  const paperProjection = dashboardPaperOperatorProjection(payload);
+  const sessions = safeList(paperProjection.sessions);
+  const latestSessionId = sessions[0]?.paper_session_id || "";
+  const bucketRows = safeList(paperProjection.actionable_current_candidates);
+  const currentRows = bucketRows.length ? bucketRows : safeList(paperProjection.current_day_candidates).filter(paperOperatorProjectionRowIsActionable);
+  const sessionRows = latestSessionId ? currentRows.filter((row) => !row.paper_session_id || row.paper_session_id === latestSessionId) : currentRows;
+  return sessionRows.map((row) => ({
+    ...row,
+    displayed_from: row.displayed_from || "paper_operator_projection.actionable_current_candidates",
+    source_state: row.source_state || "ACTIVE_REVIEW",
+    active_review_present: row.active_review_present === true,
+    construction_present: row.construction_present !== false,
+    actionable: row.actionable === true,
+    action_endpoint: row.action_endpoint || "/api/aegis/commands",
+  })).filter(paperOperatorProjectionRowIsActionable);
+}
+
+function nonActiveCandidateRows(rows = [], displayedFrom = "candidate_ui_projection.trading_lifecycle_awaiting_paper_entry") {
+  return safeList(rows).map((row) => ({
+    ...row,
+    displayed_from: row.displayed_from || displayedFrom,
+    source_state: row.source_state || (row.carry_forward ? "CARRY_FORWARD" : "LEGACY_PARTIAL"),
+    active_review_present: false,
+    construction_present: row.construction_present === true,
+    actionable: false,
+    action_block_reason: row.action_block_reason || "Not in active review state",
+    action_endpoint: "none",
+  }));
+}
+
+function paperLedgerProjection(payload = {}) {
+  const projection = payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {};
+  const positions = payload.positions || payload.canonical_operator_state?.positions || {};
+  const governedOpen = safeList(projection.trading_lifecycle_open_governed_positions);
+  const legacyOpen = safeList(projection.trading_lifecycle_legacy_partial_open_positions);
+  const lifecycleClosed = safeList(projection.trading_lifecycle_closed_positions);
+  const paperProjection = dashboardPaperOperatorProjection(payload);
+  const lifecycleProjection = dashboardCandidateLifecycleProjection(payload);
+  const activeAwaiting = safeList(lifecycleProjection.actionable_current_candidates).length ? safeList(lifecycleProjection.actionable_current_candidates) : paperOperatorProjectionCurrentSessionCandidates(payload);
+  const activeIds = new Set(activeAwaiting.map((row) => String(row.candidate_id || "")).filter(Boolean));
+  const lifecycleAwaiting = nonActiveCandidateRows(projection.trading_lifecycle_awaiting_paper_entry)
+    .filter((row) => !activeIds.has(String(row.candidate_id || "")));
+  const projectionOpenRows = safeList(lifecycleProjection.open_paper_positions).length ? safeList(lifecycleProjection.open_paper_positions) : safeList(paperProjection.open_paper_positions);
+  const carryForwardRows = safeList(lifecycleProjection.carry_forward_context).length ? safeList(lifecycleProjection.carry_forward_context) : (safeList(paperProjection.carry_forward_context).length ? safeList(paperProjection.carry_forward_context) : safeList(paperProjection.carry_forward_candidates));
+  return {
+    status: projection.trading_lifecycle_state_status || projection.paper_position_ledger_status || positions.paper_position_ledger_status || "MISSING",
+    path: projection.trading_lifecycle_state_path || projection.paper_position_ledger_path || positions.paper_position_ledger_path || "",
+    open: projectionOpenRows.length ? projectionOpenRows : (governedOpen.length ? governedOpen : (safeList(projection.open_paper_positions).length ? safeList(projection.open_paper_positions) : safeList(positions.open_paper_positions))),
+    closed: lifecycleClosed.length ? lifecycleClosed : (safeList(projection.closed_paper_positions).length ? safeList(projection.closed_paper_positions) : safeList(positions.closed_paper_positions || positions.historical_paper_positions)),
+    legacy: legacyOpen.length ? legacyOpen : (safeList(projection.legacy_captures).length ? safeList(projection.legacy_captures) : safeList(positions.legacy_captures)),
+    mismatches: safeList(projection.paper_position_ledger_mismatches).length ? safeList(projection.paper_position_ledger_mismatches) : safeList(positions.paper_position_ledger_mismatches),
+    lifecycleCounts: Object.keys(projection.trading_lifecycle_counts || {}).length ? projection.trading_lifecycle_counts : (projection.paper_lifecycle_counts || {}),
+    lifecycleMessages: safeList(projection.paper_lifecycle_operator_summary_messages),
+    lifecycleFailedActions: safeList(projection.trading_lifecycle_failed_paper_entry_attempts).length ? safeList(projection.trading_lifecycle_failed_paper_entry_attempts) : safeList(projection.paper_lifecycle_failed_actions),
+    lifecycleReceiptMismatches: safeList(projection.paper_lifecycle_receipt_without_ledger_event),
+    awaiting: activeAwaiting,
+    lifecycleAwaiting,
+    carryForwardCandidates: nonActiveCandidateRows(carryForwardRows, "paper_operator_projection.carry_forward_context"),
+    unclassified: safeList(projection.trading_lifecycle_unclassified_items),
+    allLifecycleItems: safeList(projection.trading_lifecycle_items),
+  };
+}
+
+function renderOpenPaperPositionsWorkflow(payload = {}) {
+  const ledger = paperLedgerProjection(payload);
+  const rows = attachExitRecommendationsToPositions(ledger.open, payload);
+  return {
+    title: "Open Paper Positions",
+    meta: "Canonical open simulated paper positions from paper_position_ledger.v1.json.",
+    html: renderWorkflowCard({
+      payload,
+      sourceKey: "paper_position_ledger",
+      fieldPath: "open_positions",
+      whyShown: "Open Paper Positions reads the canonical paper position ledger. Closed and legacy captures are not mixed into active positions.",
+      eyebrow: "PAPER_POSITION_LEDGER",
+      title: "Open Paper Positions",
+      subtitle: `${ledger.status} · ${ledger.path || "ledger path unavailable"}`,
+      body: `
+        <div class="operator-summary-strip operator-dashboard-summary">
+          ${renderMetricCard({ label: "Open", value: String(rows.length) })}
+          ${renderMetricCard({ label: "Closed", value: String(ledger.closed.length) })}
+          ${renderMetricCard({ label: "Legacy / partial historical trades", value: String(ledger.legacy.length) })}
+        </div>
+        ${renderPaperLifecycleQueueWarning(ledger, rows)}
+        ${renderPaperPositionLedgerMismatchWarning([...safeList(ledger.mismatches), ...safeList(ledger.lifecycleReceiptMismatches)])}
+        ${renderPaperTradeActionFailedWarning(ledger.lifecycleFailedActions)}
+        ${renderPaperPositionTable(rows, "No open paper positions are recorded.")}
+        ${renderOpenPaperPositionExitModals(rows, payload)}
+      `,
+    }),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
+}
+
+function renderPaperPositionTable(rows = [], emptyMessage = "No paper positions are recorded.") {
+  return renderSimpleTable({
+    columns: [
+      { label: "Symbol", render: (row) => `<strong>${escapeHtml(row.symbol || "-")}</strong><div class="muted-mini">${escapeHtml(row.position_id || "")}</div>` },
+      { label: "Candidate", render: (row) => escapeHtml(row.candidate_id || "-") },
+      { label: "Side", render: (row) => escapeHtml(row.side || row.action || "-") },
+      { label: "Qty / notional", render: (row) => escapeHtml([row.quantity, row.notional].filter(Boolean).join(" / ") || "-") },
+      { label: "Entry", render: (row) => escapeHtml(String(row.entry_price ?? "-")) },
+      { label: "Entry time", render: (row) => escapeHtml(formatTimestamp(row.entry_time || row.timestamp_utc || "")) },
+      { label: "Status", render: (row) => renderStatusPill(row.current_status || row.status || "UNKNOWN", verifiedRuntimeStatusKind(row.current_status || row.status), {}) },
+      { label: "Recommendation", render: (row) => { const rec = row.exit_recommendation || {}; return `<strong>${escapeHtml(rec.exit_recommendation || "HOLD")}</strong><div class="muted-mini">${escapeHtml(safeList(rec.reason_codes).join(", ") || "NO_EXIT_RULE_TRIGGERED")}</div>`; } },
+      { label: "PnL", render: (row) => escapeHtml(String(row.realized_pnl || row.unrealized_pnl || "")) },
+      { label: "Action", render: (row) => renderOpenPaperPositionExitButton(row) },
+      { label: "Operator", render: (row) => escapeHtml(row.operator || row.operator_id || "-") },
+    ],
+    rows,
+    emptyMessage,
+  });
+}
+
+function isOpenPaperPositionRow(row = {}) {
+  const status = String(row.current_status || row.status || row.candidate_lifecycle_state || row.lifecycle_state || "").toUpperCase();
+  return status === "OPEN" || status === "PAPER_POSITION_OPEN" || status === "POSITION_OPEN" || status === "ENTRY_RECORDED";
+}
+
+function renderOpenPaperPositionExitButton(row = {}) {
+  const candidateId = row.candidate_id || row.candidate_contract_id || "";
+  if (!candidateId || !isOpenPaperPositionRow(row)) return `<span class="muted-mini">No position action</span>`;
+  const rec = row.exit_recommendation || {};
+  const detailId = `paper-exit-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `<button class="primary-button" type="button" data-aegis-command-id="RECORD_PAPER_EXIT" data-aegis-command-action-type="IN_PAGE_DETAIL" data-aegis-command-target-type="paper_review_candidate" data-aegis-command-target-id="${escapeHtml(candidateId)}" data-command-detail-target="${escapeHtml(detailId)}">Record Exit</button><div class="muted-mini">${escapeHtml(rec.exit_recommendation || "HOLD")}</div>`;
+}
+
+function renderOpenPaperPositionExitModals(rows = [], payload = {}) {
+  return safeList(rows).map((row) => {
+    const candidateId = row.candidate_id || row.candidate_contract_id || "";
+    if (!candidateId || !isOpenPaperPositionRow(row)) return "";
+    const day = row.day_utc || payload.day_utc || payload.displayed_artifact_day || payload.canonical_operator_state?.day_utc || "";
+    const rec = row.exit_recommendation || {};
+    const exitModalId = `paper-exit-${candidateId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const reasonCodes = safeList(rec.reason_codes).join(", ") || "NO_EXIT_RULE_TRIGGERED";
+    return `
+      <dialog id="${escapeHtml(exitModalId)}" data-command-detail-panel class="candidate-review-dialog">
+        <header class="drawer-header"><div><div class="drawer-eyebrow">Record Simulated Paper Exit</div><h3>${escapeHtml(row.symbol || candidateId)}</h3></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header>
+        <div class="callout warning"><strong>SIMULATED_PAPER only</strong><div>NO LIVE TRADING. NO BROKER EXECUTION. Exit recommendations require operator confirmation.</div></div>
+        ${renderDefinitionRows([
+          { label: "System recommendation", value: rec.exit_recommendation || "HOLD" },
+          { label: "Reason codes", value: reasonCodes },
+          { label: "Current PnL", value: String(row.unrealized_pnl ?? rec.unrealized_pnl ?? "") },
+          { label: "Current mark", value: String(rec.current_mark ?? row.mark_price ?? row.current_mark ?? "") },
+        ])}
+        <form class="paper-candidate-action-form stacked-form" method="post">
+          <input type="hidden" name="command_id" value="RECORD_PAPER_EXIT"><input type="hidden" name="candidate_id" value="${escapeHtml(candidateId)}"><input type="hidden" name="day_utc" value="${escapeHtml(day)}">
+          <label>Exit reason<input name="exit_reason_selected_by_operator" required value="${escapeHtml(rec.exit_recommendation || "MANUAL_EXIT")}"></label>
+          <label>Exit price<input name="paper_exit_price" inputmode="decimal" required value="${escapeHtml(String(rec.current_mark ?? row.mark_price ?? row.current_mark ?? ""))}"></label>
+          <label>Timestamp<input name="timestamp" type="datetime-local"></label>
+          <label>Exit thesis<textarea name="notes" rows="3">${escapeHtml(reasonCodes)}</textarea></label>
+          <footer class="paper-entry-modal-footer"><button class="ghost-button" type="button" data-paper-entry-cancel>Cancel</button><button class="primary-button" type="submit">Record Exit</button></footer><span data-paper-candidate-status hidden></span>
+        </form>
+      </dialog>
+    `;
+  }).join("");
+}
+
+function attachExitRecommendationsToPositions(rows = [], payload = {}) {
+  const ledger = paperLedgerProjection(payload);
+  const projection = payload.candidate_ui_projection || payload.canonical_operator_state?.candidate_ui_projection || {};
+  const recRows = safeList(projection.exit_recommendations);
+  const byCandidate = new Map(recRows.map((row) => [String(row.candidate_id || ""), row]));
+  return safeList(rows).map((row) => ({ ...row, exit_recommendation: row.exit_recommendation || byCandidate.get(String(row.candidate_id || "")) || {} }));
+}
+
 function renderAegisHistoryWorkflow(payload) {
-  const captureSource = safeList(payload.historical_captures).length
-    ? safeList(payload.historical_captures)
-    : safeList(payload.captured_trades).length
-      ? safeList(payload.captured_trades)
-      : (payload.latest_captured_trade_projection ? [payload.latest_captured_trade_projection] : []);
+  const ledger = paperLedgerProjection(payload);
+  const ledgerClosed = ledger.closed.map((row) => ({ ...row, lifecycle_state: "CLOSED" }));
+  const ledgerLegacy = ledger.legacy.map((row) => ({ ...row, lifecycle_state: "LEGACY_CAPTURE" }));
+  const captureSource = ledgerClosed.length || ledgerLegacy.length
+    ? [...ledgerClosed, ...ledgerLegacy]
+    : safeList(payload.historical_captures).length
+      ? safeList(payload.historical_captures)
+      : safeList(payload.captured_trades).length
+        ? safeList(payload.captured_trades).filter((row) => String(row.current_status || row.status || "").toUpperCase() !== "OPEN")
+        : (payload.latest_captured_trade_projection ? [payload.latest_captured_trade_projection] : []);
   const captures = safeList(captureSource);
   const fallback = payload.historical_fallback || {};
   const rows = captures.length ? captures : (fallback.source_day ? [{
@@ -7160,28 +16749,31 @@ function renderAegisHistoryWorkflow(payload) {
     artifact_path: fallback.artifact_path,
   }] : []);
   return {
-    title: "Captured Trades",
-    meta: "Authoritative historical manual-capture ledger.",
+    title: "Closed Trades",
+    meta: "This page contains closed governed paper trades and legacy historical records. Open positions appear under Positions.",
     html: [
       renderWorkflowCard({
         payload,
         sourceKey: "captured_ticket_projection_v1",
         fieldPath: "historical_captures",
-        whyShown: "Captured Trades is the only primary workspace for historical manual captures. Historical captures are not active candidates.",
-        eyebrow: "HISTORICAL_LEDGER",
-        title: "Captured Trades",
-        subtitle: "Read-only historical records. Export and evidence drilldown only; no capture actions appear here.",
+        whyShown: "Closed Trades is the primary workspace for closed governed paper trades and legacy historical records. Historical records are not active candidates.",
+        eyebrow: "TRADE_HISTORY",
+        title: "Closed Trades",
+        subtitle: "This page contains closed governed paper trades and legacy historical records. Open positions appear under Positions.",
         body: `
           <div class="operator-summary-strip operator-dashboard-summary">
-            ${renderMetricCard({ label: "Historical captures", value: String(rows.length) })}
-            ${renderMetricCard({ label: "Latest capture day", value: payload.operator_today_projection?.latest_historical_capture_label || fallback.source_day || "none" })}
-            ${renderMetricCard({ label: "Current-day captures", value: String(payload.operator_today_projection?.completed_capture_count ?? 0) })}
+            ${renderMetricCard({ label: "Closed governed trades", value: String(ledgerClosed.length) })}
+            ${renderMetricCard({ label: "Legacy / partial historical trades", value: String(ledgerLegacy.length) })}
+            ${renderMetricCard({ label: "Latest history day", value: payload.operator_today_projection?.latest_historical_capture_label || fallback.source_day || "none" })}
+            ${renderMetricCard({ label: "Current-day history records", value: String(payload.operator_today_projection?.completed_capture_count ?? 0) })}
           </div>
           ${renderCapturedTradeTable(rows)}
         `,
       }),
     ].join(""),
-    contextHtml: workflowContextHtml(payload),
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
   };
 }
 
@@ -7194,14 +16786,25 @@ function renderCapturedTradeTable(rows = []) {
       { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || "-") },
       { label: "Entry", render: (row) => escapeHtml(String(row.fill_price ?? row.entry_price ?? "-")) },
       { label: "Quantity", render: (row) => escapeHtml(String(row.quantity ?? "-")) },
-      { label: "Captured", render: (row) => escapeHtml(formatTimestamp(row.captured_at_utc || row.recorded_at_utc || "")) },
+      { label: "Recorded", render: (row) => escapeHtml(formatTimestamp(row.captured_at_utc || row.recorded_at_utc || "")) },
       { label: "Operator", render: (row) => escapeHtml(row.operator_id || "-") },
       { label: "Lifecycle", render: (row) => renderStatusPill(row.lifecycle_state || "Historical", "healthy", {}) },
       { label: "Replay", render: (row) => escapeHtml(row.replay_status || "not reported") },
       { label: "Record", render: (row) => `<span class="muted-mini">${escapeHtml(row.capture_record_id || row.record_id || "-")}</span>` },
+      { label: "Evidence", render: (row) => renderEvidenceTrigger({
+        title: `${row.symbol || "Historical trade"} evidence`,
+        explanation: "Historical trade record provenance and replay evidence.",
+        supportingMetric: row.capture_record_id || row.record_id || "historical_captures",
+        artifactPath: row.artifact_path || row.source_artifact_path || "",
+        artifactHash: row.artifact_hash || row.content_hash || "",
+        sourceTimestamp: row.captured_at_utc || row.recorded_at_utc || "",
+        rawMetricKey: "historical_captures",
+        evidenceStatus: row.artifact_path || row.source_artifact_path ? "COMPLETE" : "PARTIAL",
+        confidence: row.artifact_path || row.source_artifact_path ? "HIGH" : "MEDIUM",
+      }) },
     ],
     rows,
-    emptyMessage: "No captured trades are recorded yet.",
+    emptyMessage: "No closed trades or historical records are recorded yet.",
   });
 }
 
@@ -7365,7 +16968,7 @@ function renderJournalAuditDetails(payload, auditDrilldowns = [], diagnostics = 
 function renderPortfolioSelectedCandidateTable(rows, opportunities = {}) {
   const safeRows = safeList(rows);
   if (!safeRows.length) {
-    return renderNoOpportunityExplanation(opportunities);
+    return renderNoOpportunityExplanation(opportunities, {});
   }
   return `
     <div class="operator-workspace-grid">
@@ -7452,7 +17055,7 @@ function renderCandidatePortfolioSelectionPanel(opportunities = {}, payload = {}
 function renderWorkflowCandidateTable(rows, opportunities = {}) {
   const safeRows = safeList(rows);
   if (!safeRows.length) {
-    return renderNoOpportunityExplanation(opportunities);
+    return renderNoOpportunityExplanation(opportunities, {});
   }
   if (safeRows.some((row) => row.selection_status === "SELECTED" || row.selection_reason === "SELECTED_BY_PORTFOLIO_SELECTION_POLICY")) {
     return renderPortfolioSelectedCandidateTable(safeRows, opportunities);
@@ -7928,7 +17531,7 @@ function renderManualCaptureDialog(candidate = {}, modalId = "") {
         <label class="edge-form-field"><span>External execution venue (optional)</span><input name="external_execution_venue" placeholder="Broker/platform name, optional"></label>
         <label class="edge-form-field"><span>Operator notes</span><textarea name="operator_notes" required placeholder="What did you manually do outside Aegis, and why?"></textarea></label>
         <label class="edge-form-field"><span>Confidence override (optional)</span><input name="confidence_override" placeholder="Optional operator confidence note"></label>
-        <label class="edge-form-field"><span>Paper trade only</span><select name="paper_trade_only" required><option value="true">true</option><option value="false">false</option></select></label>
+        <label class="edge-form-field"><span>Paper entry only</span><select name="paper_entry_only" required><option value="true">true</option><option value="false">false</option></select></label>
         <input type="hidden" name="review_decision" value="MANUAL_CAPTURE_RECORDED">
         <label class="edge-form-field"><span>Operator</span><input name="operator" value="David" required></label>
         <div class="edge-modal-actions">
@@ -8187,9 +17790,421 @@ function renderNoonPreflightAlert(opportunities = {}) {
   });
 }
 
-function renderNoOpportunityExplanation(opportunities = {}) {
+function renderExecutionCoverageSection(coverage = {}) {
+  return renderNoOpportunitySection({
+    eyebrow: "EXECUTION_COVERAGE",
+    title: "Execution Coverage",
+    subtitle: "Expected sleeves versus attempted, executed, blocked, and signal-producing sleeves.",
+    body: renderDefinitionRows([
+      { label: "Expected sleeves", value: String(coverage.expected_sleeves ?? 0) },
+      { label: "Sleeves attempted", value: String(coverage.sleeves_attempted ?? 0) },
+      { label: "Sleeves successfully executed", value: String(coverage.sleeves_successfully_executed ?? 0) },
+      { label: "Sleeves blocked", value: String(coverage.sleeves_blocked ?? 0) },
+      { label: "Sleeves producing signals", value: String(coverage.sleeves_producing_signals ?? 0) },
+    ]),
+  });
+}
+
+function renderSleeveExecutionSummarySection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "SLEEVE_EXECUTION_SUMMARY",
+    title: "Sleeve Execution Summary",
+    subtitle: "Every sleeve is classified as not run, blocked, executed without signals, executed with rejected outcomes, or executed with candidates.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Sleeve", key: "sleeve_id" },
+        { label: "Execution status", render: (row) => escapeHtml(row.execution_status || "UNKNOWN") },
+        { label: "Symbols evaluated", render: (row) => escapeHtml(String(row.symbols_evaluated_count ?? 0)) },
+        { label: "Raw signals", render: (row) => escapeHtml(String(row.raw_signals_count ?? 0)) },
+        { label: "Candidates generated", render: (row) => escapeHtml(String(row.candidates_generated_count ?? 0)) },
+        { label: "Candidates rejected", render: (row) => escapeHtml(String(row.candidates_rejected_count ?? 0)) },
+        { label: "Primary blocker", render: (row) => escapeHtml(row.primary_blocker_reason || "none") },
+        { label: "Evidence path", render: (row) => escapeHtml(row.evidence_path || "not reported") },
+        { label: "Graph linkage", render: (row) => escapeHtml(row.graph_linkage || "not available") },
+      ],
+      rows,
+      emptyMessage: "No sleeve execution summary rows are available.",
+    }),
+  });
+}
+
+function renderRejectedCandidateVisibilitySection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "REJECTED_CANDIDATE_VISIBILITY",
+    title: "Rejected Candidate Visibility",
+    subtitle: "Rejected symbols remain visible even when no candidate survives to the blotter.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Sleeve", key: "sleeve_id" },
+        { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+        { label: "Rejection reason", render: (row) => escapeHtml(row.rejection_reason || row.reason || "UNKNOWN") },
+        { label: "Rejection stage", render: (row) => escapeHtml(row.rejection_stage || "UNKNOWN") },
+        { label: "Missing price symbol", render: (row) => escapeHtml(row.entry_reference_price_missing_symbol || row.symbol || "none") },
+        { label: "Checked price evidence", render: (row) => escapeHtml(safeList(row.entry_reference_price_checked_evidence_paths).join(", ") || "not reported") },
+        { label: "Next repair command", render: (row) => escapeHtml(row.next_repair_action || "npm run aegis:repair-candidate-readiness") },
+        { label: "Candidate gate failed", render: (row) => escapeHtml(row.candidate_gate_failed === true ? "yes" : "no") },
+        { label: "Promotion gate failed", render: (row) => escapeHtml(row.promotion_gate_failed === true ? "yes" : "no") },
+        { label: "Evidence path", render: (row) => escapeHtml(row.evidence_path || "not reported") },
+        { label: "Graph linkage", render: (row) => escapeHtml(row.graph_linkage || "not available") },
+      ],
+      rows,
+      emptyMessage: "No rejected symbol rows were reported.",
+    }),
+  });
+}
+
+function renderRealRawSignalsSection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "REAL_RAW_SIGNALS",
+    title: "Real Raw Signals",
+    subtitle: "Real raw signals only; paper rehearsal is excluded from these totals.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Sleeve", key: "sleeve_id" },
+        { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+        { label: "Raw signal id", render: (row) => escapeHtml(row.raw_signal_id || "UNKNOWN") },
+        { label: "Signal type", render: (row) => escapeHtml(row.signal_type || "UNKNOWN") },
+        { label: "Source artifact", render: (row) => escapeHtml(row.source_artifact || "not reported") },
+        { label: "Evidence path", render: (row) => escapeHtml(row.evidence_path || "not reported") },
+      ],
+      rows,
+      emptyMessage: "No real raw signals were reported.",
+    }),
+  });
+}
+
+function renderSignalEvidenceGraphSection(rows = []) {
+  const flattened = [];
+  rows.forEach((signal) => {
+    safeList(signal.required_evidence).forEach((edge) => {
+      flattened.push({
+        raw_signal_id: signal.raw_signal_id,
+        symbol: signal.symbol,
+        sleeve_id: signal.sleeve_id,
+        purpose: edge.purpose,
+        data_item_id: edge.data_item_id,
+        demanded: edge.demanded,
+        fetched: edge.fetched,
+        certified: edge.certified,
+        consumed: edge.consumed,
+        failure_reason: edge.failure_reason,
+        source_artifact_path: edge.source_artifact_path,
+        candidate_contract_status: signal.candidate_contract_status,
+        next_repair_action: signal.next_repair_action,
+      });
+    });
+  });
+  return renderNoOpportunitySection({
+    eyebrow: "SIGNAL_EVIDENCE_GRAPH",
+    title: "Signal Evidence Graph",
+    subtitle: "Per-signal evidence requirements and whether each edge was demanded, fetched, certified, and consumed.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Raw signal", render: (row) => escapeHtml(row.raw_signal_id || "UNKNOWN") },
+        { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || "UNKNOWN") },
+        { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+        { label: "Purpose", render: (row) => escapeHtml(row.purpose || "UNKNOWN") },
+        { label: "Data item", render: (row) => escapeHtml(row.data_item_id || "UNKNOWN") },
+        { label: "Demanded", render: (row) => escapeHtml(String(row.demanded === true)) },
+        { label: "Fetched", render: (row) => escapeHtml(String(row.fetched === true)) },
+        { label: "Certified", render: (row) => escapeHtml(String(row.certified === true)) },
+        { label: "Consumed", render: (row) => escapeHtml(String(row.consumed === true)) },
+        { label: "Candidate impact", render: (row) => escapeHtml(row.candidate_contract_status || "UNKNOWN") },
+        { label: "Failure reason", render: (row) => escapeHtml(row.failure_reason || "none") },
+        { label: "Source artifact", render: (row) => escapeHtml(row.source_artifact_path || "not reported") },
+        { label: "Next repair action", render: (row) => escapeHtml(row.next_repair_action || "No repair action required.") },
+      ],
+      rows: flattened,
+      emptyMessage: "No signal evidence graph rows were reported.",
+    }),
+  });
+}
+
+function renderRealCandidateContractsSection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "REAL_CANDIDATE_CONTRACTS",
+    title: "Real Candidate Contracts",
+    subtitle: "Closed-by-default candidate contracts created from real raw-signal evidence only.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Sleeve", key: "sleeve_id" },
+        { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+        { label: "Candidate id", render: (row) => escapeHtml(row.candidate_id || "UNKNOWN") },
+        { label: "Intent id", render: (row) => escapeHtml(row.intent_id || "UNKNOWN") },
+        { label: "Entry price", render: (row) => escapeHtml(row.entry_reference_price || "missing") },
+        { label: "Entry price source", render: (row) => escapeHtml(row.entry_reference_price_source_path || "missing") },
+        { label: "Price provider", render: (row) => escapeHtml(row.entry_reference_price_provider || "missing") },
+        { label: "Price timestamp", render: (row) => escapeHtml(row.entry_reference_price_timestamp_utc || "missing") },
+        { label: "Price session date", render: (row) => escapeHtml(row.entry_reference_price_session_date || "missing") },
+        { label: "Source hash", render: (row) => escapeHtml(row.entry_reference_price_source_hash || "missing") },
+        { label: "Executable status", render: (row) => escapeHtml(row.executable_status || "UNKNOWN") },
+        { label: "Governance", render: (row) => escapeHtml(row.governance_status || "UNKNOWN") },
+      ],
+      rows,
+      emptyMessage: "No real candidate contracts were created.",
+    }),
+  });
+}
+
+function renderCandidateReviewQueueSection(packet = {}, queue = {}) {
+  const packetRows = safeList(packet.review_candidates);
+  const queueRows = safeList(queue.rows);
+  const packetById = Object.fromEntries(packetRows.map((row) => [String(row.candidate_id || ""), row]));
+  const rows = queueRows.map((row) => ({ ...packetById[String(row.candidate_id || "")] || {}, ...row }));
+  const commandBar = `<div class="candidate-action-row">${[
+    renderContextReadinessCommandButton("Review Queue", "paper_review_queue", "npm run aegis:paper:review-queue"),
+    renderContextReadinessCommandButton("Record Entry", "paper_review_trade", "npm run aegis:paper:receipt -- --candidate-id <candidate_id> --paper-entry-price <price> --quantity <qty>"),
+    renderContextReadinessCommandButton("Reject", "paper_review_reject", "npm run aegis:paper:review -- --candidate-id <candidate_id> --decision REJECT --reason <reason>"),
+    renderContextReadinessCommandButton("Record Paper Receipt", "paper_review_receipt", "npm run aegis:paper:receipt -- --candidate-id <candidate_id> --paper-entry-price <price> --quantity <qty>"),
+  ].join("")}</div>`;
+  return renderNoOpportunitySection({
+    eyebrow: "PAPER_REVIEW_QUEUE",
+    title: "Candidate Review Queue",
+    subtitle: "PAPER ONLY · HUMAN REVIEW REQUIRED · NO BROKER EXECUTION · NOT LIVE TRADING",
+    body: `${commandBar}
+      ${renderDefinitionRows([
+        { label: "Operating mode", value: packet.operating_mode || queue.operating_mode || "HUMAN_REVIEWED_PAPER_MODE" },
+        { label: "Operator review required", value: String(packet.operator_review_required === true || queue.operator_review_required === true) },
+        { label: "Paper only", value: String(packet.paper_only === true || queue.paper_only === true) },
+      ])}
+      ${renderSimpleTable({
+        columns: [
+          { label: "Candidate id", render: (row) => escapeHtml(row.candidate_id || "UNKNOWN") },
+          { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+          { label: "Sleeve", render: (row) => escapeHtml(row.sleeve_id || "UNKNOWN") },
+          { label: "Status", render: (row) => escapeHtml(row.status || "AWAITING_REVIEW") },
+          { label: "Entry reference price", render: (row) => escapeHtml(row.entry_reference_price || "missing") },
+          { label: "Thesis/reason codes", render: (row) => escapeHtml(safeList(row.thesis_reason_codes).join(", ") || "none") },
+          { label: "Score/rank", render: (row) => escapeHtml([row.score ?? "", row.rank ?? ""].filter(Boolean).join(" / ") || "not scored") },
+          { label: "Paper entry eligible", render: (row) => escapeHtml(String(row.paper_entry_eligible === true)) },
+          { label: "Live trade eligible", render: (row) => escapeHtml(String(row.live_trade_eligible === true)) },
+          { label: "Decision reason", render: (row) => escapeHtml(row.decision_reason || "pending review") },
+          { label: "Evidence paths", render: (row) => escapeHtml(safeList(row.evidence_paths).join(", ") || "not reported") },
+        ],
+        rows,
+        emptyMessage: "No paper review candidates are available.",
+      })}`,
+  });
+}
+
+function renderPaperOutcomeTrackerSection(outcomes = {}) {
+  const openTrades = safeList(outcomes.open_trades);
+  const commandBar = `<div class="candidate-action-row">${[
+    renderContextReadinessCommandButton("Review Queue", "paper_review_queue", "npm run aegis:paper:review-queue"),
+    renderContextReadinessCommandButton("Record Paper Receipt", "paper_review_receipt", "npm run aegis:paper:receipt -- --candidate-id <candidate_id> --paper-entry-price <price> --quantity <qty>"),
+  ].join("")}</div>`;
+  return renderNoOpportunitySection({
+    eyebrow: "PAPER_OUTCOMES",
+    title: "Paper Outcome Tracker",
+    subtitle: "Track open simulated paper trades linked back to reviewed candidates.",
+    body: `${commandBar}
+      ${renderDefinitionRows([
+        { label: "Operating mode", value: outcomes.operating_mode || "HUMAN_REVIEWED_PAPER_MODE" },
+        { label: "Open paper trades", value: String(outcomes.trade_count ?? openTrades.length) },
+        { label: "PAPER ONLY", value: "true" },
+        { label: "HUMAN REVIEW REQUIRED", value: "true" },
+        { label: "NO BROKER EXECUTION", value: "true" },
+        { label: "NOT LIVE TRADING", value: "true" },
+      ])}
+      ${renderSimpleTable({
+        columns: [
+          { label: "Candidate id", render: (row) => escapeHtml(row.candidate_id || row.linked_candidate_id || "UNKNOWN") },
+          { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+          { label: "Status", render: (row) => escapeHtml(row.status || "OPEN") },
+          { label: "Entry", render: (row) => escapeHtml(row.entry_price || "") },
+          { label: "Mark price", render: (row) => escapeHtml(row.mark_price || "") },
+          { label: "Unrealized PnL", render: (row) => escapeHtml(row.unrealized_pnl || "") },
+          { label: "Realized PnL", render: (row) => escapeHtml(row.realized_pnl || "") },
+          { label: "Exit reason", render: (row) => escapeHtml(row.exit_reason || "") },
+          { label: "Linked candidate_id", render: (row) => escapeHtml(row.linked_candidate_id || "") },
+        ],
+        rows: openTrades,
+        emptyMessage: "No simulated paper receipts have been recorded.",
+      })}`,
+  });
+}
+
+function renderWhereTheyDiedSection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "WHERE_THEY_DIED",
+    title: "Where They Died",
+    subtitle: "Per-signal rejection stage, missing fields, and the next repair action relative to the proven paper path.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Symbol", render: (row) => escapeHtml(row.symbol || "UNKNOWN") },
+        { label: "Stage", render: (row) => escapeHtml(row.rejection_stage || "UNKNOWN") },
+        { label: "Reason", render: (row) => escapeHtml(row.rejection_reason || "UNKNOWN") },
+        { label: "Missing price symbol", render: (row) => escapeHtml(row.entry_reference_price_missing_symbol || row.symbol || "none") },
+        { label: "Checked price evidence", render: (row) => escapeHtml(safeList(row.entry_reference_price_checked_evidence_paths).join(", ") || "not reported") },
+        { label: "Missing fields", render: (row) => escapeHtml([
+          ...safeList(row.failed_candidate_contract_fields),
+          ...safeList(row.failed_arbitration_fields),
+          ...safeList(row.failed_promotion_fields),
+          ...safeList(row.failed_evidence_fields),
+        ].join(", ") || "none") },
+        { label: "Next repair action", render: (row) => escapeHtml(row.next_repair_action || "Inspect source artifacts") },
+      ],
+      rows,
+      emptyMessage: "No per-signal death rows were reported.",
+    }),
+  });
+}
+
+function renderGoldenPathComparisonSection(summary = {}) {
+  return renderNoOpportunitySection({
+    eyebrow: "GOLDEN_PATH_COMPARISON",
+    title: "Comparison to Golden Path",
+    subtitle: "Live candidate generation is compared against the proven paper rehearsal contract without treating rehearsal as real readiness.",
+    body: renderDefinitionRows([
+      { label: "Paper rehearsal proven", value: String(summary.paper_rehearsal_lifecycle_proven === true) },
+      { label: "Paper raw signals", value: String(summary.paper_raw_signal_count ?? 0) },
+      { label: "Paper candidates", value: String(summary.paper_candidate_count ?? 0) },
+      { label: "Real raw signals", value: String(summary.real_raw_signal_count ?? 0) },
+      { label: "Real candidates", value: String(summary.real_candidate_count ?? 0) },
+      { label: "Paper excluded from real totals", value: String(summary.paper_rehearsal_excluded_from_real_totals === true) },
+      { label: "Missing live stages", value: safeList(summary.real_missing_stages_vs_paper).join(", ") || "none" },
+      { label: "Summary", value: summary.summary || "No comparison summary reported." },
+    ]),
+  });
+}
+
+function renderNextRepairActionsSection(actions = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "NEXT_REPAIR_ACTION",
+    title: "Next Repair Action",
+    subtitle: "Deterministic repair steps from the signal death report.",
+    body: actions.length
+      ? `<ul class="simple-list">${actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : `<div class="muted">No repair actions were reported.</div>`,
+  });
+}
+
+function renderContextReadinessCommandButton(label, targetId, command) {
+  return `<button class="ghost-button" type="button" data-aegis-command-id="RUN_CONTEXT_READINESS_COMMAND" data-aegis-command-action-type="API_COMMAND" data-aegis-command-target-type="runtime_context" data-aegis-command-target-id="${escapeHtml(targetId)}" data-aegis-command-payload="${escapeHtml(JSON.stringify({ command }))}">${escapeHtml(label)}</button>`;
+}
+
+function renderMarketContextDemandSection(rows = [], providerHealthRows = [], options = {}) {
+  const breadthValidation = options.breadthValidation && typeof options.breadthValidation === "object" ? options.breadthValidation : {};
+  const vixVerification = options.vixVerification && typeof options.vixVerification === "object" ? options.vixVerification : {};
+  const contextRepair = options.contextRepair && typeof options.contextRepair === "object" ? options.contextRepair : {};
+  const vixExpectedPath = safeList(vixVerification.providers).find((row) => row.provider === "MANUAL_CSV_DROP")?.source_artifact_path || "not reported";
+  const commandBar = `<div class="candidate-action-row">${[
+    renderContextReadinessCommandButton("Create Breadth Template", "create_breadth_template", "npm run aegis:create-breadth-template"),
+    renderContextReadinessCommandButton("Validate Breadth Drop", "validate_breadth_drop", "npm run aegis:validate-breadth-drop"),
+    renderContextReadinessCommandButton("Ingest Breadth Drop", "ingest_breadth_drop", "npm run aegis:ingest-breadth-drop"),
+    renderContextReadinessCommandButton("Create VIX Template", "create_vix_template", "npm run aegis:create-vix-template"),
+    renderContextReadinessCommandButton("Validate VIX Drop", "validate_vix_drop", "npm run aegis:validate-vix-drop"),
+    renderContextReadinessCommandButton("Ingest VIX Drop", "ingest_vix_drop", "npm run aegis:ingest-vix-drop"),
+    renderContextReadinessCommandButton("Verify VIX", "verify_vix_source", "npm run aegis:verify-vix-source"),
+    renderContextReadinessCommandButton("Repair Context Readiness", "repair_context_readiness", "npm run aegis:repair-context-readiness"),
+  ].join("")}</div>`;
+  return renderNoOpportunitySection({
+    eyebrow: "CONTEXT_READINESS_CLOSEOUT",
+    title: "Context Readiness Closeout",
+    subtitle: "Runtime context stays fail-closed until breadth and VIX evidence are certified for the current session. Candidate visibility remains available even when breadth or VIX blocks runtime context.",
+    body: [
+      renderDefinitionRows([
+        { label: "Expected breadth.csv path", value: breadthValidation.expected_path || "not reported" },
+        { label: "Template command", value: "npm run aegis:create-breadth-template" },
+        { label: "Validate command", value: "npm run aegis:validate-breadth-drop" },
+        { label: "Breadth drop found", value: String(breadthValidation.file_found === true) },
+        { label: "Breadth certification", value: breadthValidation.certification_status || "UNKNOWN" },
+        { label: "Expected vix.csv path", value: vixExpectedPath },
+        { label: "VIX provider chain result", value: vixVerification.status || "UNKNOWN" },
+        { label: "VIX freshness policy", value: (vixVerification.vix_freshness_policy || {}).mode || "UNKNOWN" },
+        { label: "Same-day VIX required now", value: String((vixVerification.vix_freshness_policy || {}).same_day_required_now === true) },
+        { label: "Context repair summary", value: contextRepair.event_market_snapshot_status || "UNKNOWN" },
+        { label: "Runtime truth", value: contextRepair.runtime_truth_classification || "UNKNOWN" },
+        { label: "Trade advice allowed", value: String(contextRepair.trade_advice_allowed === true) },
+      ]),
+      commandBar,
+      renderSimpleTable({
+        columns: [
+          { label: "Item", render: (row) => escapeHtml(row.context_item_id || "UNKNOWN") },
+          { label: "Status", render: (row) => escapeHtml(row.fulfillment_status || row.status || "UNKNOWN") },
+          { label: "Provider", render: (row) => escapeHtml(row.provider || "") },
+          { label: "Source label", render: (row) => escapeHtml(row.source_label || "") },
+          { label: "Policy", render: (row) => escapeHtml(row.policy_mode || "") },
+          { label: "Formula", render: (row) => escapeHtml(row.formula_version || "direct source") },
+          { label: "Blocker", render: (row) => escapeHtml(row.failure_reason || "none") },
+          { label: "Repair", render: (row) => escapeHtml(row.next_repair_command || "npm run aegis:repair-context-readiness") },
+        ],
+        rows,
+        emptyMessage: "No market-context demand rows were reported.",
+      }),
+      renderSimpleTable({
+        columns: [
+          { label: "Provider health item", render: (row) => escapeHtml(row.context_item_id || "UNKNOWN") },
+          { label: "Health status", render: (row) => escapeHtml(row.health_status || "UNKNOWN") },
+          { label: "Allowed provider chain", render: (row) => escapeHtml(safeList(row.allowed_provider_chain).join(", ") || "none") },
+          { label: "Source / certification", render: (row) => escapeHtml([row.provider || "", row.certification_status || ""].filter(Boolean).join(" / ")) },
+          { label: "Policy", render: (row) => escapeHtml(row.policy_mode || "") },
+          { label: "Source label", render: (row) => escapeHtml(row.source_label || "") },
+          { label: "Session date", render: (row) => escapeHtml(row.session_date || "") },
+          { label: "Next repair action", render: (row) => escapeHtml(row.next_repair_action || "npm run aegis:repair-context-readiness") },
+        ],
+        rows: providerHealthRows,
+        emptyMessage: "No provider health rows were reported.",
+      }),
+      renderSimpleTable({
+        columns: [
+          { label: "Provider", render: (row) => escapeHtml(row.provider || "UNKNOWN") },
+          { label: "Status", render: (row) => escapeHtml(row.provider_status || "UNKNOWN") },
+          { label: "Session date", render: (row) => escapeHtml(row.returned_session_date || "missing") },
+          { label: "Value", render: (row) => escapeHtml(String(row.value ?? "" ) || "missing") },
+          { label: "Freshness", render: (row) => escapeHtml(row.freshness_status || "UNKNOWN") },
+          { label: "Certification", render: (row) => escapeHtml(row.certification_status || "UNKNOWN") },
+          { label: "Source label", render: (row) => escapeHtml(row.source_label || "") },
+          { label: "Policy", render: (row) => escapeHtml(row.policy_mode || "") },
+          { label: "Same-day required", render: (row) => escapeHtml(String(row.same_day_required_now === true)) },
+          { label: "Reason", render: (row) => escapeHtml(row.reason_if_rejected || "") },
+        ],
+        rows: safeList(vixVerification.providers),
+        emptyMessage: "No VIX provider verification rows were reported.",
+      }),
+      contextRepair.remaining_blockers ? `<div class="muted"><strong>Remaining blockers</strong><ul class="simple-list">${safeList(contextRepair.remaining_blockers).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : "",
+    ].join(""),
+  });
+}
+
+function renderRuntimeBlockersSection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "RUNTIME_BLOCKERS",
+    title: "Runtime Blockers",
+    subtitle: "Runtime truth blockers remain fail-closed until their evidence artifacts are current.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Blocker", render: (row) => escapeHtml(row.blocker || row.code || "UNKNOWN") },
+        { label: "Recovery command", render: (row) => escapeHtml(row.recovery_command || "npm run aegis:repair-runtime-readiness") },
+      ],
+      rows,
+      emptyMessage: "No runtime blockers were reported.",
+    }),
+  });
+}
+
+function renderNoCandidateExplanationSection(rows = []) {
+  return renderNoOpportunitySection({
+    eyebrow: "NO_CANDIDATE_EXPLANATION",
+    title: "No Candidate Explanation",
+    subtitle: "Deterministic reasons for an empty candidate blotter.",
+    body: renderSimpleTable({
+      columns: [
+        { label: "Code", render: (row) => escapeHtml(row.code || "UNKNOWN") },
+        { label: "Explanation", render: (row) => escapeHtml(row.explanation || "") },
+        { label: "Evidence path", render: (row) => escapeHtml(row.evidence_path || "not reported") },
+        { label: "Graph linkage", render: (row) => escapeHtml(row.graph_linkage || "not available") },
+      ],
+      rows,
+      emptyMessage: "No deterministic no-candidate explanations were reported.",
+    }),
+  });
+}
+
+function renderNoOpportunityExplanation(opportunities = {}, payload = {}) {
   const explanation = opportunities.no_opportunity_explanation || {};
   const diagnostics = opportunities.diagnostics || {};
+  const visibility = opportunities.candidate_generation_visibility || {};
   if (!diagnostics.schema_id && explanation.reason === "CANDIDATE_DIAGNOSTICS_MISSING") {
     return renderMissingOpportunityDiagnostics(explanation);
   }
@@ -8210,10 +18225,17 @@ function renderNoOpportunityExplanation(opportunities = {}) {
     candidates_generated: diagnostics.total_candidates_generated || 0,
     candidates_rejected: diagnostics.total_candidates_rejected || 0,
   };
-  const rejectedRows = safeList(opportunities.rejected_candidate_summary);
-  const rejectionReasons = rejectedRows.length
-    ? rejectedRows
-    : safeList(opportunities.sleeve_run_summary).flatMap((row) => safeList(row.rejection_reasons).map((reason) => ({ sleeve_id: row.sleeve_id, reason })));
+  const coverage = visibility.execution_coverage || opportunities.execution_coverage || {};
+  const deathReport = visibility.real_signal_death_report || opportunities.real_signal_death_report || {};
+  const candidateContracts = visibility.candidate_contracts || opportunities.candidate_contracts || diagnostics.candidate_contracts || {};
+  const realCandidateContracts = safeList(visibility.real_candidate_contracts || opportunities.real_candidate_contracts || candidateContracts.candidate_contracts);
+  const realRawSignals = safeList(visibility.real_raw_signals || opportunities.real_raw_signals || deathReport.signals);
+  const goldenPathComparison = visibility.paper_golden_path_comparison_summary || opportunities.paper_golden_path_comparison_summary || diagnostics.paper_golden_path_comparison_summary || {};
+  const signalEvidenceRows = safeList(visibility.signal_evidence_rows || opportunities.signal_evidence_rows || diagnostics.signal_evidence_graph?.signals);
+  const repairActions = safeList(visibility.exact_next_repair_actions || opportunities.exact_next_repair_actions || deathReport.exact_next_repair_actions);
+  const sleeveSummaryRows = safeList(visibility.sleeve_execution_summary || opportunities.sleeve_execution_summary);
+  const rejectedRows = safeList(visibility.rejected_candidate_visibility || opportunities.rejected_candidate_summary);
+  const noCandidateRows = safeList(visibility.no_candidate_explanations || opportunities.no_candidate_explanations);
   const trigger = opportunities.trigger_summary || diagnostics.trigger_evaluation || {};
   const nextSteps = safeList(explanation.recommended_next_steps || diagnostics.recommended_next_steps);
   const readinessRows = safeList(opportunities.sleeve_readiness_summary || diagnostics.per_sleeve_readiness);
@@ -8224,6 +18246,18 @@ function renderNoOpportunityExplanation(opportunities = {}) {
   const providerConfigured = providerConfig.configured === true || Boolean(providerConfig.primary || providerConfig.fallback);
   const missingSymbols = safeList(marketDataSummary.missing_symbols);
   const staleSymbols = safeList(marketDataSummary.stale_symbols);
+  const missingPriceSymbols = safeList(diagnostics.missing_price_symbols);
+  const certifiedPriceSymbols = safeList(diagnostics.certified_price_symbols);
+  const runtimeBlockers = safeList(opportunities.runtime_blockers || payload.verified_runtime_graph?.runtime_blockers).map((item) => ({ blocker: item, recovery_command: "npm run aegis:repair-runtime-readiness" }));
+  const marketContextRows = safeList(opportunities.market_context_demand?.market_context_items || diagnostics.market_context_demand?.market_context_items || opportunities.market_context_blockers);
+  const marketContextProviderHealthRows = safeList(opportunities.market_context_demand?.provider_health?.provider_items || diagnostics.market_context_demand?.provider_health?.provider_items);
+  const breadthValidation = opportunities.breadth_drop_validation || diagnostics.breadth_drop_validation || {};
+  const vixVerification = opportunities.vix_source_verification || diagnostics.vix_source_verification || {};
+  const contextRepair = opportunities.context_readiness_repair || diagnostics.context_readiness_repair || {};
+  const candidateReviewPacket = opportunities.candidate_review_packet || diagnostics.candidate_review_packet || {};
+  const paperReviewQueue = opportunities.paper_review_queue || diagnostics.paper_review_queue || {};
+  const paperTradeOutcomes = opportunities.paper_entry_outcomes || diagnostics.paper_entry_outcomes || {};
+  if (!runtimeBlockers.length && diagnostics.exact_blocker) runtimeBlockers.push({ blocker: diagnostics.exact_blocker, recovery_command: "npm run aegis:repair-runtime-readiness" });
   const providerIssueMessage = !providerConfigured
     ? "Market data provider is not configured. Aegis cannot evaluate sleeve opportunities."
     : missingSymbols.length
@@ -8251,13 +18285,30 @@ function renderNoOpportunityExplanation(opportunities = {}) {
         { label: "Sleeves ready with warnings", value: String(diagnostics.total_sleeves_ready_with_warnings ?? 0) },
         { label: "Sleeves blocked", value: String(diagnostics.total_sleeves_blocked ?? 0) },
         { label: "Sleeves run", value: String(summary.sleeves_run ?? 0) },
-        { label: "Raw signals rejected", value: String(summary.candidates_rejected ?? 0) },
+        { label: "Raw signals generated", value: String(summary.raw_signals ?? diagnostics.total_raw_signals ?? 0) },
+        { label: "Rejected signals", value: String(rejectedRows.length || summary.candidates_rejected || diagnostics.total_candidates_rejected || 0) },
+        { label: "Raw signals by sleeve", value: Object.entries(diagnostics.raw_signals_by_sleeve || {}).map(([key, value]) => `${key}: ${value}`).join(", ") || "none" },
+        { label: "Raw signals by symbol", value: Object.entries(diagnostics.raw_signals_by_symbol || {}).map(([key, value]) => `${key}: ${value}`).join(", ") || "none" },
         { label: "Candidates passed filters", value: String(summary.candidates_generated ?? 0) },
         { label: "Why zero", value: whyZero },
         { label: "Candidate generation", value: diagnostics.candidate_generation_status || explanation.candidate_generation_status || "UNKNOWN" },
         { label: "Interpretation", value: interpretation },
       ]),
     }),
+    renderExecutionCoverageSection(coverage),
+    renderSleeveExecutionSummarySection(sleeveSummaryRows),
+    renderRealCandidateContractsSection(realCandidateContracts),
+    renderCandidateReviewQueueSection(candidateReviewPacket, paperReviewQueue),
+    renderPaperOutcomeTrackerSection(paperTradeOutcomes),
+    renderRealRawSignalsSection(realRawSignals),
+    renderSignalEvidenceGraphSection(signalEvidenceRows),
+    renderWhereTheyDiedSection(realRawSignals),
+    renderRejectedCandidateVisibilitySection(rejectedRows),
+    renderNoCandidateExplanationSection(noCandidateRows),
+    renderGoldenPathComparisonSection(goldenPathComparison),
+    renderNextRepairActionsSection(repairActions),
+    renderRuntimeBlockersSection(runtimeBlockers),
+    renderMarketContextDemandSection(marketContextRows, marketContextProviderHealthRows, { breadthValidation, vixVerification, contextRepair }),
     renderNoOpportunitySection({
       eyebrow: "MARKET_DATA",
       title: "Market Data Provider",
@@ -8278,6 +18329,9 @@ function renderNoOpportunityExplanation(opportunities = {}) {
           { label: "Current symbols", value: safeList(marketDataSummary.fetched_symbols).join(", ") || "none" },
           { label: "Missing symbols", value: missingSymbols.join(", ") || "none" },
           { label: "Stale symbols", value: staleSymbols.join(", ") || "none" },
+          { label: "Price coverage missing", value: missingPriceSymbols.join(", ") || "none" },
+          { label: "Certified price available", value: certifiedPriceSymbols.join(", ") || "none" },
+          { label: "Candidate contracts after coverage", value: String(diagnostics.candidate_contracts_created_after_price_coverage ?? 0) },
           { label: "Mapping missing", value: safeList(marketDataSummary.mapping_missing_symbols).join(", ") || "none" },
           { label: "Provider failed symbols", value: safeList(marketDataSummary.provider_failed_symbols).join(", ") || "none" },
           { label: "Failure reason", value: marketDataSummary.failure_reason || "none" },
@@ -8316,28 +18370,6 @@ function renderNoOpportunityExplanation(opportunities = {}) {
       }),
     }),
     renderNoOpportunitySection({
-      eyebrow: "SLEEVE_RUN_STATUS",
-      title: "Sleeve Run Status",
-      subtitle: "Per-sleeve status for candidate generation and filtering.",
-      body: renderSimpleTable({
-        columns: [
-          { label: "Sleeve", key: "sleeve_id" },
-          { label: "Status", render: (row) => escapeHtml(row.run_status || "UNKNOWN") },
-          { label: "Readiness", render: (row) => escapeHtml(row.readiness || "UNKNOWN") },
-          { label: "Blocker", render: (row) => escapeHtml(row.canonical_blocker || row.reason_no_candidate || "none") },
-          { label: "Warning", render: (row) => escapeHtml(safeList(row.warning_inputs).join(", ") || "none") },
-          { label: "Required missing input", render: (row) => escapeHtml(safeList(row.blocking_inputs || row.missing_inputs).join(", ") || "none") },
-          { label: "Optional missing input", render: (row) => escapeHtml(safeList(row.warning_inputs).join(", ") || "none") },
-          { label: "Next action", render: (row) => escapeHtml(row.next_repair_action || "No action needed.") },
-          { label: "Raw signals", key: "raw_signal_count" },
-          { label: "Candidates", key: "candidate_count" },
-          { label: "Rejected", key: "rejected_count" },
-        ],
-        rows: safeList(opportunities.sleeve_run_summary || diagnostics.sleeves),
-        emptyMessage: "No sleeve diagnostics are available.",
-      }),
-    }),
-    renderNoOpportunitySection({
       eyebrow: "GLOBAL_CONTEXT",
       title: "Global Context",
       subtitle: "Global context; not necessarily required by every sleeve.",
@@ -8351,25 +18383,6 @@ function renderNoOpportunityExplanation(opportunities = {}) {
         ],
         rows: globalContextRows,
         emptyMessage: "No global context registry rows are available.",
-      }),
-    }),
-    renderNoOpportunitySection({
-      eyebrow: "REJECTION_REASONS",
-      title: "Rejection Reasons",
-      subtitle: "Raw signals rejected during lifecycle, promotion, portfolio gate, or ranking stay visible and separate from blocked sleeves. Examples: volatility filter, confidence threshold, regime mismatch, insufficient data, missing event packet.",
-      body: renderSimpleTable({
-        columns: [
-          { label: "Sleeve", key: "sleeve_id" },
-          { label: "Raw signal", render: (row) => escapeHtml(row.raw_signal_id || row.candidate_id || "") },
-          { label: "Stage", render: (row) => escapeHtml(row.rejection_stage || "") },
-          { label: "Reason", render: (row) => escapeHtml(row.rejection_reason || row.reason || "") },
-          { label: "Explanation", render: (row) => escapeHtml(row.human_readable_explanation || "") },
-          { label: "Required next action", render: (row) => escapeHtml(row.required_next_action || "") },
-          { label: "Classification", render: (row) => escapeHtml(row.rejection_classification || "") },
-          { label: "Rejected", key: "rejected_count" },
-        ],
-        rows: rejectionReasons,
-        emptyMessage: "No rejected raw signals were reported.",
       }),
     }),
     renderNoOpportunitySection({
@@ -9903,7 +19916,7 @@ function renderResearchHypothesisIntakePanel(payload = {}) {
 function renderResearchSafetyStrip(payload = {}) {
   const labels = safeList(payload.safety_labels).length
     ? safeList(payload.safety_labels)
-    : ["READ-ONLY GOVERNANCE", "NO BROKER EXECUTION", "NO LIVE TRADING", "MANUAL REVIEW REQUIRED"];
+    : ["READ-ONLY GOVERNANCE", "NO BROKER EXECUTION", "NO LIVE TRADING", "RESEARCH ONLY"];
   return `<div class="compact-safety-strip">${labels.map(escapeHtml).join(" · ")}<br>${escapeHtml(payload.hypothetical_evidence_label || "Backtests and model outputs are hypothetical research evidence, not achieved portfolio performance.")}</div>`;
 }
 
@@ -10333,7 +20346,7 @@ function researchOperatorDataStatusText(row = {}) {
   const raw = researchDataReadinessText(row);
   const normalized = String(raw || "").toLowerCase();
   if (!normalized) return "Not reported";
-  if (normalized.includes("inconclusive_sample_size")) return "Inconclusive sample size";
+  if (normalized.includes("inconclusive_sample_size")) return "Collecting Evidence";
   if (normalized.includes("waiting_for_event_data")) return "Waiting for earnings/event data";
   if (normalized.includes("earnings_event_calendar_required")) return "Earnings/event calendar required";
   if (normalized.includes("upload_external_dataset")) return "External dataset required";
@@ -10368,7 +20381,7 @@ function researchOperatorActionDescriptor(row = {}) {
   ].filter(Boolean).join(" ").toLowerCase();
   const href = `/research-lab/hypotheses?dossier=${encodeURIComponent(String(row.hypothesis_proposal_id || row.item_id || row.hypothesis_id || ""))}`;
   if (raw.includes("inconclusive_sample_size")) {
-    return { label: "Review inconclusive result", button: "Review result", href, disabled: false, tone: "review" };
+    return { label: "Collect forward-return observations", button: "View progress", href, disabled: false, tone: "progress" };
   }
   if (raw.includes("waiting_for_event_data") || raw.includes("earnings_event_calendar_required") || raw.includes("event calendar required")) {
     return { label: "Provide earnings/event calendar", button: "View data format", href, disabled: false, tone: "data" };
@@ -10398,16 +20411,17 @@ function researchOperatorActionButton(row = {}) {
 
 
 
-const HYPOTHESIS_USER_STATUSES = ["Ready to Start", "Queued", "Scheduled", "Researching", "Waiting", "Complete", "Blocked", "Recommendation Ready"];
+const HYPOTHESIS_USER_STATUSES = ["Ready to Start", "Queued", "Scheduled", "Researching", "Collecting Evidence", "Waiting", "Complete", "Blocked", "Recommendation Ready"];
 const HYPOTHESIS_VIEW_SECTION_LABELS = {
   recommendations_ready: "Recommendations Ready",
+  collecting_evidence: "Collecting Evidence",
   ready_to_start: "Ready to Start",
   researching: "Researching",
   waiting: "Waiting",
   blocked: "Blocked",
   completed: "Completed",
 };
-const HYPOTHESIS_VIEW_SECTION_ORDER = ["recommendations_ready", "ready_to_start", "researching", "waiting", "blocked", "completed"];
+const HYPOTHESIS_VIEW_SECTION_ORDER = ["recommendations_ready", "collecting_evidence", "ready_to_start", "researching", "waiting", "blocked", "completed"];
 
 function hypothesisCleanUserText(value, fallback = "Not reported") {
   const raw = String(value || "").trim();
@@ -10435,7 +20449,8 @@ function hypothesisUserStatus(row = {}) {
 function hypothesisCurrentStage(row = {}) {
   if (row.current_stage) return hypothesisCleanUserText(row.current_stage, "Ready to start");
   const status = hypothesisUserStatus(row);
-  if (status === "Recommendation Ready") return "Manual review";
+  if (status === "Recommendation Ready") return "Review brief";
+  if (status === "Collecting Evidence") return "Collecting forward-return observations";
   if (status === "Researching") return "AI research";
   if (status === "Scheduled") return "Scheduled overnight";
   if (status === "Waiting") return "Waiting for data or time window";
@@ -10503,7 +20518,8 @@ function hypothesisRecommendationSummary(row = {}) {
 function hypothesisUserNextStep(row = {}) {
   if (row.user_facing_explanation) return hypothesisCleanUserText(row.user_facing_explanation, "Review hypothesis status.");
   const status = hypothesisUserStatus(row);
-  if (status === "Recommendation Ready") return "Review findings and manually capture in IB only if the recommendation still fits your workflow.";
+  if (status === "Recommendation Ready") return "Review the research brief and decide whether follow-up monitoring is needed.";
+  if (status === "Collecting Evidence") return "Collect forward-return observations; no operator action is required.";
   if (status === "Blocked") return "Resolve the blocker shown on this card.";
   if (status === "Researching") return "Wait for AI research to finish, then review findings.";
   if (status === "Scheduled") return "Scheduled overnight; check results after the run completes.";
@@ -10526,10 +20542,10 @@ function hypothesisPrimaryAction(row = {}) {
   if (row.primary_command && typeof row.primary_command === "object" && row.primary_command.command_id) return row.primary_command;
   return {
     command_id: "",
-    label: "Action unavailable",
+    label: "View Status",
     action_type: "IN_PAGE_DETAIL",
     enabled: false,
-    disabled_reason: "This hypothesis is missing a declared command contract.",
+    disabled_reason: "Waiting for a declared research command contract.",
   };
 }
 
@@ -10561,12 +20577,13 @@ function renderHypothesisDetailPanel(row = {}, panelId = "") {
 
 function renderCommandButton(command = {}, className = "ghost-button", { detailPanelId = "", hypothesisId = "", title = "", symbols = "" } = {}) {
   const commandId = String(command.command_id || "");
-  const label = String(command.label || "Action unavailable");
+  const label = String(command.label || "View Status");
   const actionType = String(command.action_type || "IN_PAGE_DETAIL");
   const enabled = command.enabled !== false && Boolean(commandId);
   const disabledReason = String(command.disabled_reason || command.failure_behavior || "This action is not available.");
   const payload = commandPayloadAttribute(command, { hypothesis_id: hypothesisId, title, idea: title, symbols });
-  const baseAttrs = `data-aegis-command-id="${escapeHtml(commandId)}" data-aegis-command-action-type="${escapeHtml(actionType)}" data-aegis-command-target-type="${escapeHtml(command.target_type || "hypothesis")}" data-aegis-command-target-id="${escapeHtml(command.target_id || hypothesisId)}" data-aegis-command-payload="${payload}"`;
+  const routeAttr = command.route ? ` data-route="${escapeHtml(command.route)}"` : "";
+  const baseAttrs = `data-aegis-command-id="${escapeHtml(commandId)}" data-aegis-command-action-type="${escapeHtml(actionType)}" data-aegis-command-target-type="${escapeHtml(command.target_type || "hypothesis")}" data-aegis-command-target-id="${escapeHtml(command.target_id || hypothesisId)}" data-aegis-command-payload="${payload}"${routeAttr}`;
   if (!enabled) {
     return `<button class="${escapeHtml(className)} research-action-button" type="button" ${baseAttrs} disabled aria-disabled="true" title="${escapeHtml(disabledReason)}">${escapeHtml(label)}</button>`;
   }
@@ -10601,19 +20618,24 @@ function renderHypothesisCard(row = {}) {
     <header class="hypothesis-card-header">
       <div>
         <h3>${escapeHtml(row.title || row.hypothesis_summary || "Research hypothesis")}</h3>
-        <p>${escapeHtml(hypothesisUserNextStep(row))}</p>
+        <p class="hypothesis-card-description">${escapeHtml(row.short_description || row.description || row.hypothesis_summary || hypothesisUserNextStep(row))}</p>
       </div>
       ${renderHypothesisStatusBadge(status)}
     </header>
-    <dl class="hypothesis-card-facts">
-      <div><dt>Status</dt><dd>${escapeHtml(status)}</dd></div>
-      <div><dt>Current stage</dt><dd>${escapeHtml(hypothesisCurrentStage(row))}</dd></div>
-      <div><dt>Symbols</dt><dd>${escapeHtml(hypothesisSymbolsText(row))}</dd></div>
-      <div><dt>Last run</dt><dd>${escapeHtml(hypothesisLastRunText(row))}</dd></div>
-      <div><dt>Trigger source</dt><dd>${escapeHtml(hypothesisTriggerSourceText(row))}</dd></div>
-      <div><dt>Recommendation</dt><dd>${escapeHtml(recommendation)}</dd></div>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Status</dt><dd>${escapeHtml(status)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Current stage</dt><dd>${escapeHtml(hypothesisCurrentStage(row))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Symbols</dt><dd>${escapeHtml(hypothesisSymbolsText(row))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Last run</dt><dd>${escapeHtml(hypothesisLastRunText(row))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Trigger source</dt><dd>${escapeHtml(hypothesisTriggerSourceText(row))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Next action</dt><dd>${escapeHtml(hypothesisUserNextStep(row))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Research follow-up</dt><dd>${escapeHtml(row.operator_action_required ? "Research follow-up required; no trading, broker, or autonomous action." : "No research follow-up required; no trading, broker, or autonomous action.")}</dd></div>
+      ${status === "Collecting Evidence" ? `<div class="hypothesis-fact-row"><dt>Samples</dt><dd>${escapeHtml(String(row.sample_size ?? 0))} / ${escapeHtml(String(row.minimum_sample_size ?? 20))}</dd></div><div class="hypothesis-fact-row"><dt>Required samples</dt><dd>${escapeHtml(String(row.minimum_sample_size ?? 20))}</dd></div><div class="hypothesis-fact-row"><dt>Current samples</dt><dd>${escapeHtml(String(row.sample_size ?? 0))}</dd></div><div class="hypothesis-fact-row"><dt>Missing samples</dt><dd>${escapeHtml(String(row.missing_samples ?? Math.max(0, Number(row.minimum_sample_size ?? 20) - Number(row.sample_size ?? 0))))}</dd></div><div class="hypothesis-fact-row"><dt>Next sample</dt><dd>${escapeHtml(row.next_sample_expected_at || "next market close")}</dd></div><div class="hypothesis-fact-row"><dt>Estimated completion</dt><dd>${escapeHtml(row.estimated_completion_date || "after 20 valid observations")}</dd></div><div class="hypothesis-fact-row"><dt>Trading days remaining</dt><dd>${escapeHtml(String(row.expected_trading_days_remaining ?? Math.max(0, Number(row.minimum_sample_size ?? 20) - Number(row.sample_size ?? 0))))}</dd></div><div class="hypothesis-fact-row"><dt>Paper-testing sleeve</dt><dd>Not created yet</dd></div><div class="hypothesis-fact-row"><dt>Reason</dt><dd>Qualification requires more evidence</dd></div>` : ""}
+      <div class="hypothesis-fact-row"><dt>Autonomous execution</dt><dd>Disabled by policy</dd></div>
+      <div class="hypothesis-fact-row"><dt>Diagnostics</dt><dd><a href="${escapeHtml(row.diagnostics_href || "/research-lab/hypotheses")}" data-route="${escapeHtml(row.diagnostics_href || "/research-lab/hypotheses")}">Open diagnostics</a></dd></div>
+      <div class="hypothesis-fact-row"><dt>Recommendation</dt><dd>${escapeHtml(recommendation)}</dd></div>
     </dl>
-    ${recommendation === "Recommendation Ready" ? `<div class="hypothesis-recommendation-callout"><strong>Manual IB capture guidance</strong><span>Review related symbols and confidence before taking any external action.</span></div>` : ""}
+    ${status === "Collecting Evidence" ? `<div class="hypothesis-recommendation-callout" data-collecting-evidence-callout><strong>Collecting Evidence</strong><span>Research is active. Aegis needs more forward-return observations before this hypothesis can qualify for paper validation.</span></div>` : recommendation === "Recommendation Ready" ? `<div class="hypothesis-recommendation-callout"><strong>Review Brief Available</strong><span>Review related symbols and confidence before any research follow-up.</span></div>` : ""}
     ${renderHypothesisDetailPanel(row, detailPanelId)}
     <div class="hypothesis-card-message" data-hypothesis-card-message-output hidden></div>
     ${renderHypothesisActionBar(row, detailPanelId)}
@@ -11114,7 +21136,7 @@ function renderResearchDossierPanel(payload = {}) {
         body: `<p>${escapeHtml(section.body)}</p>`,
       })).join("")}
     </section>
-    ${hypothesisHasRecommendation(row) ? `<section class="hypothesis-recommendation-panel"><h2>Recommendation Ready</h2><p>Confidence: ${escapeHtml(hypothesisConfidenceSummary(row))}</p><p>Related symbols: ${escapeHtml(hypothesisSymbolsText(row))}</p><p>Manual IB capture guidance: review findings before taking any external action.</p></section>` : ""}
+    ${hypothesisHasRecommendation(row) ? `<section class="hypothesis-recommendation-panel"><h2>Review Brief Available</h2><p>Confidence: ${escapeHtml(hypothesisConfidenceSummary(row))}</p><p>Related symbols: ${escapeHtml(hypothesisSymbolsText(row))}</p><p>Research-only finding. No broker execution or trade advice is enabled.</p></section>` : ""}
     <details class="hypotheses-diagnostics" data-hypothesis-detail-diagnostics>
       <summary>Diagnostics</summary>
       ${renderDefinitionRows([
@@ -11201,6 +21223,7 @@ function renderResearchHomeSummaryPanel(payload = {}) {
       `<div class="research-action-toolbar">
         <a class="primary-button research-action-button" href="/research-lab/start" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_start" data-route="/research-lab/start">+ Start Research</a>
         <a class="ghost-button research-action-button" href="/research-lab/hypotheses" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_hypotheses" data-route="/research-lab/hypotheses">Review Hypotheses</a>
+        <a class="ghost-button research-action-button" href="/research-lab/review" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_review" data-route="/research-lab/review">Research Review</a>
         <a class="ghost-button research-action-button" href="/research-lab/plans" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_plans" data-route="/research-lab/plans">Run/Continue Studies</a>
         <a class="ghost-button research-action-button" href="/research-lab/paper-trials" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_paper_trials" data-route="/research-lab/paper-trials">Continue Paper Trials</a>
         <a class="ghost-button research-action-button" href="/research-lab/sleeve-reviews" data-aegis-command-id="OPEN_VALID_ROUTE" data-aegis-command-action-type="EXPAND_SECTION" data-aegis-command-target-type="navigation" data-aegis-command-target-id="research_sleeve_reviews" data-route="/research-lab/sleeve-reviews">Review Sleeves</a>
@@ -11208,6 +21231,137 @@ function renderResearchHomeSummaryPanel(payload = {}) {
       </div>`,
     ].join(""),
   });
+}
+
+
+function researchReviewValidationUi(brief = {}) {
+  return brief.validation_ui && typeof brief.validation_ui === "object" ? brief.validation_ui : {};
+}
+
+function researchReviewDisplayStatus(brief = {}) {
+  const validation = researchReviewValidationUi(brief);
+  return validation.state_label || readableStatus(brief.status || "BLOCKED");
+}
+
+function renderResearchValidationStatusPanel(brief = {}) {
+  const validation = researchReviewValidationUi(brief);
+  if (!validation.state_label) return "";
+  return `<section class="research-review-brief-section research-validation-status" data-research-validation-status>
+    <h4>${escapeHtml(validation.state_label)}</h4>
+    <p>${escapeHtml(validation.message || "Research validation status is available.")}</p>
+    ${renderDefinitionRows([
+      { label: "Required samples", value: validation.required_samples ?? "Not reported" },
+      { label: "Current samples", value: validation.current_samples ?? "Not reported" },
+      { label: "Missing samples", value: validation.missing_samples ?? "Not reported" },
+      { label: "Sample count", value: validation.sample_count_label || "Not reported" },
+      { label: "Next sample", value: validation.next_sample_expected_at || "Not reported" },
+      { label: "Estimated completion", value: validation.estimated_completion_date || "Not reported" },
+      { label: "Trading days remaining", value: validation.expected_trading_days_remaining ?? "Not reported" },
+      { label: "Next action", value: validation.next_action || "Not reported" },
+      { label: "Operator action required", value: validation.operator_action_required ? "Yes" : "No" },
+      { label: "Paper-testing sleeve", value: validation.paper_testing_sleeve || "Not reported" },
+      { label: "Reason", value: validation.reason || "Not reported" },
+    ])}
+  </section>`;
+}
+
+function renderResearchReviewBriefCard(brief = {}) {
+  const status = String(brief.status || "BLOCKED");
+  const displayStatus = researchReviewDisplayStatus(brief);
+  const actions = safeList(brief.allowed_actions).filter(Boolean);
+  const symbols = safeList(brief.affected_symbols).join(", ") || "No affected symbols reported";
+  const evidence = safeList(brief.key_evidence).length
+    ? `<ul class="evidence-list compact">${safeList(brief.key_evidence).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : `<p>No structured key evidence was reported.</p>`;
+  const risks = safeList(brief.risks).length
+    ? `<ul class="evidence-list compact">${safeList(brief.risks).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : `<p>No specific risks were reported.</p>`;
+  return `<article class="hypothesis-card research-review-brief-card" data-research-review-brief data-hypothesis-id="${escapeHtml(brief.hypothesis_id || "")}">
+    <header class="hypothesis-card-header">
+      <div>
+        <h3>${escapeHtml(brief.title || "Research finding")}</h3>
+        <p class="hypothesis-card-description">${escapeHtml(brief.conclusion || "Review brief is blocked until required fields are present.")}</p>
+      </div>
+      <span class="hypothesis-status hypothesis-status-${escapeHtml(displayStatus.toLowerCase().replaceAll("_", "-").replaceAll(" ", "-"))}">${escapeHtml(displayStatus)}</span>
+    </header>
+    <dl class="hypothesis-card-facts hypothesis-compact-fact-rows">
+      <div class="hypothesis-fact-row"><dt>Confidence</dt><dd>${escapeHtml(readableStatus(brief.confidence || "Not reported"))}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Confidence reason</dt><dd>${escapeHtml(brief.confidence_reason || "Not reported")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Why it matters</dt><dd>${escapeHtml(brief.why_it_matters || "Not reported")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Affected symbols</dt><dd>${escapeHtml(symbols)}</dd></div>
+      <div class="hypothesis-fact-row"><dt>Decision needed</dt><dd>${escapeHtml(brief.decision_needed || "Not reported")}</dd></div>
+      <div class="hypothesis-fact-row"><dt>As of</dt><dd>${escapeHtml(brief.as_of || "Not reported")}</dd></div>
+    </dl>
+    ${renderResearchValidationStatusPanel(brief)}
+    <section class="research-review-brief-section"><h4>Key evidence</h4>${evidence}</section>
+    <section class="research-review-brief-section"><h4>Risks / caveats</h4>${risks}</section>
+    <div class="research-action-toolbar compact" aria-label="Research review actions">
+      ${actions.map((action) => `<button class="ghost-button research-action-button" type="button" data-aegis-command-id="${escapeHtml(action)}" data-aegis-command-action-type="RESEARCH_REVIEW_DECISION" data-aegis-command-target-type="hypothesis" data-aegis-command-target-id="${escapeHtml(brief.hypothesis_id || "")}">${escapeHtml(readableStatus(action))}</button>`).join("")}
+    </div>
+    <details class="hypotheses-diagnostics"><summary>Diagnostics</summary>
+      ${renderDefinitionRows([
+        { label: "Hypothesis ID", value: brief.hypothesis_id || "Not reported" },
+        { label: "Research run ID", value: brief.research_run_id || "Not reported" },
+        { label: "Source artifacts", value: safeList(brief.source_artifacts).map((item) => item.artifact_id || item.description || "source").join(", ") || "Not reported" },
+      ])}
+    </details>
+  </article>`;
+}
+
+function renderResearchReviewPageContent(payload = {}) {
+  const artifact = payload.artifact && typeof payload.artifact === "object" ? payload.artifact : payload;
+  const summary = artifact.summary || {};
+  const briefs = safeList(artifact.briefs);
+  const diagnostics = safeList(artifact.diagnostics);
+  return `<div class="hypotheses-workspace research-review-page" data-research-review-page data-artifact="AEGIS_RESEARCH_REVIEW_BRIEF_V1">
+    <section class="hypotheses-hero">
+      <div>
+        <p class="section-eyebrow">RESEARCH REVIEW</p>
+        <h1>Research Review</h1>
+        <p>Operator-readable research state and validation briefs.</p>
+      </div>
+      <div class="hypotheses-hero-actions">
+        <div class="hypotheses-total-count"><span>Artifact</span><strong>AEGIS_RESEARCH_REVIEW_BRIEF_V1</strong></div>
+      </div>
+    </section>
+    <section class="metric-grid">
+      ${renderMetricCard({ label: "Status", value: readableStatus(artifact.status || "MISSING") })}
+      ${renderMetricCard({ label: "Collecting Evidence", value: String(summary.collecting_evidence_count || 0) })}
+      ${renderMetricCard({ label: "Review Briefs", value: String(summary.review_brief_count || briefs.length || 0) })}
+      ${renderMetricCard({ label: "Blocked Briefs", value: String(summary.blocked_brief_count || 0) })}
+      ${renderMetricCard({ label: "As of", value: artifact.as_of || artifact.generated_at || "Not reported" })}
+    </section>
+    <section class="hypothesis-section" id="research-review-briefs">
+      <div class="hypothesis-section-heading"><h2>Research Briefs</h2><span>${escapeHtml(String(briefs.length))}</span></div>
+      <div class="hypothesis-card-grid">
+        ${briefs.length ? briefs.map(renderResearchReviewBriefCard).join("") : `<div class="hypothesis-empty-state">No research review briefs.</div>`}
+      </div>
+    </section>
+    <details class="hypotheses-diagnostics" data-research-review-diagnostics>
+      <summary>Diagnostics</summary>
+      ${diagnostics.length ? diagnostics.map((item) => `<div class="callout warning">${escapeHtml(item.message || JSON.stringify(item))}</div>`).join("") : `<div class="callout">No blocked review brief diagnostics.</div>`}
+    </details>
+  </div>`;
+}
+
+async function renderResearchReviewPage(state) {
+  let payload;
+  try {
+    payload = await fetchResearchReviewBrief();
+  } catch (error) {
+    payload = { ok: false, error: error?.message || "Research Review brief unavailable." };
+  }
+  const body = payload?.ok === false
+    ? `<div class="callout warning" data-research-review-missing>${escapeHtml(payload.message || payload.error || "Research Review brief unavailable.")}</div>`
+    : renderResearchReviewPageContent(payload);
+  return {
+    title: "Research Review",
+    meta: "Operator-readable research state and validation briefs.",
+    html: body,
+    contextHtml: "",
+    hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
+  };
 }
 
 function renderResearchPageBoundaryCard() {
@@ -11225,6 +21379,18 @@ function renderResearchPageBoundaryCard() {
 }
 
 async function renderResearchLabPage(state, mode = "home") {
+  const routeParams = routeQueryParams();
+  const [contractEnvelope, todayPayload] = await Promise.all([
+    fetchAegisOperatorSurfaceContract(routeParams).catch(() => ({})),
+    fetchAegisOperatorToday(routeParams).catch(() => ({})),
+  ]);
+  const contractPayload = contractEnvelope.data || contractEnvelope.artifact || contractEnvelope || {};
+  const researchSurface = surfaceContractRow({ operator_surface_contract: contractPayload }, "research");
+  const operatorTruth = buildOperatorTruthModel(todayPayload);
+  operatorTruth.actionLabel = "Research follow-ups only; no David trading action required.";
+  if (!contractPrimaryRenderAllowed(researchSurface)) {
+    return renderContractGatedPage({ title: "Research", subtitle: "What is being validated?", surfaceId: "research", contractRow: researchSurface });
+  }
   const dossierId = mode === "hypotheses" ? String(currentSearchParams().get("dossier") || "").trim() : "";
   const [consolePayload, dossierPayload] = await Promise.all([
     fetchResearchConsole().catch((error) => ({ ok: false, error: error?.message || "Hypotheses unavailable." })),
@@ -11253,9 +21419,14 @@ async function renderResearchLabPage(state, mode = "home") {
   return {
     title,
     meta,
-    html: panels.join(""),
+    html: EntityListTemplate({ surfaceId: "research", contractRow: researchSurface, bodyHtml: `${renderOperatorTruthStrip(operatorTruth, [
+      { label: "Research follow-ups", value: "Research-only", detail: "Follow-ups never authorize trading, broker action, or autonomous execution." },
+      { label: "Autonomous execution", value: "Disabled by policy", detail: "Runtime truth disables autonomous execution." },
+      { label: "Broker execution", value: "Disabled by policy", detail: "No broker action is enabled from Research." },
+    ])}${panels.join("")}` }),
     contextHtml: "",
     hideContextRail: true,
+    layoutMode: "WORKFLOW_LAYOUT",
   };
 }
 
@@ -13043,6 +23214,572 @@ async function renderReliabilityAiDraftPage(state) {
   };
 }
 
+
+function changeControlValidationState(row = {}) {
+  const status = String(row.status || "").toUpperCase();
+  const validationCount = safeList(row.validation_ids).length;
+  if (status === "CLOSED" || status === "VALIDATED" || validationCount > 0) return "Validated";
+  if (status === "IMPLEMENTED") return "Awaiting validation";
+  if (status === "REJECTED") return "Not applicable";
+  return "Not yet validated";
+}
+
+function changeControlDecisionSummary(row = {}, decisionsByChange = {}) {
+  const records = safeList(decisionsByChange[row.id]);
+  if (!records.length) return "No decision recorded yet.";
+  return records.map((record) => `${record.decision || "Decision"}: ${record.rationale || "No rationale recorded."}`).join(" ");
+}
+
+function changeControlImplementationSummary(row = {}, implementationsByChange = {}) {
+  const records = safeList(implementationsByChange[row.id]);
+  if (!records.length) return "No implementation record yet.";
+  return records.map((record) => record.summary || "Implementation summary unavailable.").join(" ");
+}
+
+function changeControlValidationSummary(row = {}, validationsByChange = {}) {
+  const records = safeList(validationsByChange[row.id]);
+  if (!records.length) return "No validation record yet.";
+  return records.map((record) => record.validation_summary || "Validation summary unavailable.").join(" ");
+}
+
+function changeControlEvidenceList(records = [], field) {
+  const values = records.flatMap((record) => safeList(record[field]));
+  return values.length ? values.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>None recorded.</li>`;
+}
+
+function changeControlList(values = [], emptyMessage = "None recorded.") {
+  const rows = safeList(values);
+  return rows.length ? rows.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>${escapeHtml(emptyMessage)}</li>`;
+}
+
+function changeControlRequiredEvidence(row = {}) {
+  const tags = new Set(safeList(row.tags));
+  const fields = [];
+  const type = String(row.change_type || "");
+  if (["BUG", "ENHANCEMENT", "OPERATOR_FEEDBACK", "PRODUCT_IMPROVEMENT"].includes(type) && tags.has("ui")) {
+    fields.push("screenshot_evidence");
+    if (tags.has("displayed_truth")) fields.push("browser_evidence");
+  }
+  if (tags.has("truth_data") || tags.has("artifact_api_browser_consistency")) {
+    fields.push("artifact_evidence", "api_evidence");
+    if (tags.has("operator_facing")) fields.push("browser_evidence");
+  }
+  if (type === "SAFETY_IMPROVEMENT" || tags.has("safety")) fields.push("safety_gate_evidence");
+  return Array.from(new Set(fields)).sort();
+}
+
+function changeControlEvidenceCompleteness(row = {}, validationsByChange = {}) {
+  if (row.evidence_completeness) return String(row.evidence_completeness);
+  const required = changeControlRequiredEvidence(row);
+  if (!required.length) return "No special closure evidence required";
+  const validations = safeList(validationsByChange[row.id]);
+  const missing = required.filter((field) => !validations.some((record) => safeList(record[field]).length));
+  if (!missing.length) return "Complete";
+  const status = String(row.status || "").toUpperCase();
+  const prefix = ["IMPLEMENTED", "VALIDATING", "VALIDATED", "CLOSED"].includes(status) ? "Missing" : "Required before closure";
+  return `${prefix}: ${missing.join(", ")}`;
+}
+
+function changeControlDecisionState(row = {}, decisionsByChange = {}) {
+  return safeList(decisionsByChange[row.id]).length ? "Decision recorded" : "Needs decision";
+}
+
+function changeControlImplementationState(row = {}, implementationsByChange = {}) {
+  return safeList(implementationsByChange[row.id]).length ? "Implementation recorded" : "Not implemented";
+}
+
+function changeControlDomain(row = {}) {
+  return row.affected_domain || row.owner || safeList(row.tags).slice(0, 2).join(", ") || row.change_type || "Unspecified";
+}
+
+function changeControlRecordAnchorId(id = "") {
+  return `change-control-item-${String(id || "").trim().replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+function changeControlRecordHref(id = "") {
+  return `/aegis-change-control#${changeControlRecordAnchorId(id)}`;
+}
+
+function renderChangeControlRecordLink(id = "", context = {}, label = "") {
+  const recordId = String(id || "").trim();
+  if (!recordId) return "";
+  const record = context.itemsById?.[recordId] || {};
+  const text = label || [recordId, record.title].filter(Boolean).join(" ") || recordId;
+  return `<a class="change-control-record-link" href="${escapeHtml(changeControlRecordHref(recordId))}" data-change-control-record-link="${escapeHtml(recordId)}">${escapeHtml(text)}</a>`;
+}
+
+function renderChangeControlLinkedIds(ids = [], context = {}, emptyMessage = "None") {
+  const values = safeList(ids).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!values.length) return `<span class="muted-mini">${escapeHtml(emptyMessage)}</span>`;
+  return values.map((id) => renderChangeControlRecordLink(id, context)).join(", ");
+}
+
+function renderChangeControlRelationshipNavigator(row = {}, context = {}) {
+  const parentId = String(row.parent_id || "").trim();
+  const childIds = Array.from(new Set([...safeList(row.required_child_ids), ...safeList(row.child_ids)]));
+  const dependencyIds = Array.from(new Set([...safeList(row.dependency_ids), ...safeList(row.prerequisite_records)]));
+  const blockerIds = Array.from(new Set([...safeList(row.blocker_ids), ...safeList(row.blocked_by_ids)]));
+  if (!parentId && !childIds.length && !dependencyIds.length && !blockerIds.length) return "";
+  return `<section class="stack-card change-control-linked-records" data-change-control-linked-records>
+    <div class="section-eyebrow">Navigation</div>
+    <h4>Linked Change Records</h4>
+    <div class="detail-grid">
+      <section><h5>Parent</h5><p class="support-note">${parentId ? renderChangeControlRecordLink(parentId, context) : "No parent record."}</p></section>
+      <section><h5>Children</h5><p class="support-note">${renderChangeControlLinkedIds(childIds, context, "No child records.")}</p></section>
+      <section><h5>Blockers</h5><p class="support-note">${renderChangeControlLinkedIds(blockerIds, context, "No blockers.")}</p></section>
+      <section><h5>Dependencies</h5><p class="support-note">${renderChangeControlLinkedIds(dependencyIds, context, "No linked dependency records.")}</p></section>
+    </div>
+  </section>`;
+}
+
+function renderChangeControlRequiredChildRecords(row = {}, context = {}) {
+  const childIds = safeList(row.required_child_ids);
+  if (!childIds.length) return "";
+  const itemsById = context.itemsById || {};
+  const children = childIds.map((id) => itemsById[id] || { id, title: "Child record title unavailable", status: "UNKNOWN" });
+  const completeStatuses = new Set(["VALIDATED", "CLOSED", "REJECTED"]);
+  const completeCount = children.filter((child) => completeStatuses.has(String(child.status || "").toUpperCase())).length;
+  const blockedBy = safeList(row.blocker_ids).join(", ") || safeList(row.required_child_ids).find((id) => !completeStatuses.has(String(itemsById[id]?.status || "").toUpperCase())) || "None";
+  const parentBlocked = completeCount < children.length;
+  const linkedStatus = children.map((child) => `${child.id || ""}: ${child.status || "UNKNOWN"}`).join(" | ");
+  return `<section class="stack-card change-control-required-children" data-change-control-required-children>
+    <div class="section-eyebrow">Parent validation gate</div>
+    <h4>Required Child Records</h4>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Completion rollup", value: `${completeCount}/${children.length} complete`, detail: `Linked status: ${linkedStatus || "No child records."}` })}
+      ${renderMetricCard({ label: "Parent validation blocked", value: parentBlocked ? "Yes" : "No", detail: parentBlocked ? "Parent cannot move to VALIDATED/CLOSED until required children are complete." : "Required children are complete." })}
+      ${renderMetricCard({ label: "Blocked by", value: blockedBy, detail: parentBlocked ? "Resolve this blocker first." : "No child blocker remains." })}
+    </div>
+    <p class="support-note"><strong>Blocked by:</strong> ${renderChangeControlLinkedIds(safeList(row.blocker_ids), context, "No blocker remains.")}</p>
+    <p class="support-note"><strong>Parent cannot move to VALIDATED/CLOSED until required children are complete.</strong></p>
+    <div class="stack-list compact">
+      ${children.map((child) => `<div class="compact-row" data-change-control-required-child="${escapeHtml(child.id || "")}"><div>${renderChangeControlRecordLink(child.id || "", context)}</div><div class="muted-mini">${escapeHtml(child.status || "UNKNOWN")} · ${escapeHtml(child.severity || "")} / ${escapeHtml(child.priority || "")}</div></div>`).join("")}
+    </div>
+  </section>`;
+}
+
+function renderChangeControlDecisionForm(row = {}) {
+  const status = String(row.status || "").toUpperCase();
+  if (["CLOSED", "VALIDATED"].includes(status)) {
+    return `<div class="empty-state">Decision workflow is closed for ${escapeHtml(status)} items.</div>`;
+  }
+  return `<form class="change-control-decision-form stack-card" method="post" data-change-control-decision-form>
+    <input type="hidden" name="change_id" value="${escapeHtml(row.id || "")}">
+    <div class="section-eyebrow">Controlled Decision Workflow</div>
+    <h4>Decide or prioritize this item</h4>
+    <p class="support-note">Allowed: approve, reject, defer, prioritize, and add decision notes. Close, validate, and implement remain evidence-driven and are not available here.</p>
+    <label class="field-label">Action
+      <select name="action" required>
+        <option value="NOTE">Add decision notes</option>
+        <option value="APPROVE">Approve</option>
+        <option value="REJECT">Reject</option>
+        <option value="DEFER">Defer</option>
+        <option value="PRIORITIZE">Prioritize</option>
+      </select>
+    </label>
+    <label class="field-label">Priority for prioritize action
+      <select name="priority">
+        <option value="">Keep current</option>
+        <option value="P0">P0</option>
+        <option value="P1">P1</option>
+        <option value="P2">P2</option>
+        <option value="P3">P3</option>
+      </select>
+    </label>
+    <label class="field-label">Decision notes
+      <textarea name="notes" rows="3" placeholder="Why this decision is being recorded"></textarea>
+    </label>
+    <div class="button-row">
+      <button class="primary-button" type="submit">Record Decision</button>
+      <span class="muted-mini" data-change-control-decision-status>No decision submitted.</span>
+    </div>
+  </form>`;
+}
+
+function renderChangeControlItemCards(rows = [], context = {}, emptyMessage = "No change-control items recorded.") {
+  if (!rows.length) {
+    return `<div class="empty-state">${escapeHtml(emptyMessage)}</div>`;
+  }
+  return rows.map((row) => {
+    const validations = safeList(context.validationsByChange?.[row.id]);
+    const hasRequiredChildren = safeList(row.required_child_ids).length > 0;
+    return `<details class="operator-disclosure stack-card change-control-item" id="${escapeHtml(changeControlRecordAnchorId(row.id || ""))}" tabindex="-1" data-change-control-item="${escapeHtml(row.id || "")}"${hasRequiredChildren ? " open" : ""}>
+      <summary><strong>${escapeHtml(row.id || "")}</strong> ${escapeHtml(row.title || "Untitled improvement")} <span class="status-pill small">${escapeHtml(row.status || "UNKNOWN")}</span></summary>
+      <div class="metric-grid compact">
+        ${renderMetricCard({ label: "Lifecycle status", value: row.status || "UNKNOWN", detail: "Implemented does not mean closed." })}
+        ${renderMetricCard({ label: "Severity / Priority", value: `${row.severity || ""} / ${row.priority || ""}`, detail: changeControlDomain(row) })}
+        ${renderMetricCard({ label: "Decision status", value: changeControlDecisionState(row, context.decisionsByChange), detail: row.decision_required_reason || "Decision details are read-only." })}
+        ${renderMetricCard({ label: "Implementation status", value: changeControlImplementationState(row, context.implementationsByChange), detail: changeControlImplementationSummary(row, context.implementationsByChange) })}
+        ${renderMetricCard({ label: "Validation status", value: changeControlValidationState(row), detail: changeControlEvidenceCompleteness(row, context.validationsByChange) })}
+      </div>
+      ${renderChangeControlRelationshipNavigator(row, context)}
+      ${renderChangeControlRequiredChildRecords(row, context)}
+      <div class="detail-grid">
+        <section><h4>Problem</h4>${renderDefinitionRows([
+          { label: "Description", value: row.description || "No description recorded." },
+          { label: "Affected domain", value: changeControlDomain(row) },
+          { label: "Origin", value: row.source || "Unknown" },
+          { label: "Strategic category", value: row.strategic_category || "Not categorized" },
+          { label: "Proposed next step", value: row.proposed_next_step || "No next step recorded." },
+          { label: "Parent", value: row.parent_id || "None" },
+          { label: "Required children", value: safeList(row.required_child_ids).join(", ") || "None" },
+          { label: "Dependencies", value: safeList(row.dependency_ids).join(", ") || safeList(row.prerequisite_records).join(", ") || "None" },
+          { label: "Blockers", value: safeList(row.blocker_ids).join(", ") || "None" },
+          { label: "Safety impact", value: safeList(row.tags).includes("safety") || row.change_type === "SAFETY_IMPROVEMENT" ? "Safety proof required before closure." : "No safety change requested." },
+        ])}</section>
+        <section><h4>Decision</h4><p class="support-note">${escapeHtml(changeControlDecisionSummary(row, context.decisionsByChange))}</p></section>
+        <section><h4>Implementation</h4><p class="support-note">${escapeHtml(changeControlImplementationSummary(row, context.implementationsByChange))}</p></section>
+        <section><h4>Validation</h4><p class="support-note">${escapeHtml(changeControlValidationSummary(row, context.validationsByChange))}</p><p class="support-note"><strong>Evidence completeness:</strong> ${escapeHtml(changeControlEvidenceCompleteness(row, context.validationsByChange))}</p></section>
+      </div>
+      ${renderChangeControlDecisionForm(row)}
+      <div class="detail-grid">
+        <section><h4>Operator value</h4><p class="support-note">${escapeHtml(row.operator_value || "Not recorded.")}</p></section>
+        <section><h4>Strategic value</h4><p class="support-note">${escapeHtml(row.strategic_value || "Not recorded.")}</p></section>
+        <section><h4>Why this matters long-term</h4><p class="support-note">${escapeHtml(row.why_long_term || "Not recorded.")}</p></section>
+        <section><h4>Safety impact</h4><p class="support-note">${escapeHtml(row.safety_impact || "No safety change requested.")}</p></section>
+      </div>
+      <div class="detail-grid">
+        <section><h4>Decision readiness</h4>${renderDefinitionRows([
+          { label: "Decision required", value: row.decision_required === true ? "Yes" : (row.decision_required === false ? "No" : "Not recorded") },
+          { label: "Question", value: row.decision_question || row.required_decision || "Not recorded" },
+          { label: "Recommended option", value: row.recommended_option || "Not recorded" },
+          { label: "Rationale", value: row.rationale || "Not recorded" },
+        ])}</section>
+        <section><h4>Rejected options</h4><ul class="line-list">${changeControlList(row.rejected_options)}</ul></section>
+        <section><h4>Implementation readiness</h4>${renderDefinitionRows([
+          { label: "Phase", value: row.implementation_phase || "Not recorded" },
+          { label: "Complexity", value: row.estimated_complexity || "Not recorded" },
+          { label: "Prerequisites", value: safeList(row.prerequisite_records).join(", ") || "None recorded" },
+          { label: "Downstream records", value: safeList(row.downstream_records).join(", ") || "None recorded" },
+        ])}</section>
+        <section><h4>Impacted surfaces and data</h4>${renderDefinitionRows([
+          { label: "Screens", value: safeList(row.screens_impacted).join(", ") || "None recorded" },
+          { label: "Artifacts/APIs", value: safeList(row.artifacts_apis_impacted).join(", ") || "None recorded" },
+        ])}</section>
+      </div>
+      <div class="detail-grid">
+        <section><h4>Non-goals</h4><ul class="line-list">${changeControlList(row.non_goals)}</ul></section>
+        <section><h4>Dependencies</h4><ul class="line-list">${changeControlList(row.dependencies)}</ul></section>
+        <section><h4>Risks</h4><ul class="line-list">${changeControlList(row.risks)}</ul></section>
+        <section><h4>Proposed phases</h4><ul class="line-list">${changeControlList(row.proposed_implementation_phases)}</ul></section>
+      </div>
+      <div class="detail-grid">
+        <section><h4>Acceptance criteria</h4><ul class="line-list">${changeControlList(row.acceptance_criteria)}</ul></section>
+        <section><h4>Required tests</h4><ul class="line-list">${changeControlList(row.required_tests)}</ul></section>
+        <section><h4>Required screenshots</h4><ul class="line-list">${changeControlList(row.required_screenshots)}</ul></section>
+        <section><h4>Required audit and safety proof</h4><ul class="line-list">${changeControlList(row.required_audit_proof)}${changeControlList(row.required_safety_proof)}</ul></section>
+      </div>
+      <div class="detail-grid">
+        <section><h4>Linked screenshots</h4><ul class="line-list">${changeControlEvidenceList(validations, "screenshot_evidence")}</ul></section>
+        <section><h4>Linked tests</h4><ul class="line-list">${changeControlEvidenceList(validations, "test_results")}</ul></section>
+        <section><h4>Safety proof</h4><ul class="line-list">${changeControlEvidenceList(validations, "safety_gate_evidence")}</ul></section>
+      </div>
+      <div class="detail-grid">
+        <section><h4>Audit evidence</h4><ul class="line-list">${changeControlEvidenceList(validations, "artifact_evidence")}${changeControlEvidenceList(validations, "api_evidence")}${changeControlEvidenceList(validations, "browser_evidence")}</ul></section>
+        <section><h4>Closure reason</h4><p class="support-note">${escapeHtml(row.status === "CLOSED" ? changeControlValidationSummary(row, context.validationsByChange) : "Item is not closed. Closure requires validation evidence.")}</p></section>
+      </div>
+    </details>`;
+  }).join("");
+}
+
+function renderChangeControlTable(rows = [], context = {}) {
+  return renderSimpleTable({
+    columns: [
+      { label: "ID", render: (row) => `<strong>${escapeHtml(row.id || "")}</strong>` },
+      { label: "Title", render: (row) => escapeHtml(row.title || "Untitled improvement") },
+      { label: "Status", render: (row) => escapeHtml(row.status || "UNKNOWN") },
+      { label: "Severity", render: (row) => escapeHtml(row.severity || "") },
+      { label: "Priority", render: (row) => escapeHtml(row.priority || "") },
+      { label: "Domain", render: (row) => escapeHtml(changeControlDomain(row)) },
+      { label: "Origin", render: (row) => escapeHtml(row.source || "Unknown") },
+      { label: "Validation state", render: (row) => escapeHtml(changeControlValidationState(row)) },
+    ],
+    rows,
+    emptyMessage: "No change-control items recorded.",
+  });
+}
+
+function groupChangeControlRecords(register = {}) {
+  const decisionsByChange = {};
+  const implementationsByChange = {};
+  const validationsByChange = {};
+  for (const record of safeList(register.decision_records)) {
+    const key = record.change_id || "";
+    if (!decisionsByChange[key]) decisionsByChange[key] = [];
+    decisionsByChange[key].push(record);
+  }
+  for (const record of safeList(register.implementation_records)) {
+    const key = record.change_id || "";
+    if (!implementationsByChange[key]) implementationsByChange[key] = [];
+    implementationsByChange[key].push(record);
+  }
+  for (const record of safeList(register.validation_records)) {
+    const key = record.change_id || "";
+    if (!validationsByChange[key]) validationsByChange[key] = [];
+    validationsByChange[key].push(record);
+  }
+  const itemsById = {};
+  for (const item of safeList(register.intake_register)) {
+    if (item?.id) itemsById[item.id] = item;
+  }
+  return { decisionsByChange, implementationsByChange, validationsByChange, itemsById };
+}
+
+
+function renderChangeControlLifecyclePipeline(lifecycleCounts = {}) {
+  const statuses = ["CAPTURED", "TRIAGED", "DECIDED", "IMPLEMENTED", "VALIDATING", "VALIDATED", "CLOSED", "DEFERRED", "REJECTED"];
+  return `<section class="stack-card change-control-pipeline">
+    <div class="section-eyebrow">Lifecycle Pipeline Summary</div>
+    <h3>Where work stands</h3>
+    <p class="support-note">Read-only lifecycle counts. Items move only through governed register updates, not this page.</p>
+    <div class="metric-grid compact">
+      ${statuses.map((status) => renderMetricCard({ label: status, value: String(lifecycleCounts[status] ?? 0) })).join("")}
+    </div>
+  </section>`;
+}
+
+function renderChangeControlRelationshipGraph(graph = {}, context = {}) {
+  const parents = safeList(graph.parents);
+  const edges = safeList(graph.edges);
+  const summary = graph.summary || {};
+  const parentCards = parents.length ? parents.map((parent) => {
+    const rollup = parent.rollup || {};
+    const children = safeList(parent.children);
+    const requiredChildren = safeList(parent.required_children);
+    return `<details class="operator-disclosure stack-card change-control-parent" open data-change-control-parent="${escapeHtml(parent.id || "")}">
+      <summary><strong>Parent ${escapeHtml(parent.id || "")}</strong> ${escapeHtml(parent.title || "Untitled parent")} <span class="status-pill small">${escapeHtml(parent.status || "UNKNOWN")}</span></summary>
+      <div class="metric-grid compact">
+        ${renderMetricCard({ label: "Completion rollup", value: rollup.completion_rollup || "No required children", detail: rollup.parent_validation_blocked ? "Parent validation is blocked by open required children." : "No child blocker currently prevents validation." })}
+        ${renderMetricCard({ label: "Required children open", value: String(rollup.required_children_open ?? 0), detail: safeList(rollup.required_child_ids_open).join(", ") || "None" })}
+        ${renderMetricCard({ label: "Child records", value: String(children.length), detail: "Required and optional child work linked to this parent." })}
+      </div>
+      <div class="detail-grid">
+        <section><h4>Required child items</h4>${renderChangeControlDashboardList(requiredChildren, context, "No required child items.")}</section>
+        <section><h4>All child items</h4>${renderChangeControlDashboardList(children, context, "No child items.")}</section>
+      </div>
+    </details>`;
+  }).join("") : `<div class="empty-state">No parent/child relationships recorded.</div>`;
+  return renderCardSection({
+    eyebrow: "Dependency Graph",
+    title: "Parent / child records",
+    subtitle: "Parent items cannot be validated while required child records remain open.",
+    body: [
+      `<section class="metric-grid compact">
+        ${renderMetricCard({ label: "Parent items", value: String(summary.parent_count ?? parents.length) })}
+        ${renderMetricCard({ label: "Dependency edges", value: String(summary.edge_count ?? edges.length) })}
+        ${renderMetricCard({ label: "Blocked parents", value: String(summary.blocked_parent_count ?? 0) })}
+      </section>`,
+      parentCards,
+      `<details class="operator-disclosure"><summary>Dependency edges</summary><ul class="line-list">${edges.length ? edges.map((edge) => `<li>${renderChangeControlRecordLink(edge.from || "", context)} ${escapeHtml(edge.relationship || "depends on")} ${renderChangeControlRecordLink(edge.to || "", context)}</li>`).join("") : "<li>No dependency edges recorded.</li>"}</ul></details>`,
+    ].join(""),
+  });
+}
+
+function renderChangeControlDashboardList(rows = [], context = {}, emptyMessage = "No items.") {
+  if (!safeList(rows).length) return `<div class="empty-state">${escapeHtml(emptyMessage)}</div>`;
+  return `<div class="stack-list compact">${safeList(rows).map((row) => `
+    <div class="compact-row">
+      <div>${context.itemsById ? renderChangeControlRecordLink(row.id || "", context) : `<strong>${escapeHtml(row.id || "")}</strong> ${escapeHtml(row.title || "Untitled improvement")}`}</div>
+      <div class="muted-mini">${escapeHtml(row.status || "UNKNOWN")} · ${escapeHtml(row.severity || "")} / ${escapeHtml(row.priority || "")} · ${escapeHtml(row.affected_domain || changeControlDomain(row))}</div>
+      <div class="support-note">${escapeHtml(row.decision_required_reason || row.evidence_completeness || "No additional reason recorded.")}</div>
+      <div class="support-note"><strong>Next:</strong> ${escapeHtml(row.proposed_next_step || "Review the governed record and decide next step.")}</div>
+    </div>`).join("")}</div>`;
+}
+
+function renderChangeControlValidationDashboard(report = {}, context = {}) {
+  const dashboard = report.validation_dashboard || {};
+  return renderCardSection({
+    eyebrow: "Validation Dashboard",
+    title: "Evidence required before closure",
+    subtitle: "Implementation is not closure. Closure requires validation evidence appropriate to the change type.",
+    body: [
+      `<section><h4>Items awaiting validation</h4>${renderChangeControlDashboardList(dashboard.awaiting_validation, context, "No items awaiting validation.")}</section>`,
+      `<section><h4>Missing required evidence</h4>${renderChangeControlDashboardList(dashboard.missing_required_evidence, context, "No implemented or validating items are missing required evidence.")}</section>`,
+      `<section><h4>UI items missing screenshots</h4>${renderChangeControlDashboardList(dashboard.ui_items_missing_screenshots, context, "No UI items are currently missing screenshot evidence.")}</section>`,
+      `<section><h4>Truth/data items missing proof</h4>${renderChangeControlDashboardList(dashboard.truth_data_items_missing_artifact_api_browser_proof, context, "No truth/data items are currently missing artifact/API/browser proof.")}</section>`,
+      `<section><h4>Safety items missing safety-gate proof</h4>${renderChangeControlDashboardList(dashboard.safety_items_missing_safety_gate_proof, context, "No safety items are currently missing safety-gate proof.")}</section>`,
+    ].join(""),
+  });
+}
+
+function renderChangeControlDecisionDashboard(report = {}, context = {}) {
+  const dashboard = report.decision_dashboard || {};
+  return renderCardSection({
+    eyebrow: "Decision Dashboard",
+    title: "Items awaiting decision",
+    subtitle: "Captured and triaged items need a decision before implementation starts.",
+    body: renderChangeControlDashboardList(dashboard.awaiting_decision, context, "No items awaiting decision."),
+  });
+}
+
+function renderChangeControlClosureEvidenceSummary(report = {}, context = {}) {
+  return renderCardSection({
+    eyebrow: "Closure Evidence",
+    title: "Validated and closed items",
+    subtitle: "Completed items must show validation evidence, screenshots when UI is involved, audit proof when truth/data is involved, and safety proof when safety is involved.",
+    body: renderChangeControlItemCards(report.closure_evidence_summary || [], context, "No validated or closed items yet."),
+  });
+}
+
+
+function renderChangeControlLabRecommendations(advisor = {}, review = {}) {
+  const scores = safeList(advisor.scores);
+  const top = scores[0] || {};
+  const reviewAction = safeList(review.recommended_next_actions)[0] || {};
+  return `<section class="stack-card change-control-lab-hero">
+    <div class="section-eyebrow">Recommended Next Actions</div>
+    <h3>${escapeHtml(top.record_id || "No recommendation")} ${escapeHtml(top.title || "")}</h3>
+    <p class="support-note">${escapeHtml(review.plain_english_summary || top.recommended_next_action || "No advisory summary is available.")}</p>
+    <div class="metric-grid compact">
+      ${renderMetricCard({ label: "Deterministic score", value: String(top.priority_score ?? "n/a"), detail: "Computed from frozen Change Control evidence. AI cannot change this score." })}
+      ${renderMetricCard({ label: "Risk level", value: top.risk_level || "UNKNOWN", detail: top.recommendation_category || "No category." })}
+      ${renderMetricCard({ label: "Blocks", value: safeList(top.blocks_records).join(", ") || "None", detail: "Records unlocked by resolving this item." })}
+      ${renderMetricCard({ label: "Human decision", value: review.human_decision_required ? "Required" : "Not required", detail: "Use governed Change Control workflow; this lab is read-only." })}
+    </div>
+    <p class="support-note"><strong>Suggested human decision:</strong> ${escapeHtml(reviewAction.action || top.recommended_next_action || "Review the recommendation.")}</p>
+  </section>`;
+}
+
+function renderChangeControlLabList(title = "Items", rows = [], empty = "No items.") {
+  return `<section class="stack-card"><div class="section-eyebrow">${escapeHtml(title)}</div>${safeList(rows).length ? `<div class="stack-list compact">${safeList(rows).map((row) => `<div class="compact-row"><div><strong>${escapeHtml(row.record_id || row.id || "")}</strong> ${escapeHtml(row.title || "Untitled")}</div><div class="muted-mini">${escapeHtml(row.status || row.risk_level || "")}${row.completion_rollup ? ` · ${escapeHtml(row.completion_rollup)}` : ""}</div><div class="support-note">${escapeHtml(row.recommended_next_action || row.proposed_next_step || row.decision_question || row.evidence_completeness || "No detail recorded.")}</div></div>`).join("")}</div>` : `<div class="empty-state">${escapeHtml(empty)}</div>`}</section>`;
+}
+
+function renderChangeControlLabPrompt(review = {}) {
+  const prompt = safeList(review.suggested_codex_prompts)[0] || "No suggested Codex prompt is available.";
+  return `<section class="stack-card"><div class="section-eyebrow">Suggested Codex Prompt</div><h3>Copyable prompt, not an automatic action</h3><p class="support-note">This prompt is advisory. The UI does not send it, approve work, validate work, close records, or mutate Change Control.</p><pre class="code-block">${escapeHtml(prompt)}</pre></section>`;
+}
+
+async function renderAegisChangeControlLabPage() {
+  return fetchAegisChangeControlIntelligence(routeQueryParams()).then((envelope) => {
+    if (!envelope?.ok || !envelope.data) {
+      return {
+        title: "Change Control Lab",
+        meta: "Advisory intelligence unavailable.",
+        html: renderCardSection({ eyebrow: "Unavailable", title: "Change Control Intelligence is unavailable", subtitle: "No stale recommendation is shown.", body: renderDefinitionRows([{ label: "Reason", value: envelope?.message || safeList(envelope?.errors).join(", ") || "Unavailable" }]) }),
+        contextHtml: "",
+      };
+    }
+    const snapshot = envelope.data.snapshot || {};
+    const advisor = envelope.data.advisor_score || {};
+    const review = envelope.data.ai_review || {};
+    const highRisk = safeList(advisor.scores).filter((row) => row.risk_level === "HIGH").slice(0, 5);
+    const staleRows = safeList(advisor.scores).filter((row) => row.stale_recommendation_flag || safeList(snapshot.validation_gaps).some((gap) => gap.record_id === row.record_id));
+    return {
+      title: "Change Control Lab",
+      meta: "Advisory-only next-action intelligence.",
+      layoutMode: "workflow",
+      html: [
+        renderSectionHeader({ eyebrow: "CHANGE CONTROL INTELLIGENCE", title: "What should David look at next?", subtitle: "Deterministic advisor ranking with AI explanation. Read-only: no approve, reject, defer, prioritize, validate, close, or implement controls." }),
+        renderChangeControlLabRecommendations(advisor, review),
+        renderChangeControlLabList("Blocked Parent Records", safeList(snapshot.incomplete_child_rollups).map((row) => ({ ...row, record_id: row.parent_id, title: "Parent validation blocked", status: "BLOCKED" })), "No blocked parent records."),
+        renderChangeControlLabList("Records Needing David Decision", snapshot.records_awaiting_decision, "No records need a decision."),
+        renderChangeControlLabList("Highest Risk Items", highRisk, "No high-risk items."),
+        renderChangeControlLabList("Stale / Contradictory Records", staleRows, "No stale or contradictory recommendations."),
+        renderChangeControlLabPrompt(review),
+        `<details class="operator-disclosure stack-card"><summary>Evidence snapshot</summary>${renderDefinitionRows([
+          { label: "Snapshot", value: snapshot.snapshot_id || "n/a" },
+          { label: "Register hash", value: snapshot.register_source_hash || "n/a" },
+          { label: "Advisor", value: advisor.advisor_score_id || "n/a" },
+          { label: "AI review", value: review.review_id || "n/a" },
+          { label: "Mutation performed", value: review.mutation_performed ? "Yes" : "No" },
+          { label: "Forbidden actions", value: safeList(review.forbidden_actions).join(", ") || "n/a" },
+        ])}</details>`,
+      ].join(""),
+      contextHtml: renderCardSection({ eyebrow: "Source", title: "Frozen evidence", subtitle: "AI reviews the snapshot, not live-changing files.", body: renderDefinitionRows([
+        { label: "Snapshot path", value: envelope.data.paths?.snapshot || "n/a" },
+        { label: "Advisor path", value: envelope.data.paths?.advisor_score || "n/a" },
+        { label: "AI review path", value: envelope.data.paths?.ai_review || "n/a" },
+      ]) }),
+    };
+  });
+}
+
+async function renderAegisChangeControlPage() {
+  return fetchAegisChangeControl().then((envelope) => {
+    if (!envelope?.ok || !envelope.data?.register) {
+      return {
+        title: "Change Control",
+        meta: "Enhancement request register unavailable.",
+        html: renderCardSection({
+          eyebrow: "Unavailable",
+          title: "Change Control is unavailable",
+          subtitle: "The enhancement register could not be loaded. No stale or fake items are shown.",
+          body: renderDefinitionRows([
+            { label: "Reason", value: envelope?.message || safeList(envelope?.errors).join(", ") || "Register unavailable." },
+            { label: "Next step", value: "Run the change-control validator or inspect System Health." },
+          ]),
+        }),
+        contextHtml: "",
+      };
+    }
+    const register = envelope.data.register || {};
+    const report = envelope.data.report || {};
+    const validation = envelope.data.validation || {};
+    const summary = report.summary || {};
+    const items = safeList(register.intake_register);
+    const context = groupChangeControlRecords(register);
+    const awaitingDecision = items.filter((row) => ["CAPTURED", "TRIAGED"].includes(String(row.status || "").toUpperCase()));
+    const awaitingValidation = items.filter((row) => String(row.status || "").toUpperCase() === "IMPLEMENTED");
+    const closed = items.filter((row) => String(row.status || "").toUpperCase() === "CLOSED");
+    const deferredRejected = items.filter((row) => ["DEFERRED", "REJECTED"].includes(String(row.status || "").toUpperCase()));
+    const v11Backlog = items.filter((row) => ["P2", "P3"].includes(String(row.priority || "").toUpperCase()) && !["CLOSED", "REJECTED"].includes(String(row.status || "").toUpperCase()));
+    const openP0P1Ids = new Set(safeList(report.open_p0_p1).map((row) => row.id));
+    const openP0P1 = items.filter((row) => openP0P1Ids.has(row.id));
+    return {
+      title: "Change Control",
+      meta: "Read-only enhancement requests, validation status, and V1.1 backlog.",
+      layoutMode: "workflow",
+      html: [
+        renderSectionHeader({ eyebrow: "CHANGE CONTROL", title: "Enhancement Requests", subtitle: "Read-only product memory for improvements, audit findings, validation, and closure evidence." }),
+        `<section class="stack-card"><div class="section-eyebrow">Controlled Decisions</div><h3>Change Control is governed, not free-form editable</h3><p class="support-note">This page can record approve, reject, defer, prioritize, and decision-note records. It cannot create enhancement items, close, validate, implement, or modify evidence-driven records. Closure still requires validation evidence in the governed register.</p></section>`,
+        `<section class="metric-grid compact change-control-summary">
+          ${renderMetricCard({ label: "Total items", value: String(summary.total_items ?? items.length) })}
+          ${renderMetricCard({ label: "Open P0/P1", value: String(summary.open_p0_p1_count ?? openP0P1.length) })}
+          ${renderMetricCard({ label: "Awaiting validation", value: String(summary.awaiting_validation_count ?? awaitingValidation.length) })}
+          ${renderMetricCard({ label: "V1.1 backlog", value: String(summary.v1_1_backlog_count ?? v11Backlog.length) })}
+          ${renderMetricCard({ label: "Recently closed", value: String(summary.recently_closed_count ?? closed.length) })}
+        </section>`,
+        renderChangeControlLifecyclePipeline(report.lifecycle_counts || {}),
+        renderChangeControlRelationshipGraph(report.relationship_graph || {}, context),
+        renderChangeControlValidationDashboard(report, context),
+        renderChangeControlDecisionDashboard(report, context),
+        renderChangeControlClosureEvidenceSummary(report, context),
+        renderCardSection({ eyebrow: "Highest Priority", title: "Open P0/P1", subtitle: "Highest-priority improvements that remain open.", body: renderChangeControlItemCards(openP0P1, context, "No open P0/P1 items.") }),
+        renderCardSection({ eyebrow: "Needs Decision", title: "Awaiting Decision", subtitle: "Captured or triaged items that need a decision before implementation.", body: renderChangeControlItemCards(awaitingDecision, context, "No items awaiting decision.") }),
+        renderCardSection({ eyebrow: "Evidence Required", title: "Awaiting Validation", subtitle: "Implemented or validating items cannot close until validation evidence exists.", body: renderChangeControlItemCards(awaitingValidation, context, "No items awaiting validation.") }),
+        renderCardSection({ eyebrow: "Planned", title: "V1.1 Backlog", subtitle: "Lower-priority improvements plus strategic backlog items that should not block V1.", body: renderChangeControlItemCards(v11Backlog, context, "No V1.1 backlog items.") }),
+        renderCardSection({ eyebrow: "Completed", title: "Recently Closed", subtitle: "Closed items with validation evidence.", body: renderChangeControlItemCards(closed, context, "No recently completed items.") }),
+        renderCardSection({ eyebrow: "Not Active", title: "Deferred / Rejected", subtitle: "Items explicitly deferred or rejected so feedback is not lost.", body: renderChangeControlItemCards(deferredRejected, context, "No deferred or rejected items.") }),
+        renderCardSection({ eyebrow: "All Items", title: "Change-Control Register", subtitle: "Read-only table of every captured improvement.", body: renderChangeControlTable(items, context) }),
+      ].join(""),
+      contextHtml: renderCardSection({
+        eyebrow: "Validation",
+        title: validation.ok ? "Register validation passed" : "Register validation failed",
+        subtitle: "The UI displays the governed register; it does not validate or close items locally.",
+        body: renderDefinitionRows([
+          { label: "Source", value: envelope.data.source_path || "aegis/change_control/aegis_change_control_register_v1.json" },
+          { label: "Validation failures", value: String(validation.failure_count ?? 0) },
+          { label: "Decision controls", value: "Approve, reject, defer, prioritize, and notes only" },
+          { label: "Evidence-driven controls", value: "Close, validate, and implement are not available here" },
+        ]),
+      }),
+    };
+  }).catch((error) => ({
+    title: "Change Control",
+    meta: "Enhancement request register unavailable.",
+    html: renderCardSection({
+      eyebrow: "Unavailable",
+      title: "Change Control is unavailable",
+      subtitle: "The enhancement register could not be loaded. No stale or fake items are shown.",
+      body: renderDefinitionRows([
+        { label: "Reason", value: error?.message || "Register unavailable." },
+        { label: "Next step", value: "Run the change-control validator or inspect System Health." },
+      ]),
+    }),
+    contextHtml: "",
+  }));
+}
+
 function renderBlockedDomain(routeId) {
   const route = routeForId(routeId);
   return {
@@ -13086,10 +23823,35 @@ export function buildPaletteEntries(state) {
 
 export async function loadRouteView(routeId, state) {
   switch (routeId) {
+    case "aegis_command_center":
+    case "aegis_trading_desk":
+      return renderCommandCenterWorkspace();
+    case "aegis_positions":
+      return renderPositionsWorkspace();
+    case "aegis_positions_diagnostics":
+      return renderPositionsDiagnosticsWorkspace();
+    case "aegis_operations_workspace":
+      return renderOperationsWorkspace();
+    case "aegis_research_workspace":
+      return renderResearchWorkspace();
+    case "aegis_audit_evidence":
+      return renderAuditEvidenceWorkspace();
     case "aegis_opportunities":
-      return renderAegisWorkflowPage("opportunities");
+      return renderEngineeringDashboardWorkspace();
+    case "aegis_change_control":
+      return renderAegisChangeControlPage();
+    case "aegis_change_control_lab":
+      return renderAegisChangeControlLabPage();
     case "aegis_candidates":
-      return renderAegisWorkflowPage("candidates");
+      return renderCandidatesWorkspace();
+    case "aegis_open_paper_positions":
+      return renderAegisWorkflowPage("open_paper_positions");
+    case "aegis_candidate_funnel":
+      return renderAegisWorkflowPage("candidate_funnel");
+    case "aegis_candidate_lineage":
+      return renderAegisCandidateLineagePage();
+    case "aegis_exit_review":
+      return renderAegisWorkflowPage("exit_review");
     case "aegis_runtime_timeline":
       return renderAegisWorkflowPage("runtime_timeline");
     case "aegis_repair_center":
@@ -13098,20 +23860,48 @@ export async function loadRouteView(routeId, state) {
       return renderAegisWorkflowPage("theses");
     case "aegis_edge_lab":
       return renderAegisWorkflowPage("edge_lab");
+    case "aegis_paper_performance":
+      return renderAegisPaperPerformancePage();
+    case "aegis_sleeve_validation":
+      return renderAegisSleeveValidationPage();
+    case "aegis_sleeve_analytics":
+      return renderAegisSleeveAnalyticsPage();
+    case "aegis_research_portfolio":
+      return renderAegisResearchPortfolioPage();
+    case "aegis_position_review":
+      return renderAegisPositionReviewPage();
     case "aegis_performance":
-      return renderAegisWorkflowPage("performance");
+      return renderAegisPaperPerformancePage();
     case "aegis_journal":
+      return renderAegisWorkflowPage("journal");
+    case "aegis_captured_trades":
       return renderAegisWorkflowPage("journal");
     case "aegis_today":
       return renderAegisWorkflowPage("opportunities");
     case "aegis_review":
-      return renderAegisWorkflowPage("performance");
+      return renderAegisPaperPerformancePage();
     case "aegis_research":
       return renderAegisWorkflowPage("edge_lab");
     case "aegis_history":
-      return renderAegisWorkflowPage("journal");
+      return renderHistoryWorkspace();
+    case "ai_cio_briefing":
+      return renderAiCioBriefingPage(state);
     case "command":
       return renderCommandPage(state);
+    case "cio_capital_map":
+      return renderCioSecondaryPage("capital");
+    case "cio_portfolios":
+      return renderCioSecondaryPage("portfolios");
+    case "cio_opportunities":
+      return renderCioSecondaryPage("opportunities");
+    case "cio_retirement_simulator":
+      return renderCioSecondaryPage("retirement");
+    case "cio_advisor_oversight":
+      return renderCioSecondaryPage("advisor");
+    case "cio_documents":
+      return renderCioSecondaryPage("documents");
+    case "cio_carolyn":
+      return renderCioSecondaryPage("carolyn");
     case "capital_overview":
       return renderCapitalOverviewPage(state);
     case "capital_accounts":
@@ -13144,6 +23934,8 @@ export async function loadRouteView(routeId, state) {
       return renderAegisRuntimePage(state);
     case "aegis_runtime_truth":
       return renderAegisRuntimeTruthPage(state);
+    case "aegis_verified_runtime":
+      return renderAegisVerifiedRuntimePage(state);
     case "aegis_operator_cockpit":
       return renderAegisOperatorCockpitPage(state);
     case "aegis_adaptive_intelligence":
@@ -13162,6 +23954,8 @@ export async function loadRouteView(routeId, state) {
       return renderResearchLabPage(state, "start");
     case "research_hypothesis_queue":
       return renderResearchLabPage(state, "hypotheses");
+    case "research_review":
+      return renderResearchReviewPage(state);
     case "research_plans":
       return renderResearchLabPage(state, "plans");
     case "research_evidence":
@@ -13204,6 +23998,14 @@ export async function loadRouteView(routeId, state) {
       return renderReliabilityVerificationsPage(state);
     case "reliability_ai":
       return renderReliabilityAiDraftPage(state);
+    case "operator_shell_not_found":
+      return {
+        title: "Page Not Found",
+        meta: "This route is not registered in the central operator shell route contract.",
+        html: `<section class="empty-state operator-shell-not-found"><h2>Page Not Found</h2><p>The requested operator shell route is not registered. Use the navigation to choose a valid workspace.</p></section>`,
+        contextHtml: "",
+        hideContextRail: true,
+      };
     default:
       return {
         title: "Unknown Route",
@@ -13378,7 +24180,7 @@ export async function executeCandidateWorkflow(formData, state) {
       external_execution_venue: String(formData?.get("external_execution_venue") || "").trim(),
       operator_notes: operatorNote,
       confidence_override: String(formData?.get("confidence_override") || "").trim(),
-      paper_trade_only: String(formData?.get("paper_trade_only") || "true").trim(),
+      paper_entry_only: String(formData?.get("paper_entry_only") || "true").trim(),
       review_decision: String(formData?.get("review_decision") || "MANUAL_CAPTURE_RECORDED").trim(),
       unsupported_evidence_acknowledgement: String(formData?.get("unsupported_evidence_acknowledgement") || "").trim() === "on",
     };

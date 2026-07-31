@@ -1,0 +1,9 @@
+id: KNW_0010
+statement: Deprecation should wait until runtime truth no longer requires the legacy artifact.
+evidence:
+  - OBS_0018
+  - Architecture authority model deprecation blockers
+limitations:
+  - Applies to reviewed compatibility layers only
+why_it_matters: Architecture cleanup can weaken auditability if it outruns runtime evidence.
+status: SUPPORTED

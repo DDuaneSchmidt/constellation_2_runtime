@@ -8,4 +8,4 @@ WorkingDirectory=/home/node/constellation_active
 Environment=PYTHONUNBUFFERED=1
 Environment=AEGIS_LITE_MANUAL_ONLY=1
 Environment=AEGIS_MARKET_DATA_MODE=INTRADAY_OPERATIONAL
-ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_intraday_sleeves_now_v1 --day-utc @today_utc@ --truth-root /home/node/constellation_runtime_data/truth --environment PAPER
+ExecStart=/usr/bin/bash -lc 'cd /home/node/constellation_active; exec /usr/bin/python3 -B ops/tools/run_aegis_intraday_sleeves_now_v1.py --day-utc $(date -u +%%F) --truth-root /home/node/constellation_runtime_data/truth --environment PAPER'

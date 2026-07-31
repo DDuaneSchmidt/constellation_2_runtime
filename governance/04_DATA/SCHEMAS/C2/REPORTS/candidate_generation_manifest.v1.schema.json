@@ -270,6 +270,34 @@
           "items": {
             "type": "string"
           }
+        },
+        "research_validation_required": {
+          "type": "boolean"
+        },
+        "hypothesis_id": {
+          "type": "string"
+        },
+        "hypothesis_version": {
+          "type": "string"
+        },
+        "research_validation_result_id": {
+          "type": "string"
+        },
+        "research_promotion_gate_status": {
+          "type": "string"
+        },
+        "research_promotion_gate_hash": {
+          "type": "string"
+        },
+        "research_validation_enforcement_status": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "REJECTED_RESEARCH_VALIDATION_MISSING",
+            "REJECTED_RESEARCH_NOT_SUPPORTED",
+            "REJECTED_RESEARCH_GATE_MISMATCH",
+            "NOT_RESEARCH_DERIVED"
+          ]
         }
       }
     }

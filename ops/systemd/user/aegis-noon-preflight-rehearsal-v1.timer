@@ -1,4 +1,7 @@
 [Unit]
+X-RetirementStatus=RETIRED
+ConditionPathExists=/run/constellation_2/legacy_candidate_generation_alerts_enabled
+# Legacy candidate-generation noon preflight retired 2026-06-22.
 Description=Schedule Aegis Noon Preflight Rehearsal v1 at 12:00 America/New_York
 Documentation=/home/node/constellation/docs/aegis_noon_preflight_rehearsal.md
 

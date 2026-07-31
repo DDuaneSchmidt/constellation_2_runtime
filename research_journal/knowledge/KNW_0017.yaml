@@ -1,0 +1,13 @@
+id: KNW_0017
+statement: Outcome maturity can improve while still remaining underpowered when closed outcomes are few and sleeve-concentrated.
+evidence:
+  - OBS_0002 evidence review
+  - Validation samples increased from 2 included samples on 2026-06-01 to 12 on 2026-06-03
+  - Paper position ledger showed 63 positions and 51 open positions on 2026-06-03
+  - Sleeve performance truth showed all 12 closed paper positions on 2026-06-03 were from C2_TREND_EQ_PRIMARY_V1
+  - Research quality engine showed 0 hypotheses ready for capital review across 2026-06-01 through 2026-06-04
+limitations:
+  - 2026-06-04 sleeve performance truth was blocked by missing paper_position_events authority
+  - Available outcome-flow audit exists for 2026-06-03 only
+why_it_matters: Researchers should distinguish improving sample count from statistically meaningful, broadly distributed outcome maturity.
+status: SUPPORTED

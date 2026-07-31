@@ -19,6 +19,11 @@ from constellation_2.common.aegis_market_context_v1 import (  # noqa: E402
     write_event_market_snapshot_v1,
 )
 from ops.aegis.intelligence_common_v1 import latest_json_v1  # noqa: E402
+from ops.aegis.market_context_demand_v1 import (  # noqa: E402
+    build_market_context_demand_v1,
+    market_context_snapshot_inputs_v1,
+    write_market_context_demand_v1,
+)
 from ops.aegis.event_append_transaction_v1 import (  # noqa: E402
     contract_input_hashes_for_paths_v1,
     emit_artifact_evidence_transaction_v1,
@@ -289,7 +294,12 @@ def main(argv: list[str] | None = None) -> int:
     derived_lineage: list[dict[str, Any]] = []
     market_data = _read_json(args.market_data_json) if args.market_data_json else {}
     if not args.market_data_json:
-        market_data, derived_lineage = _market_data_report_context(truth_root=truth_root, day_utc=day_utc)
+        demand_payload = build_market_context_demand_v1(truth_root=truth_root, day_utc=day_utc, generated_at_utc=generated_at)
+        write_market_context_demand_v1(truth_root=truth_root, day_utc=day_utc, payload=demand_payload)
+        market_data = market_context_snapshot_inputs_v1(demand_payload, truth_root=truth_root, day_utc=day_utc)
+        derived_lineage = market_data.get("source_lineage") if isinstance(market_data.get("source_lineage"), list) else []
+        if not market_data:
+            market_data, derived_lineage = _market_data_report_context(truth_root=truth_root, day_utc=day_utc)
         if not market_data:
             market_data, derived_lineage = _derive_market_data_from_truth(truth_root=truth_root, day_utc=day_utc)
     if not isinstance(market_data, dict):

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from .common import (
+    GLOBAL_TRUTH_ROOT,
     REPO_ROOT,
     SLEEVE_TRUTH_ROOT,
     evidence_ref,
@@ -584,9 +585,152 @@ def _load_capital_policy() -> tuple[List[Dict[str, Any]], Optional[Path], List[s
     return rows, policy_path, warnings
 
 
+def _load_bond_sleeve_registry_row() -> tuple[Optional[Dict[str, Any]], Optional[Path], List[str]]:
+    registry_path = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
+    registry_doc, registry_err = read_json_dict(registry_path)
+    if not isinstance(registry_doc, dict):
+        return None, registry_path, [f"SLEEVE_REGISTRY_{registry_err or 'UNREADABLE'}"]
+    sleeves = registry_doc.get("sleeves")
+    if not isinstance(sleeves, list):
+        return None, registry_path, ["SLEEVE_REGISTRY_SLEEVES_INVALID"]
+    for row in sleeves:
+        if isinstance(row, dict) and str(row.get("sleeve_id") or "").strip().upper() == "BOND":
+            return row, registry_path, []
+    return None, registry_path, []
+
+
+def _latest_bond_recommendation_for_ui(day: Optional[str]) -> Dict[str, Any]:
+    day_text = _string_or_none(day)
+    roots = [
+        (GLOBAL_TRUTH_ROOT / "reports" / "bond_sleeve_recommendation_v2").resolve(),
+        (SLEEVE_TRUTH_ROOT / "bond_decision_artifact_v1").resolve(),
+    ]
+    candidates: List[tuple[str, Path, str]] = []
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for day_dir in root.iterdir():
+            if not day_dir.is_dir() or not _string_or_none(day_dir.name):
+                continue
+            if root.name == "bond_sleeve_recommendation_v2":
+                artifact = (day_dir / "bond_sleeve_recommendation.v2.json").resolve()
+                source = "bond_sleeve_recommendation_v2"
+            else:
+                artifact = (day_dir / "bond_decision_artifact.v1.json").resolve()
+                source = "bond_decision_artifact_v1"
+            if artifact.exists() and artifact.is_file():
+                candidates.append((day_dir.name, artifact, source))
+    if not candidates:
+        return {"present": False}
+    same_day = [row for row in candidates if day_text and row[0] == day_text]
+    selected_day, path, source = sorted(same_day or candidates, key=lambda row: (row[0], str(row[1])))[-1]
+    doc, _err = read_json_dict(path)
+    if not isinstance(doc, dict):
+        return {"present": False, "artifact_path": str(path)}
+    if source == "bond_sleeve_recommendation_v2":
+        state = _string_or_none(doc.get("recommendation_state")) or _string_or_none(doc.get("action_state")) or "MANUAL_REVIEW"
+        produced = _string_or_none(doc.get("produced_utc"))
+        next_step = _string_or_none(doc.get("operator_next_step"))
+    else:
+        summary = doc.get("decision_summary") if isinstance(doc.get("decision_summary"), Mapping) else {}
+        state = _string_or_none(summary.get("rebalance_state")) or _string_or_none(doc.get("authority_status")) or "MANUAL_REVIEW"
+        produced = _string_or_none(doc.get("created_at"))
+        next_step = "Review the bond recommendation manually; automated execution is not enabled."
+    return {
+        "present": True,
+        "day_utc": selected_day,
+        "artifact_path": str(path),
+        "source": source,
+        "produced_utc": produced,
+        "recommendation_state": state.upper(),
+        "operator_next_step": next_step,
+    }
+
+
+def _bond_manual_sleeve_row(day: Optional[str], registry_row: Optional[Dict[str, Any]], registry_ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(registry_row, dict):
+        return None
+    if str(registry_row.get("execution_mode") or "").strip().upper() != "MANUAL":
+        return None
+    if registry_row.get("ui_visible") is False or not bool(registry_row.get("enabled")):
+        return None
+    latest = _latest_bond_recommendation_for_ui(day)
+    recommendation_state = _string_or_none(latest.get("recommendation_state")) if latest.get("present") else "unavailable"
+    as_of_utc = _string_or_none(latest.get("produced_utc"))
+    refs = evidence_refs(registry_ref)
+    artifact_path = _string_or_none(latest.get("artifact_path"))
+    if artifact_path:
+        refs = evidence_refs(registry_ref, evidence_ref(Path(artifact_path), label="BOND Manual Recommendation", artifact_type=str(latest.get("source") or "bond_manual_recommendation")))
+    return {
+        "entity_id": "BOND",
+        "sleeve_id": "BOND",
+        "display_name": _string_or_none(registry_row.get("display_name")) or "Bond Sleeve",
+        "engine_ids": [],
+        "priority_rank": registry_row.get("priority_rank") if isinstance(registry_row.get("priority_rank"), int) else 900,
+        "execution_scope_id": "MANUAL_ADVISORY",
+        "mode": _string_or_none(registry_row.get("mode")) or "PAPER",
+        "execution_mode": "MANUAL",
+        "execution_label": "Manual execution",
+        "advisory_label": "Advisory only",
+        "manual_execution_only": True,
+        "advisory_only": True,
+        "broker_execution_allowed": False,
+        "automated_execution_allowed": False,
+        "asset_class": _string_or_none(registry_row.get("asset_class")) or "FIXED_INCOME",
+        "target_allocation_pct": None,
+        "target_allocation_status": "MANUAL_POLICY",
+        "actual_allocation_pct": None,
+        "actual_value_usd": None,
+        "effective_budget_usd": None,
+        "effective_budget_status": "MANUAL_ADVISORY_ONLY",
+        "effective_risk_budget_usd": None,
+        "used_risk_budget_usd": None,
+        "headroom_usd": None,
+        "performance_metrics": {"lookback_window": {}, "sample_trade_count": None, "warnings": []},
+        "drawdown_metrics": {"max_drawdown_pct": None, "drawdown_status": "MANUAL_ADVISORY_ONLY", "warnings": []},
+        "stability_metrics": {"drift_band": "MANUAL", "stability_state": "manual_advisory", "sample_sufficiency_band": "N/A", "confidence_state": "MANUAL", "execution_health_band": "MANUAL"},
+        "qualification_state": "MANUAL_ADVISORY",
+        "edge_band": "MANUAL_ADVISORY",
+        "tax_efficiency_summary": {"status": "UNAVAILABLE", "warnings": []},
+        "recommendation": {
+            "recommendation_state": recommendation_state,
+            "state_class": "MANUAL_ADVISORY",
+            "alignment_state": "MANUAL_REVIEW",
+            "control_state": "advisory_only",
+            "backend_reason_codes": ["BOND_MANUAL_ADVISORY_ONLY"],
+        },
+        "latest_evaluation": latest,
+        "evidence_summary": {"source_artifact_count": 1 if latest.get("present") else 0, "sample_trade_count": None, "closure_state": "MANUAL_ADVISORY", "first_blocker_code": ""},
+        "policy_limits": {"max_capital_at_risk_usd": None, "max_symbols": None, "max_single_name_notional_pct": None, "max_sector_concentration_pct": None},
+        "truth_state": "derived",
+        "as_of_utc": as_of_utc,
+        "freshness_state": freshness_state(as_of_utc),
+        "source_authority": ["C2_SLEEVE_REGISTRY_V1", "bond_sleeve_recommendation_v2", "bond_decision_artifact_v1"],
+        "provenance_refs": refs,
+        "degradation_codes": [] if latest.get("present") else ["BOND_EVALUATION_NOT_AVAILABLE"],
+        "readiness_grade_1_to_7": None,
+        "score_threshold_grade_1_to_7": None,
+        "readiness_grade_scale": None,
+        "grading_thresholds_1_to_7": [],
+        "readiness_score": None,
+        "readiness_score_threshold": None,
+        "readiness_promotion_candidate": False,
+        "readiness_threshold_met": None,
+        "readiness_contributing_factors": [],
+        "readiness_reason_codes": [],
+        "measurement_reason_codes": [],
+        "measurement_attribution_diagnostics": {},
+        "readiness_grade_reason": "Manual/advisory bond sleeve; automated readiness artifacts are not required.",
+        "readiness_grade_next_step": _string_or_none(latest.get("operator_next_step")) or "Review bond sleeve manually when a recommendation is available.",
+        "readiness_diagnostic_code": "MANUAL_ADVISORY_NO_AUTOMATED_READINESS_REQUIRED",
+        "readiness_artifact_path": None,
+    }
+
+
 def build_sleeve_evaluation_view(day: Optional[str] = None) -> Dict[str, Any]:
     resolved_day = _resolve_sleeve_day(day)
     policy_rows, policy_path, policy_warnings = _load_capital_policy()
+    bond_registry_row, bond_registry_path, bond_registry_warnings = _load_bond_sleeve_registry_row()
     sleeve_readiness, sleeve_readiness_path, sleeve_readiness_warnings = _load_sleeve_live_readiness(resolved_day)
 
     allocation_path = (
@@ -611,10 +755,15 @@ def build_sleeve_evaluation_view(day: Optional[str] = None) -> Dict[str, Any]:
         label="Sleeve Live Readiness",
         artifact_type="C2_SLEEVE_LIVE_READINESS_V1",
     )
+    bond_registry_ref = evidence_ref(
+        bond_registry_path if bond_registry_path else None,
+        label="Sleeve Registry",
+        artifact_type="C2_SLEEVE_REGISTRY_V1",
+    )
 
     rows: List[Dict[str, Any]] = []
-    sleeve_warnings: List[str] = list(policy_warnings) + list(sleeve_readiness_warnings)
-    source_refs: List[Dict[str, Any]] = evidence_refs(policy_ref, allocation_ref, sleeve_readiness_ref)
+    sleeve_warnings: List[str] = list(policy_warnings) + list(bond_registry_warnings) + list(sleeve_readiness_warnings)
+    source_refs: List[Dict[str, Any]] = evidence_refs(policy_ref, allocation_ref, sleeve_readiness_ref, bond_registry_ref)
     top_as_of_candidates: List[str] = []
 
     for policy_row in policy_rows:
@@ -965,6 +1114,14 @@ def build_sleeve_evaluation_view(day: Optional[str] = None) -> Dict[str, Any]:
             }
         )
 
+    bond_row = _bond_manual_sleeve_row(resolved_day, bond_registry_row, bond_registry_ref)
+    if bond_row is not None:
+        rows.append(bond_row)
+        bond_as_of = _string_or_none(bond_row.get("as_of_utc"))
+        if bond_as_of:
+            top_as_of_candidates.append(bond_as_of)
+        source_refs.extend(list(bond_row.get("provenance_refs") or []))
+
     if allocation_doc is None:
         sleeve_warnings.append(f"CAPITAL_AUTHORITY_ALLOCATION_{allocation_err or 'UNREADABLE'}")
 
@@ -1010,7 +1167,7 @@ def build_sleeve_evaluation_view(day: Optional[str] = None) -> Dict[str, Any]:
         sleeve_registry_summary={
             "total_sleeves": len(rows),
             "evaluated_sleeves": sum(1 for row in rows if row["recommendation"]["recommendation_state"] != "unavailable"),
-            "source_refs": evidence_refs(policy_ref, allocation_ref, sleeve_readiness_ref),
+            "source_refs": evidence_refs(policy_ref, allocation_ref, sleeve_readiness_ref, bond_registry_ref),
             "warnings": ["TARGET_ALLOCATION_POLICY_UNPROVEN"],
         },
         sleeve_live_readiness_summary={

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_cheap_experiment_executor.v1.schema.json",
+  "title": "Atlas V2 Cheap Experiment Executor V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ExperimentExecutionRun"},
+    {"$ref": "#/$defs/ExperimentResult"},
+    {"$ref": "#/$defs/ExperimentOutcomeSummary"}
+  ],
+  "$defs": {
+    "Tier": {"enum": ["TIER_0_DEDUPE", "TIER_1_SANITY", "TIER_2_LIGHTWEIGHT_VALIDATION"]},
+    "DataMode": {"enum": ["FIXTURE", "MOCK_HISTORICAL", "HISTORICAL_READONLY"]},
+    "Outcome": {"enum": ["PASS", "FAIL", "INCONCLUSIVE"]},
+    "FalsificationResult": {"enum": ["FALSIFIED", "NOT_FALSIFIED", "INCONCLUSIVE"]},
+    "Transition": {
+      "type": "object",
+      "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"],
+      "properties": {
+        "transitioned_at": {"type": "string", "minLength": 1},
+        "from_status": {"type": "string"},
+        "to_status": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "triggering_object": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": ["object_type", "created_at", "transition_history"],
+      "properties": {
+        "object_type": {"type": "string"},
+        "created_at": {"type": "string", "minLength": 1},
+        "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}
+      }
+    },
+    "ExperimentResult": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["result_id", "execution_run_id", "experiment_spec_id", "hypothesis_id", "mechanism_id", "tier", "data_mode", "baseline_condition", "baseline_observation_count", "experiment_observation_count", "baseline_metric_value", "experiment_metric_value", "baseline_comparison", "evaluation_metric", "falsification_threshold", "falsification_result", "outcome", "result_summary", "authority_boundary_acknowledged", "status"],
+          "properties": {
+            "object_type": {"const": "ExperimentResult"},
+            "result_id": {"type": "string", "minLength": 1},
+            "execution_run_id": {"type": "string", "minLength": 1},
+            "experiment_spec_id": {"type": "string", "minLength": 1},
+            "hypothesis_id": {"type": "string", "minLength": 1},
+            "mechanism_id": {"type": "string", "minLength": 1},
+            "tier": {"$ref": "#/$defs/Tier"},
+            "data_mode": {"$ref": "#/$defs/DataMode"},
+            "baseline_condition": {"type": "string", "minLength": 1},
+            "baseline_observation_count": {"type": "integer", "minimum": 0},
+            "experiment_observation_count": {"type": "integer", "minimum": 0},
+            "baseline_metric_value": {"type": "number"},
+            "experiment_metric_value": {"type": "number"},
+            "baseline_comparison": {"type": "string", "minLength": 1},
+            "evaluation_metric": {"type": "string", "minLength": 1},
+            "falsification_threshold": {"type": "string", "minLength": 1},
+            "falsification_result": {"$ref": "#/$defs/FalsificationResult"},
+            "outcome": {"$ref": "#/$defs/Outcome"},
+            "result_summary": {"type": "string", "minLength": 1},
+            "authority_boundary_acknowledged": {"const": true},
+            "status": {"const": "RECORDED_READ_ONLY_RESULT"}
+          }
+        }
+      ]
+    },
+    "ExperimentOutcomeSummary": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["summary_id", "execution_run_id", "result_count", "pass_count", "fail_count", "inconclusive_count", "falsified_count", "not_falsified_count", "baseline_comparison_recorded_count", "authority_boundary_acknowledged", "status"],
+          "properties": {
+            "object_type": {"const": "ExperimentOutcomeSummary"},
+            "summary_id": {"type": "string", "minLength": 1},
+            "execution_run_id": {"type": "string", "minLength": 1},
+            "result_count": {"type": "integer", "minimum": 0},
+            "pass_count": {"type": "integer", "minimum": 0},
+            "fail_count": {"type": "integer", "minimum": 0},
+            "inconclusive_count": {"type": "integer", "minimum": 0},
+            "falsified_count": {"type": "integer", "minimum": 0},
+            "not_falsified_count": {"type": "integer", "minimum": 0},
+            "baseline_comparison_recorded_count": {"type": "integer", "minimum": 0},
+            "authority_boundary_acknowledged": {"const": true},
+            "status": {"const": "SUMMARIZED_READ_ONLY_RESULTS"}
+          }
+        }
+      ]
+    },
+    "ExperimentExecutionRun": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["execution_run_id", "executor_version", "input_spec_count", "result_count", "experiment_spec_ids", "result_ids", "outcome_summary_id", "allowed_data_modes", "forbidden_authority_acknowledged", "status"],
+          "properties": {
+            "object_type": {"const": "ExperimentExecutionRun"},
+            "execution_run_id": {"type": "string", "minLength": 1},
+            "executor_version": {"const": "atlas_v2_cheap_experiment_executor_v1"},
+            "input_spec_count": {"type": "integer", "minimum": 0},
+            "result_count": {"type": "integer", "minimum": 0},
+            "experiment_spec_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "result_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "outcome_summary_id": {"type": "string", "minLength": 1},
+            "allowed_data_modes": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/DataMode"}},
+            "forbidden_authority_acknowledged": {"const": true},
+            "status": {"const": "COMPLETED_READ_ONLY_EXECUTION"}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,268 @@
+{
+  "$defs": {
+    "provider_history": {
+      "additionalProperties": false,
+      "properties": {
+        "day_utc": {
+          "minLength": 10,
+          "type": "string"
+        },
+        "provider_item_statuses": {
+          "type": "object"
+        },
+        "status_counts": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "day_utc",
+        "status_counts",
+        "provider_item_statuses"
+      ],
+      "type": "object"
+    },
+    "provider_item": {
+      "additionalProperties": false,
+      "properties": {
+        "active_context_profile_id": {
+          "type": "string"
+        },
+        "allowed_fallback_reference_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_provider_chain": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "blocker_severity": {
+          "type": "string"
+        },
+        "certification_status": {
+          "enum": [
+            "CERTIFIED",
+            "CERTIFIED_REFERENCE",
+            "BLOCKED"
+          ],
+          "type": "string"
+        },
+        "checked_evidence_hashes": {
+          "type": "object"
+        },
+        "checked_evidence_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "consuming_capability": {
+          "type": "string"
+        },
+        "context_item_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "context_requirement": {
+          "type": "object"
+        },
+        "context_requirement_profile_hash": {
+          "type": "string"
+        },
+        "context_requirement_profile_path": {
+          "type": "string"
+        },
+        "data_item_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "failure_reason": {
+          "type": "string"
+        },
+        "fetch_attempted": {
+          "type": "boolean"
+        },
+        "fetch_status": {
+          "type": "string"
+        },
+        "freshness_status": {
+          "type": "string"
+        },
+        "health_status": {
+          "enum": [
+            "PROVIDER_NOT_CONFIGURED",
+            "CONTEXT_NOT_FETCHED",
+            "CONTEXT_STALE",
+            "CONTEXT_UNCERTIFIED",
+            "CONTEXT_CERTIFIED"
+          ],
+          "type": "string"
+        },
+        "next_repair_action": {
+          "type": "string"
+        },
+        "policy_mode": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provider_configured": {
+          "type": "boolean"
+        },
+        "reference_trading_days_old": {},
+        "same_day_required_now": {
+          "type": "boolean"
+        },
+        "session_date": {
+          "type": "string"
+        },
+        "source_artifact_path": {
+          "type": "string"
+        },
+        "source_hash": {
+          "type": "string"
+        },
+        "source_label": {
+          "type": "string"
+        },
+        "timestamp_utc": {
+          "type": "string"
+        },
+        "value": {}
+      },
+      "required": [
+        "context_item_id",
+        "data_item_id",
+        "provider_configured",
+        "allowed_provider_chain",
+        "fetch_attempted",
+        "fetch_status",
+        "provider",
+        "health_status",
+        "certification_status",
+        "timestamp_utc",
+        "session_date",
+        "source_artifact_path",
+        "source_hash",
+        "checked_evidence_paths",
+        "checked_evidence_hashes",
+        "freshness_status",
+        "source_label",
+        "policy_mode",
+        "same_day_required_now",
+        "reference_trading_days_old",
+        "failure_reason",
+        "next_repair_action"
+      ],
+      "type": "object"
+    },
+    "provider_outage": {
+      "additionalProperties": false,
+      "properties": {
+        "failure_reason": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "request_status": {
+          "type": "string"
+        },
+        "returned_data_date": {
+          "type": "string"
+        },
+        "timestamp_utc": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "request_status",
+        "returned_data_date",
+        "timestamp_utc",
+        "failure_reason"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://constellation.local/schemas/C2/REPORTS/provider_health.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_id": {
+      "const": "aegis_market_context_provider_health_v1"
+    },
+    "canonical_json_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "day_utc": {
+      "minLength": 10,
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "minLength": 20,
+      "type": "string"
+    },
+    "provider_configurations": {
+      "type": "object"
+    },
+    "provider_health_history": {
+      "items": {
+        "$ref": "#/$defs/provider_history"
+      },
+      "type": "array"
+    },
+    "provider_items": {
+      "items": {
+        "$ref": "#/$defs/provider_item"
+      },
+      "type": "array"
+    },
+    "provider_outages": {
+      "items": {
+        "$ref": "#/$defs/provider_outage"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "aegis_market_context_provider_health"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "source_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_hashes": {
+      "type": "object"
+    },
+    "status_counts": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at_utc",
+    "provider_configurations",
+    "provider_items",
+    "status_counts",
+    "provider_outages",
+    "provider_health_history",
+    "source_artifacts",
+    "source_hashes",
+    "canonical_json_hash"
+  ],
+  "title": "provider_health.v1",
+  "type": "object"
+}

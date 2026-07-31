@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 try:
     from constellation_2.common.runtime_base_v1 import ensure_repo_root_on_sys_path
 except ModuleNotFoundError:  # pragma: no cover - direct script execution bootstrap

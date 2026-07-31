@@ -173,6 +173,20 @@ def main(argv: list[str] | None = None) -> int:
             ],
         ),
     ]
+    manual_advisory_steps = [
+        (
+            "bond_manual_monitor",
+            [
+                "python3",
+                "ops/tools/run_bond_manual_monitor_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                truth_root,
+            ],
+        ),
+    ]
+
     trading_only_steps = [
         (
             "position_lifecycle_v2",
@@ -272,6 +286,10 @@ def main(argv: list[str] | None = None) -> int:
     session_day_blocker = _detect_session_day_blocker(day_utc=day, session_reentry_result=session_reentry_result)
 
     for name, cmd in open_phase_steps:
+        result = _run_step(name, cmd)
+        _append_result(result)
+
+    for name, cmd in manual_advisory_steps:
         result = _run_step(name, cmd)
         _append_result(result)
 

@@ -12,6 +12,7 @@ from ops.aegis.candidate_generation_diagnostics_v1 import (
     build_candidate_generation_diagnostics_v1,
     write_candidate_generation_diagnostics_v1,
 )
+from ops.aegis.candidate_generation_visibility_v1 import build_candidate_generation_visibility_v1
 
 
 DAY = "2026-05-18"
@@ -489,6 +490,70 @@ def test_all_seven_advisory_sleeves_are_discovered_from_engine_registry(tmp_path
     assert all(row["run_status"] == "RAN" for row in payload["sleeves"])
 
 
+def test_intent_simulator_is_diagnostic_only_not_candidate_expected(tmp_path: Path) -> None:
+    root = tmp_path / "truth"
+    production_sleeves = _seven_sleeves()
+    simulator = "C2_INTENT_SIMULATOR_V1"
+    repo = _repo(tmp_path, [*production_sleeves, simulator])
+    _runtime(root)
+    outcomes = [
+        {
+            "sleeve_id": sleeve,
+            "engine_id": sleeve,
+            "enabled": True,
+            "activation_status": "ACTIVE",
+            "status": "NO_INTENT",
+            "current_status": "NO_INTENT",
+            "canonical_blocker": "",
+            "reason_codes": ["NO_INTENT_DECLARED"],
+            "exit_code": 0,
+            "producer_command": f"python3 run_{sleeve}.py",
+            "market_data_manifest_check": {"status": "PASS"},
+            "output_intents": [],
+            "artifact_path": str(root / "unused.json"),
+        }
+        for sleeve in production_sleeves
+    ]
+    outcomes.append(
+        {
+            "sleeve_id": simulator,
+            "engine_id": simulator,
+            "enabled": True,
+            "activation_status": "ACTIVE",
+            "status": "FILTERED_OUT",
+            "current_status": "FILTERED_OUT",
+            "canonical_blocker": "",
+            "reason_codes": ["ACTIVE_SIMULATOR_NOT_PRESTART_REQUIRED", "OPTIONAL_SIMULATION"],
+            "exit_code": 0,
+            "producer_command": "",
+            "market_data_manifest_check": {"status": "PASS"},
+            "output_intents": [],
+            "artifact_path": str(root / "simulator.json"),
+        }
+    )
+    _write_json(
+        root / "reports/sleeve_evaluation_kernel_v1" / DAY / "sleeve_evaluation_rollup.v1.json",
+        {"day_utc": DAY, "status": "PASS", "outcomes": outcomes},
+    )
+
+    payload = build_candidate_generation_diagnostics_v1(truth_root=root, repo_root=repo, day_utc=DAY)
+    by_id = {row["sleeve_id"]: row for row in payload["sleeves"]}
+
+    assert payload["total_sleeves_registered"] == 8
+    assert payload["total_sleeves_enabled"] == 7
+    assert payload["total_sleeves_expected_today"] == 7
+    assert payload["total_sleeves_expected"] == 7
+    assert payload["total_sleeves_run"] == 7
+    assert simulator not in payload["expected_sleeves"]
+    assert simulator not in payload["enabled_sleeve_ids"]
+    assert simulator in by_id
+    assert by_id[simulator]["diagnostic_only"] is True
+    assert by_id[simulator]["excluded_from_candidate_generation_totals"] is True
+    assert by_id[simulator]["expected_today"] is False
+    assert by_id[simulator]["evaluation_status"] == "FILTERED_OUT"
+    assert by_id[simulator]["reason_codes"] == ["ACTIVE_SIMULATOR_NOT_PRESTART_REQUIRED", "OPTIONAL_SIMULATION"]
+
+
 def test_legacy_execution_registry_mismatch_is_flagged_not_used(tmp_path: Path) -> None:
     root = tmp_path / "truth"
     sleeves = _seven_sleeves()
@@ -643,6 +708,172 @@ def test_selected_scored_raw_signal_without_promotion_is_precise_fail_closed(tmp
     assert "failed closed instead of fabricating an opportunity" in rejection["human_readable_explanation"]
     assert payload["total_candidates_generated"] == 0
 
+
+
+def _candidate_manifest_with_trend_raw_signals(root: Path) -> None:
+    _write_json(
+        root / "reports/candidate_generation_manifest_v1" / DAY / f"sleeve_evaluation_kernel_v1:{DAY}" / "candidate_generation_manifest.v1.json",
+        {
+            "schema_id": "candidate_generation_manifest",
+            "day_utc": DAY,
+            "run_id": f"sleeve_evaluation_kernel_v1:{DAY}",
+            "candidate_rows": [
+                {
+                    "candidate_id": "trend-amt",
+                    "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "status": "CANDIDATE_CREATED",
+                    "symbol_or_pair": "AMT",
+                    "raw_intent_id": "c2_trend_eq_amt_2026-05-18_v1",
+                    "raw_intent_hash": "amt-hash",
+                    "raw_intent_path": "/truth/intents/amt.exposure_intent.v1.json",
+                    "lifecycle_decision": "INTENT_CREATED",
+                    "lifecycle_reason_codes": ["SIGNAL_CHANGED"],
+                    "allowed_by_portfolio_gate": True,
+                    "portfolio_gate_decision": "ALLOW",
+                    "output_artifact_paths": ["/truth/reports/sleeve_evaluation.v1.json"],
+                },
+                {
+                    "candidate_id": "trend-bac",
+                    "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "status": "SUPPRESSED",
+                    "symbol_or_pair": "BAC",
+                    "raw_intent_id": "c2_trend_eq_bac_2026-05-18_v1",
+                    "raw_intent_hash": "bac-hash",
+                    "raw_intent_path": "/truth/intents/bac.exposure_intent.v1.json",
+                    "lifecycle_decision": "INTENT_CREATED",
+                    "lifecycle_reason_codes": ["SIGNAL_CHANGED"],
+                    "allowed_by_portfolio_gate": False,
+                    "portfolio_gate_decision": "SUPPRESS",
+                    "rejection_reason": "PORTFOLIO_GATE_SUPPRESSED",
+                    "output_artifact_paths": ["/truth/reports/sleeve_evaluation.v1.json"],
+                },
+            ],
+        },
+    )
+
+
+def _intent_arbitration_with_trend_rejections(root: Path) -> None:
+    _write_json(
+        root / "reports/intent_arbitration_v1" / DAY / "intent_arbitration.v1.json",
+        {
+            "schema_id": "intent_arbitration",
+            "status": "BLOCKED",
+            "portfolio_scoring_path": "/truth/reports/portfolio_scoring_v1/2026-05-18/portfolio_scoring.v1.json",
+            "selected_intent": {},
+            "raw_candidate_intents": [
+                {"sleeve_id": "C2_TREND_EQ_PRIMARY_V1", "symbol": "AMT", "intent_id": "c2_trend_eq_amt_2026-05-18_v1", "intent_path": "/truth/intents/amt.exposure_intent.v1.json"},
+                {"sleeve_id": "C2_TREND_EQ_PRIMARY_V1", "symbol": "BAC", "intent_id": "c2_trend_eq_bac_2026-05-18_v1", "intent_path": "/truth/intents/bac.exposure_intent.v1.json"},
+            ],
+            "rejected_or_filtered_intents": [
+                {
+                    "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "symbol": "BAC",
+                    "intent_id": "c2_trend_eq_bac_2026-05-18_v1",
+                    "intent_path": "/truth/intents/bac.exposure_intent.v1.json",
+                    "rejection_reason": "PORTFOLIO_GATE_SUPPRESSED",
+                    "portfolio_gate_decision": "SUPPRESS",
+                    "portfolio_gate_reason_codes": ["ONE_PRIMARY_PER_REGIME_BUCKET_SUPPRESSED"],
+                },
+                {
+                    "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "symbol": "AMT",
+                    "intent_id": "c2_trend_eq_amt_2026-05-18_v1",
+                    "intent_path": "/truth/intents/amt.exposure_intent.v1.json",
+                    "rejection_reason": "NON_CERTIFIED_CANDIDATE_SNAPSHOT",
+                    "portfolio_scoring_status": "SCORED",
+                    "portfolio_score_rank": 999999,
+                    "portfolio_score_total": 0.0,
+                    "portfolio_gate_decision": "ALLOW",
+                    "executable_eligible": False,
+                    "score_unavailable_reason": "NON_CERTIFIED_CANDIDATE_SNAPSHOT",
+                    "scoring_reason_codes": ["SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT"],
+                },
+            ],
+        },
+    )
+
+
+def _selected_intent_promotion_contract_failed(root: Path) -> None:
+    _write_json(
+        root / "reports/aegis_selected_intent_promotion_v1" / DAY / "selected_intent_promotion.v1.json",
+        {
+            "schema_id": "aegis_selected_intent_promotion",
+            "day_utc": DAY,
+            "status": "CONTRACT_FAILED",
+            "promotion_status": "blocked",
+            "selected_intent_id": "",
+            "sleeve_id": "",
+            "symbol": "",
+            "promoted_candidate_count": 0,
+            "missing_contract_fields": ["selected_intent.intent_id", "portfolio_scoring.executable_eligible"],
+            "operator_review_required": True,
+            "broker_execution_allowed": False,
+            "autonomous_execution_allowed": False,
+            "automatic_approval_allowed": False,
+        },
+    )
+
+
+def test_raw_signals_zero_candidates_expose_rejection_and_contract_visibility(tmp_path: Path) -> None:
+    root = tmp_path / "truth"
+    sleeves = ["C2_TREND_EQ_PRIMARY_V1"]
+    repo = _repo(tmp_path, sleeves)
+    _runtime(root)
+    eval_path = root / "reports/sleeve_evaluation_kernel_v1" / DAY / "C2_TREND_EQ_PRIMARY_V1" / "sleeve_evaluation.v1.json"
+    eval_payload = {
+        "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+        "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+        "status": "INTENT_CREATED",
+        "current_status": "INTENT_CREATED",
+        "output_intents": [
+            {"intent_id": "c2_trend_eq_amt_2026-05-18_v1", "symbol": "AMT"},
+            {"intent_id": "c2_trend_eq_bac_2026-05-18_v1", "symbol": "BAC"},
+        ],
+        "reason_codes": ["SIGNAL_CHANGED"],
+        "market_data_manifest_check": {"status": "PASS"},
+        "artifact_path": str(eval_path),
+    }
+    _write_json(eval_path, eval_payload)
+    _write_json(root / "reports/sleeve_evaluation_kernel_v1" / DAY / "sleeve_evaluation_rollup.v1.json", {"day_utc": DAY, "status": "PARTIAL", "outcomes": [eval_payload]})
+    _readiness(root, sleeves)
+    _candidate_manifest_with_trend_raw_signals(root)
+    _intent_arbitration_with_trend_rejections(root)
+    _selected_intent_promotion_contract_failed(root)
+
+    payload = build_candidate_generation_diagnostics_v1(truth_root=root, repo_root=repo, day_utc=DAY)
+    visibility = build_candidate_generation_visibility_v1(payload)
+    by_symbol = {row["symbol"]: row for row in payload["raw_signal_rejections"]}
+
+    assert payload["total_raw_signals"] == 2
+    assert payload["total_candidates_generated"] == 0
+    assert payload["symbols_evaluated"] == ["AMT", "BAC"]
+    assert payload["raw_signals_by_sleeve"] == {"C2_TREND_EQ_PRIMARY_V1": 2}
+    assert payload["raw_signals_by_symbol"] == {"AMT": 1, "BAC": 1}
+    assert by_symbol["BAC"]["rejection_stage"] == "PORTFOLIO_GATE"
+    assert by_symbol["BAC"]["rejection_reason"] == "PORTFOLIO_GATE_SUPPRESSED"
+    assert by_symbol["BAC"]["candidate_gate_failed"] is True
+    assert by_symbol["BAC"]["promotion_gate_failed"] is False
+    assert by_symbol["AMT"]["rejection_stage"] == "PORTFOLIO_SCORING"
+    assert by_symbol["AMT"]["rejection_reason"] == "NON_CERTIFIED_CANDIDATE_SNAPSHOT"
+    assert by_symbol["AMT"]["candidate_gate_failed"] is True
+    assert by_symbol["AMT"]["promotion_gate_failed"] is True
+    assert by_symbol["AMT"]["selected_intent_promotion_status"] == "CONTRACT_FAILED"
+    assert payload["selected_intent_promotion"]["status"] == "CONTRACT_FAILED"
+    assert payload["safety"] == {
+        "advisory_only": True,
+        "read_only": True,
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "automatic_approval_allowed": False,
+        "automatic_sleeve_mutation_allowed": False,
+        "broker_submit_transmit_called": False,
+    }
+    visible = {row["symbol"]: row for row in visibility["rejected_candidate_visibility"]}
+    assert visible["AMT"]["promotion_gate_failed"] is True
+    assert visible["AMT"]["candidate_gate_failed"] is True
+    assert visibility["safety"]["trade_advice_allowed"] is False
+    assert visibility["safety"]["broker_execution_allowed"] is False
+    assert visibility["safety"]["autonomous_execution_allowed"] is False
 
 def test_promoted_selected_intent_is_not_reported_as_raw_signal_rejection(tmp_path: Path) -> None:
     root = tmp_path / "truth"

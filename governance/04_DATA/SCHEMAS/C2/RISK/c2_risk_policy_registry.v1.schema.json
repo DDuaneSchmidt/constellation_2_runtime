@@ -23,6 +23,10 @@
           "const": "max_loss_estimate_over_suggested_notional",
           "type": "string"
         },
+        "expected_holding_days": {
+          "minimum": 1,
+          "type": "integer"
+        },
         "expected_holding_days_default": {
           "minimum": 1,
           "type": "integer"
@@ -99,6 +103,17 @@
           "const": false,
           "type": "boolean"
         },
+        "max_risk_pct": {
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "order_routing_allowed": {
           "const": false,
           "type": "boolean"
@@ -119,6 +134,18 @@
           "minLength": 1,
           "type": "string"
         },
+        "real_capital_allowed": {
+          "const": false,
+          "type": "boolean"
+        },
+        "research_only": {
+          "const": true,
+          "type": "boolean"
+        },
+        "risk_class": {
+          "minLength": 1,
+          "type": "string"
+        },
         "risk_estimate_method": {
           "const": "entry_minus_stop_times_quantity",
           "type": "string"
@@ -131,6 +158,10 @@
         "target_notional_pct_default": {
           "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
           "type": "string"
+        },
+        "trade_advice_allowed": {
+          "const": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -175,6 +206,9 @@
         "C2_MEAN_REVERSION_EQ_V1": {
           "$ref": "#/$defs/policy"
         },
+        "C2_OIL_SHOCK_REVERSAL_V1": {
+          "$ref": "#/$defs/policy"
+        },
         "C2_TREND_EQ_PRIMARY_V1": {
           "$ref": "#/$defs/policy"
         },
@@ -188,6 +222,7 @@
         "C2_EVENT_DISLOCATION_V1",
         "C2_MARKET_NEUTRAL_SPREAD_V1",
         "C2_MEAN_REVERSION_EQ_V1",
+        "C2_OIL_SHOCK_REVERSAL_V1",
         "C2_TREND_EQ_PRIMARY_V1",
         "C2_VOL_INCOME_DEFINED_RISK_V1"
       ],

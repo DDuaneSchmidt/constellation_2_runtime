@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "affected_trades": {
+      "type": "array"
+    },
+    "concentration_warnings": {
+      "type": "array"
+    },
+    "confidence": {
+      "type": "string"
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "evidence_links": {
+      "type": "array"
+    },
+    "exposure_summary": {
+      "type": "object"
+    },
+    "factor_exposure": {
+      "type": "array"
+    },
+    "missing_data": {
+      "type": "array"
+    },
+    "regime_concentration": {
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "portfolio_context_projection"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "sleeve_overlap": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "exposure_summary",
+    "concentration_warnings",
+    "sleeve_overlap",
+    "regime_concentration",
+    "factor_exposure",
+    "affected_trades",
+    "evidence_links",
+    "confidence",
+    "missing_data",
+    "content_hash"
+  ],
+  "title": "Portfolio Context Projection v1",
+  "type": "object"
+}

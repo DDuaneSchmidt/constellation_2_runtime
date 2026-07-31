@@ -1,0 +1,12 @@
+id: KNW_0014
+statement: Low sleeve candidate production can reflect normal no-signal conditions and candidate-generation bottlenecks rather than poor sleeve quality.
+evidence:
+  - OBS_0001 evidence review
+  - Sleeve throughput diagnostics showed 5 of 10 sleeves produced candidates
+  - Evidence scorecard marked 4 sleeves healthy with no candidate and 1 sleeve needing data
+  - Candidate diagnostics showed 42 raw signals but only 1 generated candidate, with 41 candidate-conversion rejections and 1 portfolio-scoring rejection
+limitations:
+  - Reviewed artifacts cover 2026-06-03 only
+  - Evidence maturity still limits claims about long-run sleeve quality
+why_it_matters: Researchers should not treat low candidate count as a sleeve-quality failure without checking no-signal conditions, data readiness, and certification gates.
+status: SUPPORTED

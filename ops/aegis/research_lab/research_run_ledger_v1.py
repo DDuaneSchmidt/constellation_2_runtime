@@ -211,6 +211,13 @@ def research_run_projection_for_hypothesis_v1(hypothesis: dict[str, Any], runs: 
     status = "Ready to Start"
     explanation = "Ready for you to start AI research."
 
+    current_gate = str(hypothesis.get("current_gate") or "").upper()
+    current_status = str(hypothesis.get("current_status") or hypothesis.get("gate_status") or "").upper()
+    latest_result_text = " ".join(
+        str(hypothesis.get(key) or "")
+        for key in ["latest_result", "latest_result_status", "latest_result_summary", "result_summary"]
+    ).strip()
+
     if active:
         status = "Researching"
         explanation = "Started by you." if str(active.get("trigger_source") or "").upper() == "USER_INITIATED" else "An active research run is in progress."
@@ -223,6 +230,9 @@ def research_run_projection_for_hypothesis_v1(hypothesis: dict[str, Any], runs: 
     elif latest and str(latest.get("run_status") or "").upper() == "SUCCEEDED" and _has_findings(latest):
         status = "Complete"
         explanation = "Findings ready."
+    elif current_gate == "RESULT_REVIEW" or (current_status == "NEEDS_OPERATOR" and latest_result_text):
+        status = "Recommendation Ready"
+        explanation = "Findings are ready for operator review before any research promotion."
     elif _has_blocker(hypothesis):
         status = "Blocked"
         explanation = str(hypothesis.get("next_action") or hypothesis.get("blocker_summary") or "Resolve the blocker before research can continue.")

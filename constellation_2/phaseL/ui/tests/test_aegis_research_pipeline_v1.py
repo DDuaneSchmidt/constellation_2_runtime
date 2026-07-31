@@ -225,6 +225,41 @@ def _write_intraday_market_report(root: Path, day: str = DAY) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _write_etf_drop_market_report(root: Path, day: str = DAY) -> None:
+    symbols = ["SPY", "QQQ", "IWM", "VIX"]
+    prices = {
+        "SPY": {"previous_close": 100.0, "close": 98.0},
+        "QQQ": {"previous_close": 100.0, "close": 100.5},
+        "IWM": {"previous_close": 100.0, "close": 97.5},
+        "VIX": {"previous_close": 18.0, "close": 19.0},
+    }
+    report = {
+        "schema_id": "aegis_market_data_v1",
+        "generated_at_utc": f"{day}T15:00:00Z",
+        "day_utc": day,
+        "status": "CURRENT",
+        "market_data_mode": "INTRADAY_OPERATIONAL",
+        "operator_market_data_state": "INTRADAY_OPERATIONAL_READY",
+        "provisional_intraday_symbols": symbols,
+        "missing_symbols": [],
+        "stale_symbols": [],
+        "symbols": {
+            symbol: {
+                "canonical_symbol": symbol,
+                "freshness_status": "CURRENT",
+                "data_finality": "PROVISIONAL_INTRADAY",
+                "market_session_date": day,
+                "previous_close": values["previous_close"],
+                "close": values["close"],
+            }
+            for symbol, values in prices.items()
+        },
+    }
+    path = root / "reports" / "aegis_market_data_v1" / day / "market_data.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _write_calendar_csv(path: Path) -> None:
     path.write_text(
         "symbol,event_date,event_time,timing,event_type,source,notes\n"
@@ -458,6 +493,39 @@ def test_research_test_runner_returns_data_needed_or_not_implemented_without_fak
     assert result["minimum_sample_size"] == 20
     assert result["broker_execution_allowed"] is False
     assert result["autonomous_execution_allowed"] is False
+
+
+def test_etf_drop_mean_reversion_runner_executes_without_missing_runner(tmp_path: Path) -> None:
+    truth = tmp_path / "truth"
+    hypothesis_id = "rh-process-test-etf-drop-mean-reversion-v1"
+    _write_hypothesis(
+        truth,
+        hypothesis_id,
+    )
+    _write_etf_drop_market_report(truth)
+    append_triage_record_v1(
+        truth_root=truth,
+        day_utc=DAY,
+        hypothesis_id=hypothesis_id,
+        decision="QUEUE_TEST_PLAN",
+        reason="Worth testing",
+        operator="David",
+    )
+    plan = build_research_plan_v1(truth_root=truth, day_utc=DAY, hypothesis_id=hypothesis_id)
+    write_research_plan_v1(truth_root=truth, day_utc=DAY, payload=plan)
+
+    result = run_research_test_v1(truth_root=truth, day_utc=DAY, hypothesis_id=hypothesis_id)
+
+    assert result["test_status"] == "INCONCLUSIVE_SAMPLE_SIZE"
+    assert result["missing_runner"] == ""
+    assert result["fabricated_results"] is False
+    assert result["metrics"]["event_count"]["metric_status"] == "COMPUTED"
+    assert result["metrics"]["forward_return_1d"]["metric_status"] == "INSUFFICIENT_FORWARD_RETURN_SAMPLE"
+    assert result["sample_size"] == 2
+    assert result["minimum_sample_size"] == 20
+    assert result["broker_execution_allowed"] is False
+    assert result["autonomous_execution_allowed"] is False
+    assert result["trade_advice_allowed"] is False
 
 
 def test_data_needed_result_is_promising_not_tier_one(tmp_path: Path) -> None:

@@ -123,6 +123,17 @@ function buildOperatorFetchError({
   return error;
 }
 
+const inFlightJsonRequests = new Map();
+
+function cacheableGetKey(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET") {
+    return "";
+  }
+  return buildRequestUrl(path);
+}
+
+
 async function requestJson(path, options = {}) {
   const requestUrl = buildRequestUrl(path);
   const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -177,7 +188,22 @@ async function requestJson(path, options = {}) {
 }
 
 export async function fetchJson(path) {
-  return requestJson(path, { cache: "no-store" });
+  const options = { cache: "no-store" };
+  const requestKey = cacheableGetKey(path, options);
+  if (requestKey && inFlightJsonRequests.has(requestKey)) {
+    if (typeof window !== "undefined") {
+      window.__AEGIS_DUPLICATE_FETCH_COUNT = Number(window.__AEGIS_DUPLICATE_FETCH_COUNT || 0) + 1;
+    }
+    return inFlightJsonRequests.get(requestKey);
+  }
+  const request = requestJson(path, options);
+  if (requestKey) {
+    inFlightJsonRequests.set(requestKey, request);
+    request.finally(() => {
+      inFlightJsonRequests.delete(requestKey);
+    });
+  }
+  return request;
 }
 
 export async function postJson(path, body) {

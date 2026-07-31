@@ -16,6 +16,7 @@ from ops.aegis.market_data.symbol_alias_registry_v1 import (
     canonicalize_symbol_list_v1,
     normalize_market_symbol_v1,
 )
+from ops.aegis.universe.canonical_symbol_universe_resolver_v1 import resolve_canonical_symbol_universe_v1
 
 REPORT_FAMILY = "aegis_symbol_map_v1"
 CONFIG_RELPATH = Path("ops/config/aegis_runtime_universe.json")
@@ -24,6 +25,8 @@ SLEEVE_REQUIRED_ONLY = "sleeve_required_only"
 PRODUCTION_SCAN_DATASET = "production_scan_dataset"
 MODE_ENV = "AEGIS_RUNTIME_UNIVERSE_MODE"
 DATASET_ID_ENV = "AEGIS_PRODUCTION_SCAN_DATASET_ID"
+TRUTH_ROOT_ENV = "AEGIS_TRUTH_ROOT"
+DEFAULT_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 SLEEVE_REQUIRED_SOURCE = "ENGINE_MODEL_REGISTRY_V1.allowed_symbols+sleeve_required_context"
 
 DEFAULT_SYMBOL_MAP: dict[str, dict[str, Any]] = {
@@ -91,20 +94,196 @@ def _generic_symbol_template(symbol: str) -> dict[str, Any]:
     canonical = normalize_market_symbol_v1(symbol)
     if canonical == "VIX":
         return DEFAULT_SYMBOL_MAP["VIX"]
-    return {"asset_type": "EQUITY", "providers": {"STOOQ": f"{canonical}.US", "LOCAL_CACHE": canonical, "MANUAL_CSV_DROP": canonical, "YFINANCE": canonical, "YAHOO_CHART": canonical}}
+    return {
+        "asset_type": "EQUITY",
+        "providers": {
+            "TIINGO": canonical,
+            "ALPHA_VANTAGE": canonical,
+            "STOOQ": f"{canonical}.US",
+            "LOCAL_CACHE": canonical,
+            "MANUAL_CSV_DROP": canonical,
+            "YFINANCE": canonical,
+            "YAHOO_CHART": canonical,
+        },
+    }
 
 
-def sleeve_required_symbols_from_registry_v1(*, repo_root: Path) -> list[str]:
-    inventory = _authoritative_sleeve_inventory(repo_root=repo_root)
-    symbols = {normalize_market_symbol_v1(symbol) for row in inventory.get("enabled_sleeves") or [] if row.get("sleeve_id") != SIMULATOR_ENGINE_ID for symbol in row.get("allowed_symbols") or [] if str(symbol).strip()}
+def _safe_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _upper(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _truth_root_v1(truth_root: Path | None) -> Path:
+    if truth_root is not None:
+        return Path(truth_root).expanduser().resolve()
+    return Path(os.environ.get(TRUTH_ROOT_ENV) or DEFAULT_TRUTH_ROOT).expanduser().resolve()
+
+
+def _executed_sleeve(row: dict[str, Any]) -> bool:
+    status = _upper(row.get("status") or row.get("current_status"))
+    signal_state = _upper((row.get("signal_state") or {}).get("state")) if isinstance(row.get("signal_state"), dict) else ""
+    try:
+        output_count = int(row.get("output_count") or 0)
+    except (TypeError, ValueError):
+        output_count = 0
+    return status in {"NO_INTENT", "INTENT_CREATED", "FILTERED_OUT", "BLOCKED"} or signal_state == "ACTIVE" or output_count > 0
+
+
+def _iter_sleeve_outcomes(*, truth_root: Path, day_utc: str) -> list[dict[str, Any]]:
+    outcomes: list[dict[str, Any]] = []
+    rollup_path = truth_root / "reports" / "sleeve_evaluation_kernel_v1" / day_utc / "sleeve_evaluation_rollup.v1.json"
+    rollup = _read_json(rollup_path)
+    for row in _safe_list(rollup.get("outcomes") or rollup.get("sleeve_outcomes")):
+        if isinstance(row, dict):
+            outcomes.append(row)
+    known = {_upper(row.get("sleeve_id") or row.get("engine_id")) for row in outcomes}
+    family_root = truth_root / "reports" / "sleeve_evaluation_kernel_v1" / day_utc
+    if family_root.exists():
+        for child in sorted(family_root.iterdir()):
+            if not child.is_dir():
+                continue
+            sleeve_id = _upper(child.name)
+            if not sleeve_id or sleeve_id in known:
+                continue
+            payload = _read_json(child / "sleeve_evaluation.v1.json")
+            if payload:
+                outcomes.append(payload)
+    return outcomes
+
+
+def raw_signal_demand_metadata_v1(*, truth_root: Path | None, day_utc: str | None) -> dict[str, Any]:
+    if not day_utc:
+        return {
+            "requested_symbols": [],
+            "requested_symbols_source": "",
+            "raw_signal_symbol_count": 0,
+            "raw_signal_symbols": [],
+            "source_artifacts": [],
+        }
+    root = _truth_root_v1(truth_root)
+    requested: set[str] = set()
+    sources: set[str] = set()
+    for row in _iter_sleeve_outcomes(truth_root=root, day_utc=day_utc):
+        sleeve_id = _upper(row.get("sleeve_id") or row.get("engine_id"))
+        if not sleeve_id or sleeve_id == SIMULATOR_ENGINE_ID or not _executed_sleeve(row):
+            continue
+        source_artifact = str(row.get("artifact_path") or "").strip()
+        if source_artifact:
+            sources.add(source_artifact)
+        batch = row.get("exposure_intent_batch") if isinstance(row.get("exposure_intent_batch"), dict) else {}
+        intents = _safe_list(batch.get("output_intents")) or _safe_list(row.get("output_intents"))
+        for item in intents:
+            if not isinstance(item, dict):
+                continue
+            symbol = normalize_market_symbol_v1(item.get("symbol") or item.get("symbol_or_pair"))
+            raw_signal_id = str(item.get("raw_signal_id") or item.get("intent_id") or item.get("intent_hash") or "").strip()
+            evidence_path = str(item.get("intent_path") or item.get("raw_intent_path") or "").strip()
+            if not symbol or "paper_rehearsal" in raw_signal_id.lower() or "paper_rehearsal" in evidence_path.lower():
+                continue
+            requested.add(symbol)
+            if evidence_path:
+                sources.add(evidence_path)
+    ordered = canonicalize_symbol_list_v1(requested)
+    return {
+        "requested_symbols": ordered,
+        "requested_symbols_source": "real_raw_signal_registry" if ordered else "",
+        "raw_signal_symbol_count": len(ordered),
+        "raw_signal_symbols": ordered,
+        "source_artifacts": sorted(sources),
+    }
+
+
+def sleeve_required_symbol_metadata_v1(*, repo_root: Path, truth_root: Path | None = None, day_utc: str | None = None) -> dict[str, Any]:
+    repo = Path(repo_root).resolve()
+    root = _truth_root_v1(truth_root) if truth_root is not None else repo
+    inventory = _authoritative_sleeve_inventory(repo_root=repo)
+    symbols: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    canonical_resolution_used = False
+    for row in inventory.get("enabled_sleeves") or []:
+        sleeve_id = _upper(row.get("sleeve_id"))
+        if sleeve_id == SIMULATOR_ENGINE_ID:
+            continue
+        registry_symbols = canonicalize_symbol_list_v1(row.get("allowed_symbols") or [])
+        resolved_symbols = registry_symbols
+        resolution_status = "DEPRECATED_REGISTRY_FALLBACK"
+        source = "ENGINE_MODEL_REGISTRY_V1.allowed_symbols"
+        source_path = str(row.get("registry_path") or "")
+        blockers: list[Any] = []
+        if day_utc:
+            try:
+                resolution = resolve_canonical_symbol_universe_v1(
+                    repo_root=repo,
+                    truth_root=root,
+                    day_utc=str(day_utc),
+                    engine_id=sleeve_id,
+                    allow_deprecated_fallback=False,
+                    market_data_mode="INTRADAY_OPERATIONAL",
+                )
+                resolved_symbols = canonicalize_symbol_list_v1(resolution.symbols)
+                source = str(resolution.source or "")
+                policy_universe_mode = str(getattr(resolution, "policy_universe_mode", "") or "")
+                target_count = int(getattr(resolution, "policy_target_symbol_count", 0) or 0)
+                dynamic_source = source in {
+                    "engine_universe_candidate_basis_v1",
+                    "engine_universe_candidate_basis_v1.operational_latest_valid",
+                    "ranked_symbol_universe_v1",
+                    "market_data_snapshot_v1.dataset_manifest",
+                }
+                if dynamic_source and not policy_universe_mode:
+                    resolved_symbols = registry_symbols
+                    resolution_status = "DEPRECATED_REGISTRY_FALLBACK_UNGOVERNED_DYNAMIC_SOURCE"
+                    source = "ENGINE_MODEL_REGISTRY_V1.allowed_symbols"
+                    source_path = str(row.get("registry_path") or "")
+                    blockers = list(resolution.blockers or [])
+                else:
+                    if dynamic_source and target_count > 0:
+                        resolved_symbols = resolved_symbols[:target_count]
+                    resolution_status = "CANONICAL_RESOLVED" if resolved_symbols else "CANONICAL_EMPTY"
+                    source_path = str(resolution.source_path or "")
+                    blockers = list(resolution.blockers or [])
+                    canonical_resolution_used = True
+            except Exception as exc:
+                blockers = [{"blocker_type": "canonical_symbol_resolution_failed", "detail": str(exc)}]
+        for symbol in resolved_symbols:
+            canonical = normalize_market_symbol_v1(symbol)
+            if canonical:
+                symbols.add(canonical)
+        rows.append(
+            {
+                "sleeve_id": sleeve_id,
+                "resolution_status": resolution_status,
+                "source": source,
+                "source_path": source_path,
+                "symbol_count": len(resolved_symbols),
+                "symbols": resolved_symbols,
+                "registry_allowed_symbols": registry_symbols,
+                "blockers": blockers,
+            }
+        )
     symbols.update({"SPY", "QQQ", "IWM", "DIA", "VIX"})
-    return canonicalize_symbol_list_v1(symbols)
+    ordered = canonicalize_symbol_list_v1(symbols)
+    return {
+        "symbols": ordered,
+        "symbol_count": len(ordered),
+        "source": "canonical_sleeve_universe_resolver_v1" if canonical_resolution_used else SLEEVE_REQUIRED_SOURCE,
+        "canonical_resolution_used": canonical_resolution_used,
+        "per_sleeve_symbol_resolution": rows,
+    }
 
 
-def build_runtime_symbol_universe_v1(*, repo_root: Path) -> dict[str, Any]:
+def sleeve_required_symbols_from_registry_v1(*, repo_root: Path, truth_root: Path | None = None, day_utc: str | None = None) -> list[str]:
+    return list(sleeve_required_symbol_metadata_v1(repo_root=repo_root, truth_root=truth_root, day_utc=day_utc).get("symbols") or [])
+
+
+def build_runtime_symbol_universe_v1(*, repo_root: Path, truth_root: Path | None = None, day_utc: str | None = None) -> dict[str, Any]:
     repo = Path(repo_root).resolve()
     config = _runtime_universe_config_v1(repo_root=repo)
-    sleeve_required = sleeve_required_symbols_from_registry_v1(repo_root=repo)
+    sleeve_required_metadata = sleeve_required_symbol_metadata_v1(repo_root=repo, truth_root=truth_root, day_utc=day_utc)
+    sleeve_required = list(sleeve_required_metadata.get("symbols") or [])
     production_symbols: list[str] = []
     dataset_path: Path | None = None
     dataset_payload: dict[str, Any] = {}
@@ -114,7 +293,15 @@ def build_runtime_symbol_universe_v1(*, repo_root: Path) -> dict[str, Any]:
         production_symbols = _dataset_symbols(dataset_payload)
         if not production_symbols:
             mode = SLEEVE_REQUIRED_ONLY
-    requested = canonicalize_symbol_list_v1([*(production_symbols if mode == PRODUCTION_SCAN_DATASET else []), *sleeve_required])
+    raw_signal_metadata = raw_signal_demand_metadata_v1(truth_root=_truth_root_v1(truth_root) if truth_root is not None else repo, day_utc=day_utc)
+    raw_signal_symbols = raw_signal_metadata["requested_symbols"]
+    requested = canonicalize_symbol_list_v1([*(production_symbols if mode == PRODUCTION_SCAN_DATASET else []), *sleeve_required, *raw_signal_symbols])
+    source_parts = []
+    if mode == PRODUCTION_SCAN_DATASET:
+        source_parts.append("production_scan_dataset")
+    source_parts.append("canonical_sleeve_required_symbols" if sleeve_required_metadata.get("canonical_resolution_used") else SLEEVE_REQUIRED_SOURCE)
+    if raw_signal_symbols:
+        source_parts.append("real_raw_signal_registry")
     return {
         "runtime_universe_mode": mode,
         "requested_symbols": requested,
@@ -122,13 +309,19 @@ def build_runtime_symbol_universe_v1(*, repo_root: Path) -> dict[str, Any]:
         "required_symbols": requested,
         "total_requested_symbol_count": len(requested),
         "runtime_symbol_count": len(requested),
-        "requested_symbols_source": "production_scan_dataset+sleeve_required_symbols" if mode == PRODUCTION_SCAN_DATASET else SLEEVE_REQUIRED_SOURCE,
+        "requested_symbols_source": "+".join(source_parts) if source_parts else SLEEVE_REQUIRED_SOURCE,
         "production_scan_dataset_id": str(dataset_payload.get("dataset_snapshot_id") or ""),
         "production_scan_dataset_path": str(dataset_path or ""),
         "production_scan_universe_count": len(production_symbols),
         "production_scan_symbols": production_symbols,
         "sleeve_required_symbol_count": len(sleeve_required),
         "sleeve_required_symbols": sleeve_required,
+        "sleeve_required_symbol_source": str(sleeve_required_metadata.get("source") or ""),
+        "canonical_sleeve_symbol_resolution_used": bool(sleeve_required_metadata.get("canonical_resolution_used")),
+        "per_sleeve_symbol_resolution": sleeve_required_metadata.get("per_sleeve_symbol_resolution") or [],
+        "raw_signal_symbol_count": raw_signal_metadata["raw_signal_symbol_count"],
+        "raw_signal_symbols": raw_signal_symbols,
+        "raw_signal_source_artifacts": raw_signal_metadata["source_artifacts"],
         "scan_universe_symbol_count": len(production_symbols),
         "dataset_snapshot_id": str(dataset_payload.get("dataset_snapshot_id") or ""),
         "dataset_quality_status": str(dataset_payload.get("quality_status") or ""),
@@ -150,8 +343,8 @@ def symbol_map_entry_for_symbol_v1(symbol: str) -> dict[str, Any]:
     return {"canonical_symbol": canonical, "providers": dict(template["providers"]), "aliases": list(template.get("aliases") or [canonical]), "provider_aliases": {provider: list(values) for provider, values in (template.get("provider_aliases") or {}).items()}, "asset_type": str(template["asset_type"])}
 
 
-def build_symbol_map_v1(*, repo_root: Path, day_utc: str) -> dict[str, Any]:
-    universe = build_runtime_symbol_universe_v1(repo_root=repo_root)
+def build_symbol_map_v1(*, repo_root: Path, day_utc: str, truth_root: Path | None = None) -> dict[str, Any]:
+    universe = build_runtime_symbol_universe_v1(repo_root=repo_root, truth_root=truth_root, day_utc=day_utc)
     required_symbols = universe["requested_symbols"]
     symbols: dict[str, Any] = {}
     missing = []

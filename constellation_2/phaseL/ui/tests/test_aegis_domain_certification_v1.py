@@ -282,7 +282,7 @@ def test_repair_lifecycle_persists_after_refresh(tmp_path: Path) -> None:
     projection = build_repair_center_projection_v1(truth_root=tmp_path, day_utc=day)
     macro = next(row for row in projection["repair_items"] if row["domain_id"] == "MACRO_CALENDAR")
 
-    assert macro["status"] == "SOURCE_SETUP_REQUIRED"
+    assert macro["status"] == "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT"
     assert macro["section_id"] == "source_setup_required"
     assert projection["domain_repair_lifecycle"]["latest_by_domain"]["MACRO_CALENDAR"]["repair_stage"] == "SOURCE_SETUP_REQUIRED"
 
@@ -395,7 +395,7 @@ def test_us_equities_eod_builder_writes_canonical_artifact_and_certifies(tmp_pat
         },
     )
     monkeypatch.setenv("AEGIS_FINAL_EOD_MARKET_DATA_SOURCE_FILE", str(source))
-    monkeypatch.setattr("ops.aegis.domain_source_builders_v1._required_eod_symbols_v1", lambda day_utc: ["SPY", "AAPL"])
+    monkeypatch.setattr("ops.aegis.domain_source_builders_v1._required_eod_symbols_v1", lambda day_utc, **_kwargs: ["SPY", "AAPL"])
 
     build = build_domain_source_artifact_v1(truth_root=tmp_path, day_utc=day, domain_id="US_EQUITIES_EOD")
     report = build_domain_certification_report_v1(truth_root=tmp_path, day_utc=day)
@@ -474,7 +474,7 @@ def test_us_equities_eod_incomplete_coverage_writes_precise_rejected_artifact(tm
         },
     )
     monkeypatch.setenv("AEGIS_FINAL_EOD_MARKET_DATA_SOURCE_FILE", str(source))
-    monkeypatch.setattr("ops.aegis.domain_source_builders_v1._required_eod_symbols_v1", lambda day_utc: ["SPY", "QQQ", "IWM"])
+    monkeypatch.setattr("ops.aegis.domain_source_builders_v1._required_eod_symbols_v1", lambda day_utc, **_kwargs: ["SPY", "QQQ", "IWM"])
 
     result = build_domain_source_artifact_v1(truth_root=tmp_path, day_utc=day, domain_id="US_EQUITIES_EOD")
     artifact = tmp_path / "reports" / "final_eod_market_data_v1" / day / "final_eod_market_data.v1.json"

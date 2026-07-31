@@ -19,7 +19,9 @@
       "same_day_symbol_basis_required": false,
       "fallback_allowed": false,
       "security_scope": "ANY",
-      "curated_symbols": ["SPY"],
+      "curated_symbols": [
+        "SPY"
+      ],
       "require_all_symbols_present": true,
       "liquidity_filters": null,
       "ranking_mode": null,
@@ -116,7 +118,14 @@
       "same_day_symbol_basis_required": false,
       "fallback_allowed": false,
       "security_scope": "ETF_ONLY",
-      "curated_symbols": ["SPY", "QQQ", "IWM", "TLT", "GLD", "HYG"],
+      "curated_symbols": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "TLT",
+        "GLD",
+        "HYG"
+      ],
       "require_all_symbols_present": false,
       "liquidity_filters": {
         "price_min": "10",
@@ -182,7 +191,9 @@
       "same_day_symbol_basis_required": false,
       "fallback_allowed": false,
       "security_scope": "ETF_ONLY",
-      "curated_symbols": ["SPY"],
+      "curated_symbols": [
+        "SPY"
+      ],
       "require_all_symbols_present": true,
       "liquidity_filters": null,
       "ranking_mode": null,
@@ -210,7 +221,18 @@
       "same_day_symbol_basis_required": false,
       "fallback_allowed": false,
       "security_scope": "ETF_ONLY",
-      "curated_symbols": ["SPY", "QQQ", "IWM", "TLT", "GLD", "HYG", "IEF", "LQD", "UUP", "DBC"],
+      "curated_symbols": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "TLT",
+        "GLD",
+        "HYG",
+        "IEF",
+        "LQD",
+        "UUP",
+        "DBC"
+      ],
       "require_all_symbols_present": true,
       "liquidity_filters": null,
       "ranking_mode": null,
@@ -238,11 +260,26 @@
       "same_day_symbol_basis_required": false,
       "fallback_allowed": false,
       "security_scope": "ETF_ONLY",
-      "curated_symbols": ["SPY", "QQQ", "IWM", "HYG", "LQD"],
+      "curated_symbols": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "HYG",
+        "LQD"
+      ],
       "curated_pairs": [
-        ["SPY", "QQQ"],
-        ["IWM", "SPY"],
-        ["HYG", "LQD"]
+        [
+          "SPY",
+          "QQQ"
+        ],
+        [
+          "IWM",
+          "SPY"
+        ],
+        [
+          "HYG",
+          "LQD"
+        ]
       ],
       "require_all_symbols_present": true,
       "liquidity_filters": null,
@@ -260,6 +297,39 @@
       },
       "notes": [
         "Pairs are governed here rather than in runner constants."
+      ]
+    },
+    {
+      "policy_id": "C2_OIL_SHOCK_REVERSAL_V1",
+      "engine_id": "C2_OIL_SHOCK_REVERSAL_V1",
+      "strategy_type": "EVENT_REVERSAL_RESEARCH",
+      "universe_mode": "CURATED_SYMBOLS",
+      "symbol_source_class": "APPROVED_HYPOTHESIS_ARTIFACTS",
+      "same_day_symbol_basis_required": false,
+      "fallback_allowed": false,
+      "security_scope": "ETF_ONLY",
+      "curated_symbols": [
+        "DBC",
+        "SPY",
+        "USO",
+        "XLE"
+      ],
+      "require_all_symbols_present": true,
+      "liquidity_filters": null,
+      "ranking_mode": null,
+      "target_symbol_count": 4,
+      "sector_cap": {
+        "enabled": false,
+        "max_fraction": null,
+        "require_classification": false
+      },
+      "atr_filter": {
+        "enabled": false,
+        "min_percentile": null,
+        "lookback_sessions": null
+      },
+      "notes": [
+        "Universe comes from approved Oil Shock hypothesis artifacts; missing symbols block producer evaluation."
       ]
     }
   ]

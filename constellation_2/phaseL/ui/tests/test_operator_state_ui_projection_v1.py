@@ -8,6 +8,108 @@ from ops.aegis.operator_state.canonical_operator_state_builder_v1 import load_or
 from ops.aegis.operator_state.current_operator_truth_resolver_v1 import resolve_current_operator_truth_v1
 
 
+
+def _write_text_json(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
+
+
+def _write_operator_session_snapshot(path: Path, day: str, *, status: str = "CURRENT", raw_count: int = 319, certified_count: int = 44) -> None:
+    _write_text_json(
+        path,
+        '{'
+        f'"day_utc":"{day}",'
+        f'"source_day":"{day}",'
+        f'"displayed_artifact_day":"{day}",'
+        f'"current_truth_status":"{status}",'
+        '"current_day_status":{"candidate_funnel_projection":{'
+        f'"day_utc":"{day}",'
+        f'"raw_candidate_count":{raw_count},'
+        f'"certified_universe":{{"symbol_count":{certified_count}}}'
+        '}}'
+        '}',
+    )
+
+
+def test_non_trading_default_resolves_to_latest_valid_operator_session(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "truth"
+    _write_operator_session_snapshot(root / "reports" / "operator_state_snapshot_v1" / "2026-05-22" / "operator_state_snapshot.v1.json", "2026-05-22")
+    _write_text_json(
+        root / "reports" / "operator_state_snapshot_v1" / "2026-05-23" / "operator_state_snapshot.v1.json",
+        '{"day_utc":"2026-05-23","source_day":"2026-05-23","displayed_artifact_day":"2026-05-20","current_truth_status":"READ_ONLY_PRIOR_DAY_FALLBACK","current_day_status":{}}',
+    )
+    monkeypatch.setattr(server, "_canonical_truth_root", lambda: root)
+
+    resolution = server._operator_day_resolution_v1(today_day="2026-05-23")
+
+    assert resolution["resolved_day"] == "2026-05-22"
+    assert resolution["fallback_applied"] is True
+    assert resolution["resolution_reason"] == "NON_TRADING_DAY_LATEST_VALID_SESSION"
+
+
+def test_holiday_default_resolves_to_previous_valid_operator_session(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "truth"
+    _write_operator_session_snapshot(root / "reports" / "operator_state_snapshot_v1" / "2026-05-22" / "operator_state_snapshot.v1.json", "2026-05-22")
+    monkeypatch.setattr(server, "_canonical_truth_root", lambda: root)
+
+    resolution = server._operator_day_resolution_v1(today_day="2026-05-25")
+
+    assert resolution["resolved_day"] == "2026-05-22"
+    assert resolution["fallback_applied"] is True
+
+
+def test_explicit_operator_day_override_bypasses_non_trading_fallback(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "truth"
+    _write_operator_session_snapshot(root / "reports" / "operator_state_snapshot_v1" / "2026-05-22" / "operator_state_snapshot.v1.json", "2026-05-22")
+    monkeypatch.setattr(server, "_canonical_truth_root", lambda: root)
+
+    resolution = server._operator_day_resolution_v1("2026-05-23", today_day="2026-05-23")
+
+    assert resolution["resolved_day"] == "2026-05-23"
+    assert resolution["fallback_applied"] is False
+    assert resolution["explicit_day_override"] is True
+
+
+def test_candidate_funnel_projection_uses_fallback_session_with_crwd_dynamic_certification(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "truth"
+    day = "2026-05-22"
+    symbols = [f"SYM{i:02d}" for i in range(43)] + ["CRWD"]
+    _write_operator_session_snapshot(root / "reports" / "operator_state_snapshot_v1" / day / "operator_state_snapshot.v1.json", day)
+    _write_text_json(
+        root / "reports" / "candidate_consumption_audit_v1" / day / "run-1" / "candidate_consumption_audit.v1.json",
+        '{'
+        f'"schema_id":"candidate_consumption_audit","trading_date":"{day}",'
+        '"raw_candidate_count":319,"promoted_candidate_count":0,"excluded_candidate_count":319,'
+        '"consumption_counts":{"EXCLUDED_UNCOVERED_SYMBOL":299,"EXCLUDED_LOW_SCORE":18,"EXCLUDED_POLICY":2},'
+        '"certified_universe_symbol_count":44,'
+        f'"certified_universe_symbols":{symbols!r},'
+        '"candidate_rows":[{"candidate_id":"crwd-low","symbol":"CRWD","sleeve_id":"TREND","consumption_category":"EXCLUDED_LOW_SCORE","covered_by_certified_eod":true}]'
+        '}'.replace("'", '"'),
+    )
+    _write_text_json(
+        root / "reports" / "dynamic_certification_queue_v1" / day / "dynamic_certification_queue.v1.json",
+        '{"schema_id":"dynamic_certification_queue_v1","day_utc":"2026-05-22","requested_symbols":["CRWD"],"requested_symbol_count":1,"certification_status":"CERTIFIED","queued_symbols":[{"symbol":"CRWD","priority_score":77,"reason":"uncovered candidate pressure"}]}',
+    )
+    monkeypatch.setattr(server, "_canonical_truth_root", lambda: root)
+
+    resolution = server._operator_day_resolution_v1(today_day="2026-05-23")
+    payload = resolve_current_operator_truth_v1(truth_root=root, day_utc=resolution["resolved_day"], generated_at_utc="2026-05-23T12:00:00Z")
+    funnel = payload["current_day_status"]["candidate_funnel_projection"]
+
+    assert resolution["resolved_day"] == day
+    assert funnel["certified_universe"]["symbol_count"] == 44
+    assert funnel["dynamic_certification_queue"]["requested_symbols"] == ["CRWD"]
+    assert funnel["dynamic_certification_queue"]["top_recommendations"][0]["symbol"] == "CRWD"
+
+
+def test_frontend_renders_latest_valid_operational_session_banner() -> None:
+    root = Path(__file__).resolve().parents[4]
+    pages = pages_source_v1(root)
+
+    assert "renderOperationalSessionFallbackBanner" in pages
+    assert "Viewing latest valid operational trading session:" in pages
+    assert "operational-session-fallback-banner" in pages
+
 def test_operator_state_routes_are_registered_in_server_source() -> None:
     source = Path(server.__file__).read_text(encoding="utf-8")
     assert '"/api/aegis/operator/current-truth"' in source
@@ -62,8 +164,11 @@ def test_frontend_renders_packet32_panels_and_uses_stable_route() -> None:
     assert "Market data state" in pages
     assert "Candidate certification" in pages
     assert "Execution eligibility" in pages
-    assert "Final EOD certification pending." in pages
-    assert "Today’s intraday sleeve run is current. Final EOD certification is pending." in pages
+    assert "Latest Run Summary" in pages
+    assert "Latest session:" not in pages
+    assert "Current Operational State" in pages
+    assert "Candidate Lifecycle Summary" in pages
+    assert "View runtime details" in pages
     assert "payload.data.schema_id === \"operator_state_snapshot\"" in pages
     assert "Final EOD certified candidates" in pages
     assert "Historical candidates" in pages
@@ -82,7 +187,7 @@ def test_frontend_renders_packet32_panels_and_uses_stable_route() -> None:
 def test_frontend_renders_candidate_pipeline_observability_panels() -> None:
     root = Path(__file__).resolve().parents[4]
     pages = pages_source_v1(root)
-    dashboard_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function renderDashboardSystemStatus")]
+    dashboard_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function dashboardCaptureProjection")]
 
     for function_name in [
         "renderDashboardCandidateFunnel",
@@ -91,38 +196,44 @@ def test_frontend_renders_candidate_pipeline_observability_panels() -> None:
         "renderDashboardCaptureReadyTrend",
     ]:
         assert function_name in pages
+        assert function_name not in dashboard_block
+    for function_name in [
+        "renderDashboardAttentionQueueV1",
+        "renderDashboardKeyNumbersV1",
+        "renderDashboardRecentImportantEventsV1",
+    ]:
         assert function_name in dashboard_block
     for label in [
-        "Candidate funnel",
-        "Sleeve health",
-        "Regime activity level",
-        "IB ticket trend",
-        "Generated",
-        "Qualified",
-        "Suppressed",
-        "Blocked",
-        "Selected",
-        "Certified",
-        "IB ticket candidates",
-        "No candidate pipeline alerts.",
+        "Candidate Funnel",
+        "Dynamic certification queue",
+        "Recommended symbols",
+        "Queue Certification",
+        "Certify Selected Symbols",
+        "View Certification Result",
     ]:
         assert label in pages
-
 
 
 def test_operator_platform_primary_navigation_is_workflow_first() -> None:
     root = Path(__file__).resolve().parents[4]
     navigation = (root / "constellation_2/phaseL/ui/static/operator_shell/navigation_schema.js").read_text(encoding="utf-8")
     pages = pages_source_v1(root)
+    primary_nav = navigation.split("export const ENGINEERING_NAVIGATION_SCHEMA", 1)[0]
 
-    for label in ["Dashboard", "Candidates", "Hypotheses", "Captured Trades", "System Health"]:
-        assert f'label: "{label}"' in navigation
-    assert 'id: "evidence"' not in navigation.split("export const LEGACY_NAVIGATION_REFERENCE", 1)[0]
+    for label in ["Command Center", "Positions", "History", "Performance", "Research", "Change Control"]:
+        assert f'label: "{label}"' in primary_nav
+    for hidden in ["Engineering Dashboard", "Dashboard", "Candidates", "Hypotheses", "Captured Trades"]:
+        assert f'label: "{hidden}"' not in primary_nav
+    assert 'id: "evidence"' not in primary_nav
     assert 'route: "/aegis-candidates"' in navigation
+    assert 'route: "/aegis-candidate-funnel"' in navigation
     assert 'id: "aegis_candidates"' in pages
-    assert 'return renderAegisWorkflowPage("candidates")' in pages
-    assert 'title: "Dashboard"' in pages
-    assert 'title: "Captured Trades"' in pages
+    assert 'case "aegis_candidate_funnel"' in pages
+    assert 'return renderCandidatesWorkspace()' in pages
+    assert 'return renderAegisWorkflowPage("candidate_funnel")' in pages
+    assert 'title: "Engineering Dashboard"' in pages
+    assert 'title: "Dashboard"' not in pages
+    assert 'title: "Closed Trades"' in pages
 
 def test_manual_capture_panel_is_compact_and_blocked_label_is_explicit() -> None:
     root = Path(__file__).resolve().parents[4]
@@ -146,7 +257,6 @@ def test_frontend_surfaces_current_day_failure_as_dedicated_incident_page() -> N
     pages = pages_source_v1(root)
     shell = (root / "constellation_2/phaseL/ui/static/operator_shell/main.js").read_text(encoding="utf-8")
     css = (root / "constellation_2/phaseL/ui/static/aegis.css").read_text(encoding="utf-8")
-    shell = (root / "constellation_2/phaseL/ui/static/operator_shell/main.js").read_text(encoding="utf-8")
 
     assert "function renderDashboardIncidentPage" in pages
     assert "function dashboardIncidentState" in pages
@@ -160,16 +270,15 @@ def test_frontend_surfaces_current_day_failure_as_dedicated_incident_page() -> N
     assert "data-dashboard-incident-details" in pages
     assert "Raw blocker code" in pages
     assert "dashboardIncidentMode: true" in pages
-    incident_branch = pages[pages.index("if (incidentState)"):pages.index("const runtimeDay", pages.index("if (incidentState)"))]
+    incident_branch = pages[pages.index("if (incidentState)"):pages.index("const cards", pages.index("if (incidentState)"))]
     assert "renderDashboardSystemStatus" not in incident_branch
-    assert "renderDashboardTodaySummary" not in incident_branch
+    assert "renderDashboardAttentionQueueV1" not in incident_branch
     assert 'document.body.classList.toggle("dashboard-incident-mode"' in shell
-    assert "contextHost.hidden = view.dashboardIncidentMode === true" in shell
+    assert "const rightRailHidden = view.dashboardIncidentMode === true" in shell
+    assert "contextHost.hidden = rightRailHidden" in shell
     assert ".dashboard-incident-mode .shell-context" in css
     assert "display: none" in css[css.index(".dashboard-incident-mode .shell-context"):css.index(".dashboard-incident-page")]
     assert "retry-market-data-refresh" in pages
-
-
 
 
 def test_vendor_lag_states_render_degraded_read_only_not_incident() -> None:
@@ -205,27 +314,27 @@ def test_vendor_lag_states_render_degraded_read_only_not_incident() -> None:
 def test_degraded_read_only_preserves_dashboard_navigation_cards() -> None:
     root = Path(__file__).resolve().parents[4]
     pages = pages_source_v1(root)
-    workflow_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function renderDashboardSystemStatus")]
+    workflow_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function dashboardCaptureProjection")]
 
     assert "if (incidentState)" in workflow_block
-    assert "dashboardDegradedReadOnlyState" not in workflow_block.split("if (incidentState)", 1)[1].split("const runtimeDay", 1)[0]
-    assert "renderDashboardSystemStatus(payload" in workflow_block
-    assert "renderDashboardTodaySummary(payload)" in workflow_block
-    assert "renderDashboardAttentionRequired(payload)" in workflow_block
-    assert "renderDashboardRecentEvents(payload)" in workflow_block
+    assert "dashboardDegradedReadOnlyState" not in workflow_block.split("if (incidentState)", 1)[1].split("const cards", 1)[0]
+    assert "renderDashboardLatestRunSummary(payload)" in workflow_block
+    assert "renderDashboardAttentionQueueV1(payload)" in workflow_block
+    assert "renderDashboardKeyNumbersV1(payload)" in workflow_block
+    assert "renderDashboardRecentImportantEventsV1(payload)" in workflow_block
 
 def test_frontend_healthy_dashboard_path_still_renders_normal_cards() -> None:
     root = Path(__file__).resolve().parents[4]
     pages = pages_source_v1(root)
-    workflow_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function renderDashboardSystemStatus")]
+    workflow_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function dashboardCaptureProjection")]
 
     assert "if (incidentState)" in workflow_block
     assert "renderDashboardIncidentPage(payload)" in workflow_block
     assert "renderCurrentDayStatusBanner(payload)" in workflow_block
-    assert "renderDashboardSystemStatus(payload" in workflow_block
-    assert "renderDashboardTodaySummary(payload)" in workflow_block
-    assert "renderDashboardAttentionRequired(payload)" in workflow_block
-    assert "renderDashboardRecentEvents(payload)" in workflow_block
+    assert "renderDashboardLatestRunSummary(payload)" in workflow_block
+    assert "renderDashboardAttentionQueueV1(payload)" in workflow_block
+    assert "renderDashboardKeyNumbersV1(payload)" in workflow_block
+    assert "renderDashboardRecentImportantEventsV1(payload)" in workflow_block
 
 
 def test_server_latest_operator_truth_uses_current_day_not_latest_historical_report() -> None:
@@ -283,24 +392,20 @@ def test_frontend_current_day_banner_uses_operator_semantics() -> None:
     assert "Current-day completed captures" in pages
     assert "Historical captures" in pages
     assert "Historical fallback" in pages
-    assert "Scheduler:" in pages
-    assert 'retry_action_available === true' in pages
-    assert 'name="day_utc"' in pages
+    assert "dashboardRunStatusSummary" in pages
+    assert "currentDay.next_action" in pages
+    assert "formatTimestamp(lastAttempt)" in pages
 
 
 def test_frontend_distinguishes_market_finalization_and_provider_failures() -> None:
     root = Path(__file__).resolve().parents[4]
     pages = pages_source_v1(root)
 
-    assert "MARKET_NOT_FINALIZED_YET" in pages
-    assert "PROVIDER_TIMEOUT" in pages
-    assert "PROVIDER_SOURCE_UNAVAILABLE" in pages
-    assert "CURRENT_DAY_DATA_STALE" in pages
-    assert "PARTIAL_PROVIDER_SUCCESS" in pages
-    assert "FINAL_EOD_READY" in pages
-    assert "Market data is not finalized yet. Aegis will retry at 16:30, 17:00, and 18:00." in pages
-    assert "Provider timeout. Some symbols were not fetched." in pages
-    assert "Partial market data available" in pages
+    assert "dashboardRunStatusSummary" in pages
+    assert "final_eod_certification_status" in pages
+    assert "candidate_certification_state" in pages
+    assert "market_data_state" in pages
+    assert "View runtime details" in pages
 
 
 
@@ -411,7 +516,8 @@ def test_operator_cockpit_keeps_snapshot_as_dashboard_authority() -> None:
     assert "Dashboard day/mode/count fields are governed by operator_state_snapshot_v1" in source
     assert '"operator_today_projection"' in source
     assert 'payload["runtime_mode"] = str(operator_snapshot.get("runtime_mode")' in source
-    assert 'payload["displayed_artifact_day"] = str(operator_snapshot.get("displayed_artifact_day")' in source
+    assert 'snapshot_displayed_day = str(operator_snapshot.get("displayed_artifact_day")' in source
+    assert 'payload["displayed_artifact_day"] = str(canonical.get("day_utc") or day_utc) if candidate_ui_projection else snapshot_displayed_day' in source
     assert 'payload["current_day_status"] = operator_snapshot.get("current_day_status")' in source
 
 
@@ -635,25 +741,67 @@ def test_operator_shell_does_not_render_stale_data_as_of_timestamp() -> None:
     assert "Data as of" not in workflow_block
 
 
-def test_dashboard_shows_explicit_operational_and_eod_timing_sections() -> None:
+def test_dashboard_shows_attention_first_sections_without_inline_eod_timing_dump() -> None:
     root = Path(__file__).resolve().parents[4]
     pages = pages_source_v1(root)
-    dashboard_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function renderDashboardSystemStatus")]
+    dashboard_block = pages[pages.index("function renderAegisTodayWorkflow"):pages.index("function dashboardCaptureProjection")]
 
-    assert "renderDashboardOperationalTimestamps" in dashboard_block
-    assert "renderDashboardEodPipelineTiming" in dashboard_block
+    assert "renderDashboardLatestRunSummary" in dashboard_block
+    assert "renderDashboardCurrentOperationalState" in dashboard_block
+    assert "renderDashboardNineFiftyRunVisibility" in dashboard_block
+    assert "renderDashboardLifecycleSummary" in dashboard_block
+    assert "renderDashboardOperatorAttentionNow" in dashboard_block
+    assert "renderDashboardAttentionQueueV1" in dashboard_block
+    assert "renderDashboardKeyNumbersV1" in dashboard_block
+    assert "renderDashboardOperationalTimestamps" not in dashboard_block
+    assert "renderDashboardEodPipelineTiming" not in dashboard_block
     for label in [
-        "Runtime Timeline",
-        "Operational day",
-        "Market data last updated",
-        "Candidate snapshot timestamp",
-        "Last certification attempt",
-        "Final EOD certification completed at",
-        "Certification Progress",
-        "Market close",
-        "Vendor lag window",
-        "Certification pending",
-        "Estimated next certification attempt",
-        "Final certification status",
+        "Attention Queue",
+        "Today’s Key Numbers",
+        "Recent Important Events",
+        "Latest Run Summary",
+        "Current Operational State",
+        "9:50 Run Visibility",
+        "Candidate Lifecycle Summary",
+        "What Needs Operator Attention Right Now?",
+        "Open Workspace",
+        "View Evidence",
     ]:
         assert label in pages
+
+
+def test_dashboard_latest_run_summary_uses_run_history_counts() -> None:
+    root = Path(__file__).resolve().parents[4]
+    pages = pages_source_v1(root)
+
+    assert "projection.run_summary" in pages
+    assert "Diagnostic candidate outputs" in pages
+    assert "Current-day valid candidates" in pages
+    assert "Valid candidate contracts" in pages
+    assert "Run evidence status" in pages
+    assert "diagnostics_candidates_generated" in pages
+    assert "candidate_contracts_created" in pages
+    assert "carried-forward" in pages
+
+
+def test_dashboard_run_timestamp_semantics_are_explicit() -> None:
+    root = Path(__file__).resolve().parents[4]
+    pages = pages_source_v1(root)
+
+    assert 'summary.runStart === "NOT_RECORDED" ? "NOT_RECORDED"' in pages
+    assert "Market snapshot time" in pages
+    assert "Candidate snapshot time" in pages
+    assert "Diagnostics started at" in pages
+    assert "Diagnostics completed at" in pages
+    assert "Projection generated at" in pages
+    assert "Dashboard rendered at" in pages
+    assert "Mismatch explanation" in pages
+    assert "Contract rejection reason" in pages
+    assert "Diagnostic rejection reasons" in pages
+    assert "renderDiagnosticRejectionReasons" in pages
+    assert "NO_PER_OUTPUT_REJECTION_ROWS" in pages
+    assert "Diagnostics found candidate-like outputs, but 0 passed candidate contract validation" in pages
+    assert "Latest run timestamp" not in pages
+    assert 'label: "Diagnostics completed"' in pages
+    run_visibility_block = pages[pages.index("function renderDashboardNineFiftyRunVisibility"):pages.index("function renderDashboardLifecycleSummary")]
+    assert "formatTimestamp(summary.generatedAt)" not in run_visibility_block

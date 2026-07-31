@@ -1,0 +1,9 @@
+id: KNW_0012
+statement: Warnings are useful journal inputs when they prevent clean-state overconfidence.
+evidence:
+  - OBS_0019
+  - Daily research integrity audit warning state
+limitations:
+  - Warning severity varies by artifact
+why_it_matters: The journal should preserve cautionary signals, not only failures.
+status: SUPPORTED

@@ -28,6 +28,7 @@ def test_rc_2_is_reported_as_degraded_not_ok(capsys: pytest.CaptureFixture[str])
             },
             {"name": "day_open_trigger", "cmd": [], "returncode": 0, "status": "OK", "stdout": "", "stderr": ""},
             {"name": "day_open_attempt", "cmd": [], "returncode": 0, "status": "OK", "stdout": "", "stderr": ""},
+            {"name": "bond_manual_monitor", "cmd": [], "returncode": 0, "status": "OK", "stdout": "", "stderr": ""},
             {"name": "position_lifecycle_v2", "cmd": [], "returncode": 0, "status": "OK", "stdout": "", "stderr": ""},
             {"name": "exit_obligations_v1", "cmd": [], "returncode": 2, "status": "DEGRADED", "stdout": "", "stderr": ""},
             {"name": "exposure_reconciliation_v2", "cmd": [], "returncode": 0, "status": "OK", "stdout": "", "stderr": ""},
@@ -64,6 +65,7 @@ def test_default_truth_root_is_canonical_and_out_of_contract_override_is_rejecte
     assert rc == 0
     default_truth_root = str(resolve_canonical_truth_root())
     assert all("--truth_root" in cmd and default_truth_root in cmd for cmd in captured[:6])
+    assert any(cmd[1] == "ops/tools/run_bond_manual_monitor_v1.py" for cmd in captured)
 
     captured.clear()
     with patch.object(monitoring_module, "_run_step", side_effect=fake_run_step):
@@ -88,3 +90,30 @@ def test_bootstrap_env_skips_session_authority_reentry(
     assert rc == 0
     assert payload["session_authority_reentry_skipped"] is True
     assert all(name != "session_authority_reentry" for name, _ in captured)
+
+
+def test_bond_manual_monitor_runs_when_paper_trading_steps_are_skipped(capsys: pytest.CaptureFixture[str]) -> None:
+    captured: list[str] = []
+
+    def fake_run_step(name: str, cmd: list[str]) -> dict[str, object]:
+        captured.append(name)
+        stdout = ""
+        if name == "session_authority_reentry":
+            stdout = json.dumps(
+                {
+                    "target_day_admission": {"admission_status": "BLOCK", "blocking_reason_codes": []},
+                    "active_session": {"active_day": "2026-04-13"},
+                }
+            )
+        return {"name": name, "cmd": cmd, "returncode": 0, "status": "OK", "stdout": stdout, "stderr": ""}
+
+    with patch.object(monitoring_module, "_run_step", side_effect=fake_run_step):
+        rc = monitoring_module.main(["--day_utc", "2026-04-14"])
+
+    payload = json.loads(capsys.readouterr().out)
+    by_name = {row["name"]: row for row in payload["results"]}
+    assert rc == 2
+    assert "bond_manual_monitor" in captured
+    assert "position_lifecycle_v2" not in captured
+    assert by_name["bond_manual_monitor"]["status"] == "OK"
+    assert by_name["position_lifecycle_v2"]["stderr"].startswith("SKIPPED_NO_ACTIVE_PAPER_SESSION")

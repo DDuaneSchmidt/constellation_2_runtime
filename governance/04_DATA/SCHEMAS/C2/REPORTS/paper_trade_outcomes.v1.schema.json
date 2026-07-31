@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/paper_trade_outcomes.v1.schema.json",
+  "title": "paper_trade_outcomes.v1",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "artifact_id", "day_utc", "generated_at_utc", "operating_mode", "open_trades", "closed_trades", "trade_count", "safety"],
+  "properties": {
+    "schema_id": {"const": "paper_trade_outcomes"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "paper_trade_outcomes"},
+    "day_utc": {"type": "string"},
+    "generated_at_utc": {"type": "string"},
+    "operating_mode": {"type": "string"},
+    "open_trades": {"type": "array", "items": {"type": "object"}},
+    "closed_trades": {"type": "array", "items": {"type": "object"}},
+    "trade_count": {"type": "integer"},
+    "safety": {"type": "object"}
+  },
+  "additionalProperties": true
+}

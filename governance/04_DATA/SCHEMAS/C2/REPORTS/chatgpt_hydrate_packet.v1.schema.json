@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/chatgpt_hydrate_packet.v1.schema.json",
+  "title": "Aegis ChatGPT Hydrate Packet v1 Metadata",
+  "description": "Schema for the required metadata embedded at the top of chatgpt_hydrate_packet.v1.md.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "day_utc",
+    "generated_at",
+    "generator_name",
+    "generator_version",
+    "git_commit_hash",
+    "schema_version",
+    "input_artifact_hashes",
+    "output_hash",
+    "verified_runtime_graph",
+    "verified_runtime_graph_hash"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "generator_name": { "const": "build_aegis_chatgpt_hydrate_packet_v1" },
+    "generator_version": { "const": "aegis_chatgpt_hydrate_packet.v1" },
+    "git_commit_hash": { "type": "string" },
+    "schema_version": { "const": "v1" },
+    "input_artifact_hashes": { "type": "object", "additionalProperties": { "type": "string" } },
+    "output_hash": { "type": "string", "minLength": 1 },
+    "verified_runtime_graph": { "type": "string" },
+    "verified_runtime_graph_hash": { "type": "string", "minLength": 1 },
+    "content_media_type": { "const": "text/markdown" }
+  },
+  "additionalProperties": true
+}

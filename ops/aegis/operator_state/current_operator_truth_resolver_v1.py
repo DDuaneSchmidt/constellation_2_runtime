@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ops.aegis.candidate_generation_visibility_v1 import build_candidate_generation_visibility_v1
 from ops.aegis.market_data.freshness_policy_v1 import (
     FRESHNESS_STATES,
     PARTIAL_DATA_AVAILABLE,
@@ -23,6 +24,10 @@ from ops.aegis.market_data.freshness_policy_v1 import (
 from ops.aegis.candidate_intent_plane_v1 import (
     build_candidate_intent_plane_v1,
     candidate_intent_plane_path_v1,
+)
+from ops.aegis.dynamic_certification_queue_v1 import (
+    build_dynamic_certification_queue_v1,
+    latest_dynamic_certification_queue_v1,
 )
 from ops.aegis.universe.canonical_universe_authority_v1 import (
     canonical_universe_authority_path,
@@ -566,6 +571,28 @@ def _candidate_funnel_projection(root: Path, day_utc: str, current_rows: list[di
             "source_artifact_path": str(row.get("source_artifact_path") or ""),
         })
     categories = sorted({str(row.get("exclusion_category") or "") for row in drilldown_rows if str(row.get("exclusion_category") or "")})
+    queue_path, queue = latest_dynamic_certification_queue_v1(truth_root=root, day_utc=day_utc)
+    if not queue:
+        queue = build_dynamic_certification_queue_v1(truth_root=root, day_utc=day_utc)
+        queue_path = None
+    queued_symbols = queue.get("queued_symbols") if isinstance(queue.get("queued_symbols"), list) else []
+    dynamic_queue_projection = {
+        "artifact_path": str(queue_path or ""),
+        "artifact_content_hash": str(queue.get("content_hash") or ""),
+        "certification_status": str(queue.get("certification_status") or "EMPTY"),
+        "requested_symbols": queue.get("requested_symbols") if isinstance(queue.get("requested_symbols"), list) else [],
+        "requested_symbol_count": _safe_int(queue.get("requested_symbol_count")),
+        "top_recommendations": queued_symbols[:10],
+        "estimated_provider_load": _safe_int(queue.get("estimated_provider_load")),
+        "certification_results": queue.get("certification_results") if isinstance(queue.get("certification_results"), list) else [],
+        "promoted_after_certification_count": _safe_int(queue.get("promoted_after_certification_count")),
+        "commands": [
+            {"command_id": "QUEUE_CERTIFICATION", "label": "Queue Certification", "target_type": "dynamic_certification_queue", "target_id": day_utc, "payload": {"day_utc": day_utc}},
+            {"command_id": "CERTIFY_SELECTED_SYMBOLS", "label": "Certify Selected Symbols", "target_type": "dynamic_certification_queue", "target_id": day_utc, "payload": {"day_utc": day_utc, "symbols": queue.get("requested_symbols") if isinstance(queue.get("requested_symbols"), list) else []}},
+            {"command_id": "VIEW_CERTIFICATION_RESULT", "label": "View Certification Result", "target_type": "dynamic_certification_queue", "target_id": day_utc, "payload": {"day_utc": day_utc}},
+        ],
+        "selection_policy": queue.get("queue_selection_policy") if isinstance(queue.get("queue_selection_policy"), dict) else {},
+    }
     return {
         "schema_id": "candidate_funnel_projection",
         "schema_version": "v1",
@@ -621,6 +648,7 @@ def _candidate_funnel_projection(root: Path, day_utc: str, current_rows: list[di
             "linked_hypotheses": [],
             "content_hash": str(authority.get("immutable_hash") or "") if isinstance(authority, dict) else "",
         },
+        "dynamic_certification_queue": dynamic_queue_projection,
         "universe_diagnostics": {
             "universe_artifact_path": str(authority_path if authority_path.exists() else certified_path),
             "universe_source": "canonical_universe_authority_v1" if authority_symbols else "final_eod_market_data_v1",
@@ -634,6 +662,8 @@ def _candidate_funnel_projection(root: Path, day_utc: str, current_rows: list[di
             "universe_config_needs_expansion": bool(uncovered and not authority_symbols),
             "filter_candidates_earlier": bool(uncovered),
             "diagnosis": diagnosis,
+            "dynamic_queue_requested_symbol_count": dynamic_queue_projection["requested_symbol_count"],
+            "dynamic_queue_estimated_provider_load": dynamic_queue_projection["estimated_provider_load"],
         },
         "diagnostics": {
             "did_sleeves_run": _safe_int(diagnostics.get("total_sleeves_run")) > 0 or bool(current_rows),
@@ -1163,6 +1193,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
     promotion_map_path = candidate_promotion_map_path_v1(root, day_utc)
     intent_plane_path = candidate_intent_plane_path_v1(truth_root=root, day_utc=day_utc)
     pointer_path = selected_pointer_path_v1(root)
+    diagnostics_path, diagnostics = _latest_report_artifact(root, "aegis_candidate_generation_diagnostics_v1", day_utc, "candidate_generation_diagnostics.v1.json")
 
     market = _read_json(market_path, errors, "aegis_market_data") if market_path.exists() else {}
     inputs = _read_json(inputs_path, errors, "market_data_inputs") if inputs_path.exists() else {}
@@ -1186,6 +1217,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
         (promotion_map_path, "candidate_promotion_map_v1", promotion_map),
         (intent_plane_path, "candidate_intent_plane_v1", intent_plane),
         (pointer_path, "selected_intent_pointer_v1", pointer),
+        (diagnostics_path, "aegis_candidate_generation_diagnostics_v1", diagnostics),
     ):
         refs.append(_source_ref(ref_path, artifact_id, payload))
 
@@ -1293,6 +1325,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
     candidate_semantic_counts = _candidate_semantic_counts(operator_candidate_rows)
     selected_intent = arbitration.get("selected_intent") if isinstance(arbitration.get("selected_intent"), dict) else {}
     selected_intent_id = str(selected_intent.get("intent_id") or "").strip()
+    candidate_generation_visibility = build_candidate_generation_visibility_v1(diagnostics)
     candidate_pipeline_observability = _rolling_candidate_pipeline_observability(
         root=root,
         day_utc=day_utc,
@@ -1423,6 +1456,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_generation_visibility": candidate_generation_visibility,
             "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
@@ -1463,6 +1497,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_generation_visibility": candidate_generation_visibility,
             "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
@@ -1503,6 +1538,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_generation_visibility": candidate_generation_visibility,
             "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
@@ -1557,6 +1593,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             "capture_ready_trend": [],
         },
         "candidate_pipeline_alerts": [],
+        "candidate_generation_visibility": build_candidate_generation_visibility_v1(diagnostics),
         "candidate_funnel_projection": _candidate_funnel_projection(root=root, day_utc=day_utc, current_rows=[]),
         "candidate_rows": [],
         "selected_candidate_count": 0,

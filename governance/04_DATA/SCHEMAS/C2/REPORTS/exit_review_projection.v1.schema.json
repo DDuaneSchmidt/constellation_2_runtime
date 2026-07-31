@@ -1,0 +1,188 @@
+{
+  "$id": "https://constellation.local/schemas/exit_review_projection.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "broker_execution_allowed": {
+      "const": false
+    },
+    "broker_submit_transmit_allowed": {
+      "const": false
+    },
+    "closed_outcomes": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "exit_summary": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "generated_at_utc": {
+      "type": "string"
+    },
+    "manual_operator_confirmation_required": {
+      "const": true
+    },
+    "needs_review": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "open_position_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "open_positions": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "order_routing_allowed": {
+      "const": false
+    },
+    "review_needed_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rows": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "MAE": {},
+          "MFE": {},
+          "current_mark": {},
+          "current_stop": {},
+          "decision_reason": {
+            "type": "string"
+          },
+          "entry_price": {},
+          "exit_decision": {
+            "enum": [
+              "HOLD",
+              "UPDATE_STOP",
+              "TAKE_PARTIAL",
+              "EXIT_FULL",
+              "BLOCK"
+            ]
+          },
+          "linked_artifacts": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "artifact_path": {
+                  "type": "string"
+                },
+                "artifact_sha256": {
+                  "type": "string"
+                },
+                "logical_name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_operator_action": {
+            "type": "string"
+          },
+          "position_id": {
+            "type": "string"
+          },
+          "proposed_stop_price": {},
+          "quantity": {},
+          "r_multiple": {},
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "return_pct": {},
+          "side": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "target_price": {},
+          "thesis_status": {
+            "type": "string"
+          },
+          "time_stop_at": {},
+          "trade_id": {
+            "type": "string"
+          },
+          "unrealized_pnl": {}
+        },
+        "required": [
+          "trade_id",
+          "position_id",
+          "symbol",
+          "exit_decision",
+          "decision_reason",
+          "next_operator_action"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "exit_review_projection"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "source_projection_hashes": {
+      "type": "object"
+    },
+    "stop_target_status": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "thesis_time_stop_status": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "trade_advice_allowed": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "rows",
+    "content_hash",
+    "broker_submit_transmit_allowed",
+    "broker_execution_allowed",
+    "autonomous_execution_allowed",
+    "trade_advice_allowed",
+    "exit_summary",
+    "open_positions"
+  ],
+  "title": "Exit Review Projection v1",
+  "type": "object"
+}

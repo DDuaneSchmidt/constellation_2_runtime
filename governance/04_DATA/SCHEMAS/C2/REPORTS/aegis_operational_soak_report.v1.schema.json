@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/aegis_operational_soak_report.v1.schema.json",
+  "title": "aegis_operational_soak_report.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "operational_day",
+    "generated_at_utc",
+    "cycle_count",
+    "cycles",
+    "replay_status",
+    "replay_hash",
+    "provider_status",
+    "provider_failure_classification",
+    "replay_failure_classification",
+    "candidate_counts",
+    "promoted_counts",
+    "dynamic_certified_symbols",
+    "workflow_failures",
+    "timeout_events",
+    "ui_failures",
+    "command_failures",
+    "runtime_durations",
+    "memory_resource_warnings",
+    "acceptance_rule_results",
+    "overall_operational_health",
+    "broker_submit_transmit_allowed",
+    "broker_execution_allowed",
+    "order_routing_allowed",
+    "autonomous_execution_allowed",
+    "trade_advice_allowed",
+    "content_hash"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "aegis_operational_soak_report"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "operational_day": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "truth_root": {
+      "type": "string"
+    },
+    "cycle_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cycles": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "replay_status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "replay_hash": {
+      "type": "string"
+    },
+    "provider_status": {
+      "enum": [
+        "PASS",
+        "WARN"
+      ]
+    },
+    "candidate_counts": {
+      "type": "object"
+    },
+    "promoted_counts": {
+      "type": "object"
+    },
+    "dynamic_certified_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workflow_failures": {
+      "type": "array"
+    },
+    "timeout_events": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ui_failures": {
+      "type": "array"
+    },
+    "command_failures": {
+      "type": "array"
+    },
+    "runtime_durations": {
+      "type": "object"
+    },
+    "memory_resource_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ui_workflow_soak": {
+      "type": "object"
+    },
+    "command_lifecycle": {
+      "type": "object"
+    },
+    "resource_usage": {
+      "type": "object"
+    },
+    "acceptance_rule_results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "overall_operational_health": {
+      "enum": [
+        "PASS",
+        "WARN",
+        "FAIL"
+      ]
+    },
+    "broker_submit_transmit_allowed": {
+      "const": false
+    },
+    "broker_execution_allowed": {
+      "const": false
+    },
+    "order_routing_allowed": {
+      "const": false
+    },
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "trade_advice_allowed": {
+      "const": false
+    },
+    "content_hash": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "replay_failure_classification": {
+      "type": "array"
+    },
+    "provider_failure_classification": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "active_failure_count",
+        "recovered_failure_count",
+        "active_timeout_count"
+      ],
+      "properties": {
+        "active_failure_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovered_failure_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active_timeout_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

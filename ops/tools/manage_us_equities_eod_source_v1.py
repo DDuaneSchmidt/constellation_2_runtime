@@ -16,13 +16,11 @@ if str(REPO_ROOT) not in sys.path:
 from ops.aegis.domain_source_builders_v1 import (
     _normalize_manual_eod_source_v1,
     build_us_equities_eod_source_v1,
+    sha256_file_v1,
     write_json_v1,
 )
 from ops.aegis.market_data.symbol_map_v1 import build_symbol_map_v1
-from ops.aegis.universe.canonical_universe_authority_v1 import (
-    canonical_universe_authority_path,
-    latest_canonical_universe_authority_v1,
-)
+from ops.aegis.dynamic_certification_queue_v1 import latest_dynamic_certification_queue_v1
 from ops.aegis.market_data.market_data_provider_v1 import (
     ProviderConfig,
     provider_config_from_env_v1,
@@ -38,24 +36,55 @@ DEFAULT_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 def _canonicalize_symbols_v1(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
-    return sorted({str(symbol).strip().upper() for symbol in raw if str(symbol).strip()})
+    seen: set[str] = set()
+    symbols: list[str] = []
+    for value in raw:
+        symbol = str(value).strip().upper()
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            symbols.append(symbol)
+    return symbols
+
+
+def _final_eod_universe_v1(*, truth_root: Path, day_utc: str) -> dict[str, Any]:
+    path = truth_root.expanduser().resolve() / "reports" / "final_eod_market_data_v1" / day_utc / "final_eod_market_data.v1.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        payload = {}
+    if payload.get("schema_id") == "final_eod_market_data_current_manifest.v1":
+        artifact_path = Path(str(payload.get("current_artifact_path") or ""))
+        try:
+            payload = json.loads(artifact_path.read_text(encoding="utf-8")) if artifact_path.exists() else {}
+            path = artifact_path if payload else path
+        except Exception:
+            payload = {}
+    symbols = _canonicalize_symbols_v1(payload.get("requested_symbols") if isinstance(payload, dict) else [])
+    if not symbols:
+        symbols = _canonicalize_symbols_v1(payload.get("final_eod_symbols") if isinstance(payload, dict) else [])
+    return {"symbols": symbols, "path": str(path if symbols else ""), "hash": sha256_file_v1(path) if symbols and path.exists() else ""}
 
 
 def governed_required_universe_v1(*, day_utc: str, truth_root: Path | None = None) -> dict[str, Any]:
     if truth_root is not None:
-        try:
-            authority = latest_canonical_universe_authority_v1(truth_root=Path(truth_root), day_utc=day_utc)
-        except Exception:
-            authority = {}
-        symbols = _canonicalize_symbols_v1(authority.get("universe_symbols") if isinstance(authority, dict) else [])
-        if symbols and str(authority.get("authority_status") or "").upper() == "PASS":
-            path = canonical_universe_authority_path(truth_root=Path(truth_root), day_utc=day_utc)
+        root = Path(truth_root).expanduser().resolve()
+        stable = _final_eod_universe_v1(truth_root=root, day_utc=day_utc)
+        _queue_path, queue = latest_dynamic_certification_queue_v1(truth_root=root, day_utc=day_utc)
+        queued = _canonicalize_symbols_v1(queue.get("requested_symbols") if isinstance(queue, dict) else [])
+        baseline = _canonicalize_symbols_v1(stable.get("symbols") or [])
+        baseline_source = "stable_certified_universe" if baseline else "symbol_map_required_symbols"
+        if not baseline:
+            payload = build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=day_utc)
+            baseline = _canonicalize_symbols_v1(payload.get("required_symbols", []))
+        symbols = _canonicalize_symbols_v1([*baseline, *queued])
+        if symbols:
             return {
                 "symbols": symbols,
                 "count": len(symbols),
-                "source": "canonical_universe_authority_v1",
-                "source_artifact_path": str(path if path.exists() else ""),
-                "source_hash": str(authority.get("immutable_hash") or ""),
+                "source": f"{baseline_source}+dynamic_certification_queue_v1" if queued else baseline_source,
+                "source_artifact_path": str(stable.get("path") or _queue_path or ""),
+                "source_hash": str(stable.get("hash") or (queue.get("content_hash") if isinstance(queue, dict) else "") or ""),
+                "dynamic_requested_symbols": queued,
             }
     payload = build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=day_utc)
     symbols = _canonicalize_symbols_v1(payload.get("required_symbols", []))
@@ -65,6 +94,7 @@ def governed_required_universe_v1(*, day_utc: str, truth_root: Path | None = Non
         "source": "symbol_map_required_symbols",
         "source_artifact_path": "",
         "source_hash": "",
+        "dynamic_requested_symbols": [],
     }
 
 

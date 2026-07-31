@@ -1,0 +1,6 @@
+id: FAIL_0015
+what_we_expected: Daily research integrity warnings might be expected operational noise or a cleared one-day condition.
+what_failed: Warnings recurred for three consecutive available days and then escalated into a failed integrity audit when graph readiness became blocked.
+why_failed: Non-blocking warning status still represented persistent candidate-integrity and sleeve-health follow-through issues.
+what_to_try_next: Track whether warning categories recur or clear before treating daily research integrity as clean.
+status: OPEN

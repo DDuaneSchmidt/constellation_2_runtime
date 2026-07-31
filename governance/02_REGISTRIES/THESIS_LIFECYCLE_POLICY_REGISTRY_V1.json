@@ -1,0 +1,72 @@
+{
+  "schema_id": "thesis_lifecycle_policy_registry",
+  "schema_version": "v1",
+  "registry_version": 1,
+  "status": "ACTIVE",
+  "producer": {
+    "repo": "constellation",
+    "module": "governance/02_REGISTRIES/THESIS_LIFECYCLE_POLICY_REGISTRY_V1.json"
+  },
+  "policies": [
+    {
+      "policy_id": "thesis_policy_mean_reversion_eq_v1",
+      "sleeve_id": "C2_MEAN_REVERSION_EQ_V1",
+      "setup_type": "MEAN_REVERSION",
+      "version": "v1",
+      "evidence_requirements": [
+        "HOLDING_PERIOD_EXCEEDED",
+        "RETURN_BELOW_TARGET",
+        "MFE_BELOW_EXPECTATION"
+      ],
+      "deterministic_rules": {
+        "max_holding_days": 5,
+        "partial_target_threshold_pct": 0.0,
+        "mfe_min_r_multiple": 1.0,
+        "mae_elevated_r_multiple": 1.5,
+        "decay_requires_all": [
+          "HOLDING_PERIOD_EXCEEDED",
+          "RETURN_BELOW_TARGET",
+          "MFE_BELOW_EXPECTATION"
+        ],
+        "invalidated_requires_all": [
+          "HOLDING_PERIOD_EXCEEDED",
+          "RETURN_BELOW_TARGET",
+          "MFE_BELOW_EXPECTATION",
+          "MAE_ELEVATED"
+        ]
+      },
+      "required_inputs": [
+        "holding_days",
+        "return_pct",
+        "MFE"
+      ],
+      "missing_input_behavior": "BLOCKED_MISSING_EVIDENCE",
+      "confidence_mapping": {
+        "all_required_present": "MEDIUM",
+        "supporting_only": "LOW",
+        "missing_required_inputs": "LOW"
+      }
+    },
+    {
+      "policy_id": "thesis_policy_default_manual_review_v1",
+      "sleeve_id": "DEFAULT",
+      "setup_type": "DEFAULT",
+      "version": "v1",
+      "evidence_requirements": [],
+      "deterministic_rules": {},
+      "required_inputs": [],
+      "missing_input_behavior": "INCONCLUSIVE",
+      "confidence_mapping": {
+        "default": "LOW"
+      }
+    }
+  ],
+  "safety": {
+    "broker_submit_transmit_allowed": false,
+    "broker_execution_allowed": false,
+    "order_routing_allowed": false,
+    "autonomous_execution_allowed": false,
+    "trade_advice_allowed": false,
+    "policy_auto_change_allowed": false
+  }
+}

@@ -27,6 +27,7 @@ from ops.aegis.market_data.symbol_alias_registry_v1 import (  # noqa: E402
     symbol_resolution_row_v1,
 )
 from ops.aegis.market_data.symbol_map_v1 import build_symbol_map_v1, symbol_map_entry_for_symbol_v1, write_symbol_map_v1  # noqa: E402
+from ops.aegis.market_data_demand_v1 import build_market_data_demand_v1, demand_symbol_map_v1, write_market_data_demand_v1  # noqa: E402
 from ops.aegis.runtime_truth_kernel_v1 import DEFAULT_TRUTH_ROOT  # noqa: E402
 from ops.aegis.run_context_v1 import child_run_context_v1, run_context_from_env_v1, step_allowed_v1  # noqa: E402
 
@@ -39,7 +40,10 @@ FINAL_EOD_REPORT_FAMILY = "market_data_final_eod_v1"
 def build_market_data_report_v1(*, truth_root: Path, day_utc: str, symbol_map_override: dict[str, Any] | None = None, timeout_diagnostic: dict[str, Any] | None = None, market_data_mode: str | None = None) -> dict[str, Any]:
     root = Path(truth_root).expanduser().resolve()
     requested_mode = normalize_market_data_mode_v1(market_data_mode or os.environ.get("AEGIS_MARKET_DATA_MODE"))
-    symbol_map = symbol_map_override if isinstance(symbol_map_override, dict) else build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=day_utc)
+    base_symbol_map = symbol_map_override if isinstance(symbol_map_override, dict) else build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=day_utc, truth_root=root)
+    demand_payload = build_market_data_demand_v1(repo_root=REPO_ROOT, truth_root=root, day_utc=day_utc, symbol_map_payload=base_symbol_map)
+    demand_paths = write_market_data_demand_v1(truth_root=root, day_utc=day_utc, payload=demand_payload)
+    symbol_map = demand_symbol_map_v1(demand_payload)
     paths = write_symbol_map_v1(truth_root=root, day_utc=day_utc, payload=symbol_map)
     symbol_map_path = Path(paths["json"])
     requested_symbols = _requested_symbols(symbol_map)
@@ -104,6 +108,15 @@ def build_market_data_report_v1(*, truth_root: Path, day_utc: str, symbol_map_ov
     intraday_operational_ready = bool(required_symbols_for_final) and not blocking_missing and not blocking_stale and current_sleeve_market_readiness_status == "READY" and any(
         bool((symbols.get(symbol) or {}).get("candidate_generation_eligible") is True)
         for symbol in required_symbols_for_final
+    )
+    intraday_data_status = _intraday_data_status_v1(
+        provider_attempts=provider_attempts,
+        requested_mode=requested_mode,
+        final_eod_ready=final_eod_ready,
+        intraday_operational_ready=intraday_operational_ready,
+        fetched_symbols=fetched_symbols,
+        missing_symbols=missing_symbols,
+        stale_symbols=stale_symbols,
     )
     operator_market_data_state = _operator_market_data_state(
         provider_attempts=provider_attempts,
@@ -199,6 +212,8 @@ def build_market_data_report_v1(*, truth_root: Path, day_utc: str, symbol_map_ov
             "market_data_mode": requested_mode,
         },
         "symbol_map_path": str(symbol_map_path or ""),
+        "market_data_demand_path": str(demand_paths.get("json") or ""),
+        "market_data_demand_hash": _sha256_path_v1(Path(demand_paths.get("json") or "")),
         "runtime_universe_mode": symbol_map.get("runtime_universe_mode") or "",
         "production_scan_dataset_id": symbol_map.get("production_scan_dataset_id") or "",
         "dataset_snapshot_id": symbol_map.get("dataset_snapshot_id") or symbol_map.get("production_scan_dataset_id") or "",
@@ -234,6 +249,10 @@ def build_market_data_report_v1(*, truth_root: Path, day_utc: str, symbol_map_ov
         "freshness_message": freshness_decision.message,
         "legacy_operator_market_data_state": operator_market_data_state,
         "operator_market_data_state": operator_market_data_state,
+        "intraday_data_status": intraday_data_status,
+        "intraday_context_degraded": bool(requested_mode == INTRADAY_OPERATIONAL and intraday_data_status not in {"INTRADAY_READY", "EOD_CERTIFIED_FALLBACK_READY"}),
+        "intraday_timeout_symbols": timeout_symbols if requested_mode == INTRADAY_OPERATIONAL else [],
+        "intraday_unavailable_symbols": missing_symbols if requested_mode == INTRADAY_OPERATIONAL and intraday_data_status == "INTRADAY_DATA_UNAVAILABLE" else [],
         "final_eod_ready": final_eod_ready,
         "intraday_operational_ready": intraday_operational_ready,
         "final_eod_certification_status": "VALID" if final_eod_ready else ("PENDING" if intraday_operational_ready else "UNAVAILABLE"),
@@ -300,6 +319,66 @@ def build_market_data_report_v1(*, truth_root: Path, day_utc: str, symbol_map_ov
     return payload
 
 
+
+
+def _stable_manifest_global_hash_v1(files: list[dict[str, Any]]) -> str:
+    rows = sorted(
+        (
+            str(row.get("symbol") or "").strip().upper(),
+            int(row.get("year") or 0),
+            str(row.get("sha256") or "").strip().lower(),
+        )
+        for row in files
+        if str(row.get("symbol") or "").strip() and str(row.get("sha256") or "").strip()
+    )
+    data = "".join(f"{symbol}|{year}|{sha}\n" for symbol, year, sha in rows).encode("utf-8")
+    return __import__("hashlib").sha256(data).hexdigest()
+
+
+def sync_market_data_snapshot_manifest_v1(*, truth_root: Path, day_utc: str, symbols: list[str], generated_at_utc: str) -> dict[str, Any]:
+    root = Path(truth_root).expanduser().resolve()
+    snapshot_root = root / "market_data_snapshot_v1"
+    manifest_path = snapshot_root / "dataset_manifest.json"
+    existing: dict[str, Any] = {}
+    if manifest_path.exists():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            existing = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            existing = {}
+    by_file: dict[str, dict[str, Any]] = {}
+    for row in existing.get("files") if isinstance(existing.get("files"), list) else []:
+        if isinstance(row, dict) and str(row.get("file") or "").strip():
+            by_file[str(row.get("file"))] = dict(row)
+    touched = []
+    requested = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
+    for symbol in requested:
+        data_path = snapshot_root / symbol / f"{day_utc[:4]}.jsonl"
+        if not data_path.is_file():
+            continue
+        rel = f"{symbol}/{day_utc[:4]}.jsonl"
+        sha = __import__("hashlib").sha256(data_path.read_bytes()).hexdigest()
+        by_file[rel] = {"file": rel, "sha256": sha, "symbol": symbol, "year": int(day_utc[:4])}
+        touched.append({"symbol": symbol, "file": rel, "sha256": sha})
+    files = sorted(by_file.values(), key=lambda row: (str(row.get("symbol") or ""), str(row.get("file") or "")))
+    payload = dict(existing)
+    payload.setdefault("dataset_version", "v1")
+    payload["files"] = files
+    payload["symbols"] = sorted({str(row.get("symbol") or "").strip().upper() for row in files if str(row.get("symbol") or "").strip()})
+    payload["symbols_authoritative"] = True
+    payload["source_snapshot_utc"] = generated_at_utc or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    payload["generated_at_utc"] = generated_at_utc or payload.get("generated_at_utc") or ""
+    payload["global_hash"] = _stable_manifest_global_hash_v1(files)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"manifest_path": str(manifest_path), "manifest_hash": _sha256_path_v1(manifest_path), "updated_file_count": len(touched), "updated_files": touched, "global_hash": payload.get("global_hash") or ""}
+
+def _sha256_path_v1(path: Path) -> str:
+    try:
+        return __import__("hashlib").sha256(path.read_bytes()).hexdigest() if path.exists() else ""
+    except Exception:
+        return ""
+
 def write_market_data_report_v1(*, truth_root: Path, day_utc: str, payload: dict[str, Any]) -> dict[str, str]:
     root = Path(truth_root).expanduser().resolve()
     out_dir = root / "reports" / REPORT_FAMILY / day_utc
@@ -344,6 +423,23 @@ def write_market_data_report_v1(*, truth_root: Path, day_utc: str, payload: dict
     return {"json": str(json_path), "summary": str(summary_path), "matrix": str(matrix_path), "provider_attempts_json": str(attempts_json_path), "provider_attempts_txt": str(attempts_txt_path), "provider_capabilities_json": str(capability_json_path), "provider_missing_config_json": str(missing_config_json_path) if str((payload.get("provider_capability_report") or {}).get("status") or "") != "VALID" else "", "mode_json": str(specific_json), "mode_summary": str(specific_txt)}
 
 
+def _intraday_data_status_v1(*, provider_attempts: list[dict[str, Any]], requested_mode: str, final_eod_ready: bool, intraday_operational_ready: bool, fetched_symbols: list[str], missing_symbols: list[str], stale_symbols: list[str]) -> str:
+    if requested_mode != INTRADAY_OPERATIONAL:
+        return "NOT_APPLICABLE"
+    statuses = {str(row.get("status") or "").upper() for row in provider_attempts if isinstance(row, dict)}
+    if final_eod_ready:
+        return "EOD_CERTIFIED_FALLBACK_READY"
+    if intraday_operational_ready:
+        return "INTRADAY_READY"
+    if "TIMEOUT" in statuses or "NOT_ATTEMPTED_DEADLINE_EXHAUSTED" in statuses:
+        return "INTRADAY_PROVIDER_TIMEOUT"
+    if "SOURCE_NOT_FINALIZED" in statuses:
+        return "INTRADAY_DATA_NOT_FINALIZED"
+    if missing_symbols or stale_symbols or not fetched_symbols:
+        return "INTRADAY_DATA_UNAVAILABLE"
+    return "INTRADAY_DEGRADED"
+
+
 def _operator_market_data_state(*, provider_attempts: list[dict[str, Any]], final_eod_ready: bool, intraday_operational_ready: bool, requested_mode: str, fetched_symbols: list[str], missing_symbols: list[str], stale_symbols: list[str], provisional_symbols: list[str]) -> str:
     statuses = {str(row.get("status") or "").upper() for row in provider_attempts if isinstance(row, dict)}
     if final_eod_ready:
@@ -353,9 +449,9 @@ def _operator_market_data_state(*, provider_attempts: list[dict[str, Any]], fina
     if "SOURCE_NOT_FINALIZED" in statuses:
         return "MARKET_NOT_FINALIZED_YET"
     if "TIMEOUT" in statuses or "NOT_ATTEMPTED_DEADLINE_EXHAUSTED" in statuses:
-        return "PARTIAL_PROVIDER_SUCCESS" if fetched_symbols else "PROVIDER_TIMEOUT"
+        return "INTRADAY_PROVIDER_TIMEOUT" if requested_mode == INTRADAY_OPERATIONAL else ("PARTIAL_PROVIDER_SUCCESS" if fetched_symbols else "PROVIDER_TIMEOUT")
     if "SOURCE_UNAVAILABLE" in statuses or "NETWORK_ERROR" in statuses:
-        return "PARTIAL_PROVIDER_SUCCESS" if fetched_symbols else "PROVIDER_SOURCE_UNAVAILABLE"
+        return "INTRADAY_DATA_UNAVAILABLE" if requested_mode == INTRADAY_OPERATIONAL else ("PARTIAL_PROVIDER_SUCCESS" if fetched_symbols else "PROVIDER_SOURCE_UNAVAILABLE")
     if provisional_symbols:
         return "PARTIAL_PROVIDER_SUCCESS"
     if stale_symbols:
@@ -415,6 +511,8 @@ def render_summary(payload: dict[str, Any]) -> str:
         f"source: {payload.get('source') or 'NOT_CONFIGURED'}",
         f"provider_capability_status: {((payload.get('provider_capability_report') or {}).get('status') if isinstance(payload.get('provider_capability_report'), dict) else '')}",
         f"operator_market_data_state: {payload.get('operator_market_data_state') or ''}",
+        f"intraday_data_status: {payload.get('intraday_data_status') or ''}",
+        f"intraday_context_degraded: {str(payload.get('intraday_context_degraded') is True).lower()}",
         f"freshness_state: {payload.get('freshness_state') or ''}",
         f"validation_status: {payload.get('validation_status') or ''}",
         f"final_eod_ready: {str(payload.get('final_eod_ready') is True).lower()}",
@@ -719,9 +817,12 @@ def main(argv: list[str] | None = None) -> int:
             symbol_override["mapping_missing_symbols"] = missing
             symbol_override["requested_symbols_source"] = "CLI_SYMBOL_OVERRIDE"
         payload = build_market_data_report_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), symbol_map_override=symbol_override, timeout_diagnostic={"run_context": context.to_dict()}, market_data_mode=str(args.market_data_mode))
+    manifest_sync = sync_market_data_snapshot_manifest_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), symbols=list(payload.get("fetched_symbols") or payload.get("requested_symbols") or []), generated_at_utc=str(payload.get("generated_at_utc") or ""))
+    payload["market_data_snapshot_manifest_sync"] = manifest_sync
     paths = write_market_data_report_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), payload=payload)
-    print(json.dumps({**paths, "status": payload["status"], "usable_for_candidate_generation": payload["usable_for_candidate_generation"], "failure_reason": payload.get("failure_reason"), "broker_execution_allowed": False, "autonomous_execution_allowed": False}, sort_keys=True))
-    return 0
+    print(json.dumps({**paths, "market_data_snapshot_manifest_sync": manifest_sync, "status": payload["status"], "intraday_data_status": payload.get("intraday_data_status"), "operator_market_data_state": payload.get("operator_market_data_state"), "usable_for_candidate_generation": payload["usable_for_candidate_generation"], "failure_reason": payload.get("failure_reason"), "broker_execution_allowed": False, "autonomous_execution_allowed": False}, sort_keys=True))
+    blocking_intraday = bool(str(args.market_data_mode) == INTRADAY_OPERATIONAL and payload.get("current_sleeve_market_readiness_status") == "BLOCKED")
+    return 2 if blocking_intraday else 0
 
 
 if __name__ == "__main__":

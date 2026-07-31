@@ -1,0 +1,6 @@
+id: FAIL_0011
+what_we_expected: Legacy compatibility layers could be retired by architecture decision.
+what_failed: Runtime truth still required legacy artifacts.
+why_failed: Deprecation readiness depended on runtime dependencies, not desired architecture state.
+what_to_try_next: Retire legacy layers only after runtime truth no longer consumes them.
+status: OPEN

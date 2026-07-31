@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/paper_review_queue.v1.schema.json",
+  "title": "paper_review_queue.v1",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "artifact_id", "day_utc", "generated_at_utc", "operating_mode", "rows", "status_counts", "safety"],
+  "properties": {
+    "schema_id": {"const": "paper_review_queue"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "paper_review_queue"},
+    "day_utc": {"type": "string"},
+    "generated_at_utc": {"type": "string"},
+    "operating_mode": {"type": "string"},
+    "rows": {"type": "array", "items": {"type": "object"}},
+    "status_counts": {"type": "object"},
+    "safety": {"type": "object"}
+  },
+  "additionalProperties": true
+}

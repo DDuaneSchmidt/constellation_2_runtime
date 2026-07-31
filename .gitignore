@@ -1,77 +1,83 @@
-# Constellation 2.0 - repo hygiene (audit-grade)
-# Rule: ignore build artifacts, virtualenvs, caches, and local outputs.
+# FCC-SOURCE-001 canonical repository boundaries
 #
-# IMPORTANT (C2 authority):
-# - Runtime truth under constellation_2/runtime/truth/** is the authoritative immutable output surface
-#   and MUST be trackable in git for reproducible, hash-verifiable replay.
-# - Non-truth runtime outputs remain local by default.
+# Versioned in Git:
+# - application and governance source;
+# - tests and authored documentation;
+# - research_journal/** evidence inputs required by reproducible tests; and
+# - explicit fixtures and static application assets.
 #
-# IMPORTANT (Derived artifacts):
-# - Human-readable summaries derived from canonical truth are NON-authoritative operational conveniences.
-# - They MUST NOT be committed. They are regenerated deterministically from canonical truth.
+# Never versioned here:
+# - live/runtime state;
+# - downloaded or cached market data;
+# - generated reports, browser captures, and proof bundles;
+# - local credentials, environments, and tool caches.
 
-# Python
+# Python and test/tool caches
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual environments
-.venv/
-venv/
-constellation_2/.venv/
-
-# Test / tooling caches
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
-# OS/editor
+# Local environments and package outputs
+.venv/
+.venv_*/
+venv/
+node_modules/
+dist/
+build/
+*.egg-info/
+
+# OS and editor files
 .DS_Store
 *.swp
 *.swo
+*~
 
-# Runtime outputs
-# Default: ignore everything under constellation_2/runtime/
-constellation_2/runtime/
-constellation_2/runtime/**
-
-# EXCEPTION: canonical immutable truth MUST be trackable
-!constellation_2/runtime/
-!constellation_2/runtime/truth/
-!constellation_2/runtime/truth/**
-!constellation_2/runtime/truth/**/**
-
-# EXCEPTION: derived human summaries are NON-authoritative and must remain local-only
-constellation_2/runtime/truth/reports/daily_portfolio_summary_*.txt
-
-# Operator/local inputs used for runs (samples belong in docs or committed fixtures; live inputs are local)
-constellation_2/phaseF/**/inputs/
-constellation_2/phaseF/**/inputs/**
-
-# Phase D local outputs (Phase D directories are governed, but outputs inside are not committed)
-constellation_2/phaseD/outputs/
-# C2 runtime outputs (must never be committed)
-constellation_2/runtime/truth/reports/
-constellation_2/runtime/truth/monitoring_v2/
-
-# Constellation runtime truth (authoritative on disk, never committed)
-constellation_2/runtime/
-
-# Aegis local operator/runtime artifacts
-artifacts/
-*.png
-research_*_v*.json
-research_*_v*.png
-research_data_readiness_audit_v1.json
-research_pipeline_data_resolution_report_v1.json
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
 ops/config/*.env
-research_lab/research_store/
+*.pem
+*.key
 
-# Research Lab local acquisition outputs
-research_lab/local_data/ohlcv/csv_readiness_report.json
-research_lab/local_data/ohlcv/expected_csv_files.json
-research_lab/local_data/ohlcv/templates/*_template.csv
+# Runtime state. The top-level runtime/ directory is Python source and is
+# intentionally NOT ignored.
+/constellation_2/runtime/
+/constellation_2/phaseD/outputs/
+/constellation_2/phaseF/**/inputs/
+/artifacts/
+/tmp/
+/.tmp_runtime_quarantine_*/
 
-# Generated Aegis projection audits
-docs/aegis/operator_ui_projection_audit.v1.*
+# Local/downloaded datasets and research execution stores
+/data/
+/research_lab/research_store/
+/research_lab/local_data/ohlcv/csv_readiness_report.json
+/research_lab/local_data/ohlcv/expected_csv_files.json
+/research_lab/local_data/ohlcv/templates/*_template.csv
+
+# Generated reports and evidence outputs. Versioned evidence inputs live in
+# research_journal/** and are deliberately not ignored.
+/reports/
+/docs/screenshots/
+/docs/aegis/operator_ui_projection_audit.v1.*
+/aegis_ui_architecture_proof/
+/aegis_ui_legacy_cleanup_proof/
+/aegis_ui_phase1b_audit/
+/aegis_filtered_real_icon_logo_candidates_manifest.tsv
+
+# Root-level generated image/research exports. Static UI assets and test
+# fixtures in subdirectories remain eligible for version control.
+/*.png
+/research_*_v*.json
+/research_*_v*.png
+/research_data_readiness_audit_v1.json
+/research_pipeline_data_resolution_report_v1.json
+
+# Temporary/generated file suffixes
+*.tmp
+*.out

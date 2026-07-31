@@ -132,8 +132,8 @@ def _normalize_manifest_rows(manifest_path: Path) -> List[Dict[str, Any]]:
             continue
         indent = len(raw_line) - len(raw_line.lstrip(" "))
 
-        if indent == 0 and stripped == "services:":
-            in_services = True
+        if indent == 0:
+            in_services = stripped == "services:"
             current = None
             continue
 

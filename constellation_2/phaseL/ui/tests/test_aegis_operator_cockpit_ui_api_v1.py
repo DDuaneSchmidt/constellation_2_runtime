@@ -229,6 +229,9 @@ def test_operator_cockpit_route_and_api_payload_use_canonical_state(tmp_path: Pa
     assert payload["safety"]["broker_execution_allowed"] is False
     assert payload["safety"]["broker_submit_transmit_allowed"] is False
     assert payload["safety"]["autonomous_execution_allowed"] is False
+    assert payload["command_center_queue_audit_v1"]["schema_id"] == "aegis_command_center_queue_audit"
+    assert payload["command_center_queue_audit_v1"]["data_quality_status"] == "MISSING_ARTIFACT"
+    assert payload["source_paths"]["command_center_queue_audit_v1"].endswith("command_center_queue_audit.v1.json")
     assert payload["drilldown_links"][0]["path"] == "/tmp/runtime_truth.json"
 
 
@@ -405,6 +408,17 @@ def test_operator_cockpit_default_day_uses_latest_canonical_state(monkeypatch, t
 
     assert server._projection_day(None) == old_day
     assert server._projection_day_for_report(None, "aegis_canonical_operator_state_v1") == latest_day
+
+
+def test_operator_api_explicit_day_does_not_fallback_to_current_truth_source_day(monkeypatch, tmp_path: Path) -> None:
+    requested_day = "2026-05-29"
+    stale_day = "2026-05-26"
+    monkeypatch.setattr(server, "GLOBAL_TRUTH_ROOT", tmp_path)
+    monkeypatch.setattr(server, "_canonical_truth_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "resolve_current_operator_truth_v1", lambda **_: {"source_day": stale_day})
+
+    assert server._resolved_operator_api_day_v1(requested_day, "aegis_canonical_operator_state_v1") == requested_day
+    assert server._resolved_operator_api_day_v1(requested_day, "operator_state_snapshot_v1") == requested_day
 
 
 def test_operator_cockpit_missing_canonical_state_is_explicit(tmp_path: Path) -> None:

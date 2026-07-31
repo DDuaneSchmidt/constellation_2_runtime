@@ -1,0 +1,6 @@
+id: FAIL_0016
+what_we_expected: Standalone technical-indicator evidence would support durable Technical Strategy Factory claims.
+what_failed: Standalone and broad discovery claims remained unsupported, false-positive-prone, baseline-recoverable, or non-generalizing.
+why_failed: Evidence often lacked relationship-specific support, out-of-fixture generalization, or separation from naive baselines.
+what_to_try_next: Evaluate technical structures only when tied to specific relationships, mechanisms, regimes, or context and tested out of fixture.
+status: OPEN

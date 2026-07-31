@@ -14,6 +14,7 @@ DEFAULT_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 PYTHON = sys.executable
 RUN_MODE = "INTRADAY_OPERATIONAL"
 SLEEVE_SYMBOLS = "SPY,QQQ,IWM,DIA,TLT,IEF,LQD,HYG,GLD,DBC,UUP,VIX"
+DEFAULT_STAGE_TIMEOUT_SECONDS = 300.0
 
 
 def _repo_root() -> Path:
@@ -43,15 +44,64 @@ def _json_or_text(text: str) -> Any:
         return {"text": raw[-4000:]}
 
 
-def _run(cmd: list[str], *, env: dict[str, str]) -> dict[str, Any]:
+def _timeout_seconds(raw: Any, default: float = DEFAULT_STAGE_TIMEOUT_SECONDS) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(1.0, value)
+
+
+def _stage_name(cmd: list[str]) -> str:
+    if len(cmd) > 1:
+        return Path(str(cmd[1])).name
+    return Path(str(cmd[0] if cmd else "unknown")).name
+
+
+def _timeout_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return str(value or "").strip()
+
+
+def _run(cmd: list[str], *, env: dict[str, str], timeout_seconds: float, stage: str | None = None) -> dict[str, Any]:
     started = _now_utc()
-    proc = subprocess.run(cmd, cwd=str(_repo_root()), env=env, capture_output=True, text=True)
+    stage_name = stage or _stage_name(cmd)
+    try:
+        proc = subprocess.run(cmd, cwd=str(_repo_root()), env=env, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        ended = _now_utc()
+        stdout = _timeout_text(exc.stdout)
+        stderr = _timeout_text(exc.stderr)
+        return {
+            "command": cmd,
+            "stage": stage_name,
+            "returncode": 124,
+            "started_at_utc": started,
+            "ended_at_utc": ended,
+            "timeout_seconds": timeout_seconds,
+            "timed_out": True,
+            "failure_reason": "STAGE_TIMEOUT",
+            "stdout": stdout,
+            "stderr": stderr,
+            "payload": {
+                "status": "FAIL",
+                "failure_reason": "STAGE_TIMEOUT",
+                "failed_stage": stage_name,
+                "timeout_seconds": timeout_seconds,
+                "message": f"{stage_name} exceeded {timeout_seconds:g}s while running the intraday sleeve pipeline.",
+            },
+        }
     ended = _now_utc()
     return {
         "command": cmd,
+        "stage": stage_name,
         "returncode": int(proc.returncode),
         "started_at_utc": started,
         "ended_at_utc": ended,
+        "timeout_seconds": timeout_seconds,
+        "timed_out": False,
+        "failure_reason": "",
         "stdout": proc.stdout.strip(),
         "stderr": proc.stderr.strip(),
         "payload": _json_or_text(proc.stdout),
@@ -131,12 +181,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", default="PAPER")
     parser.add_argument("--symbols", default=SLEEVE_SYMBOLS)
     parser.add_argument("--run-id", "--run_id", default="")
+    parser.add_argument("--stage-timeout-seconds", "--stage_timeout_seconds", type=float, default=None)
     args = parser.parse_args(argv)
 
     root = Path(args.truth_root).expanduser().resolve()
     day = str(args.day_utc)
     environment = str(args.environment or "PAPER").strip().upper()
     run_id = str(args.run_id or _run_id(day)).strip()
+    stage_timeout_seconds = _timeout_seconds(
+        args.stage_timeout_seconds
+        if args.stage_timeout_seconds is not None
+        else os.environ.get("AEGIS_INTRADAY_SLEEVES_STAGE_TIMEOUT_SECONDS")
+    )
     safe_run_id = _safe_run_id(run_id)
     rollup_path = root / "reports" / "sleeve_evaluation_kernel_v1" / day / safe_run_id / "sleeve_evaluation_rollup.v1.json"
     portfolio_gate_path = root / "reports" / "portfolio_activation_gate_v1" / day / "portfolio_activation_gate.v1.json"
@@ -166,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results: list[dict[str, Any]] = []
     for command in pre_arbitration_commands:
-        result = _run(command, env=env)
+        result = _run(command, env=env, timeout_seconds=stage_timeout_seconds)
         results.append(result)
         if int(result["returncode"]) not in {0, 2}:
             break
@@ -180,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
                 [PYTHON, "ops/tools/build_aegis_market_data_inputs_v1.py", "--truth-root", str(root), "--day-utc", day, "--market-data-mode", RUN_MODE, "--emit-events"],
                 [PYTHON, "ops/tools/build_aegis_data_registry_v1.py", "--truth_root", str(root), "--day", day],
             ):
-                result = _run(command, env=env)
+                result = _run(command, env=env, timeout_seconds=stage_timeout_seconds)
                 results.append(result)
                 if int(result["returncode"]) not in {0, 2}:
                     break
@@ -188,14 +244,33 @@ def main(argv: list[str] | None = None) -> int:
     post_arbitration_commands = [
         [PYTHON, "ops/tools/promote_aegis_selected_intent_v1.py", "--truth-root", str(root), "--day", day],
         [PYTHON, "ops/tools/build_candidate_promotion_map_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_context_requirement_profile_v1.py", "--truth-root", str(root), "--day-utc", day],
+        [PYTHON, "ops/tools/build_aegis_market_data_demand_v1.py", "--truth-root", str(root), "--day-utc", day],
+        [PYTHON, "ops/tools/build_aegis_market_data_coverage_v1.py", "--truth-root", str(root), "--day-utc", day],
+        [PYTHON, "ops/tools/build_aegis_sleeve_input_contracts_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_input_contract_reconciliation_v1.py", "--truth-root", str(root), "--day-utc", day],
+        [PYTHON, "ops/tools/write_aegis_signal_evidence_graph_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/write_aegis_candidate_contracts_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/write_aegis_real_signal_death_report_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/write_aegis_candidate_generation_diagnostics_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/write_aegis_paper_review_queue_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/roll_aegis_candidate_state_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_trading_lifecycle_state_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_paper_position_ledger_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_mode_readiness_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_paper_pnl_report_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_daily_paper_performance_v1.py", "--truth-root", str(root), "--day", day],
         [PYTHON, "ops/tools/build_operator_state_snapshot_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_canonical_operator_state_v1.py", "--truth-root", str(root), "--day", day],
+        [PYTHON, "ops/tools/write_aegis_daily_operator_v1.py", "--truth_root", str(root), "--day", day],
+        [PYTHON, "ops/tools/build_aegis_daily_operator_workspace_v1.py", "--truth-root", str(root), "--day", day],
         [PYTHON, "ops/tools/run_aegis_runtime_truth_kernel_v1.py", "--truth_root", str(root), "--day", day, "--json"],
         [PYTHON, "ops/tools/run_aegis_projection_refresh_v1.py", "--truth-root", str(root), "--target-day", day, "--environment", environment],
         [PYTHON, "ops/tools/build_aegis_audit_bundle_v1.py", "--truth-root", str(root), "--day-utc", day, "--run-id", run_id],
     ]
     if results and all(int(row["returncode"]) in {0, 2} for row in results):
         for command in post_arbitration_commands:
-            result = _run(command, env=env)
+            result = _run(command, env=env, timeout_seconds=stage_timeout_seconds)
             results.append(result)
             if int(result["returncode"]) not in {0, 2}:
                 break
@@ -203,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     audit_path = _first_path(results[-1].get("payload") if results else {}, "bundle_path", "audit_bundle_path", "manifest_path", "artifact_path", "json")
     replay_result: dict[str, Any] = {}
     if audit_path and Path(audit_path).exists():
-        replay_result = _run([PYTHON, "ops/tools/replay_aegis_runtime_v1.py", "--audit-bundle", audit_path], env=env)
+        replay_result = _run([PYTHON, "ops/tools/replay_aegis_runtime_v1.py", "--audit-bundle", audit_path], env=env, timeout_seconds=stage_timeout_seconds)
         results.append(replay_result)
 
     refresh_payload = results[0].get("payload") if results and isinstance(results[0].get("payload"), dict) else {}
@@ -211,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     readiness_payload = results[4].get("payload") if len(results) > 4 and isinstance(results[4].get("payload"), dict) else {}
     counts = _candidate_counts(root, day, run_id)
     all_ok = all(int(row["returncode"]) in {0, 2} for row in results)
+    failed_stage = next((row for row in results if int(row.get("returncode") or 0) not in {0, 2}), {})
     out = {
         "schema_id": "aegis_intraday_sleeves_now_run",
         "schema_version": "v1",
@@ -219,8 +295,12 @@ def main(argv: list[str] | None = None) -> int:
         "run_id": run_id,
         "run_mode": RUN_MODE,
         "market_data_mode": RUN_MODE,
+        "stage_timeout_seconds": stage_timeout_seconds,
         "underlying_command": " ".join([PYTHON, "ops/tools/run_aegis_intraday_sleeves_now_v1.py", "--truth-root", str(root), "--day-utc", day, "--environment", environment, "--run-id", run_id]),
         "status": "PASS" if all_ok else "FAIL",
+        "failed_stage": failed_stage.get("stage", ""),
+        "failure_reason": failed_stage.get("failure_reason") or _first_path(failed_stage.get("payload") if failed_stage else {}, "failure_reason") or "",
+        "failed_stage_returncode": int(failed_stage.get("returncode") or 0) if failed_stage else 0,
         "market_data_status": refresh_payload.get("status") if isinstance(refresh_payload, dict) else "UNKNOWN",
         "operator_market_data_state": refresh_payload.get("operator_market_data_state") if isinstance(refresh_payload, dict) else "UNKNOWN",
         "market_data_usable_for_candidate_generation": refresh_payload.get("usable_for_candidate_generation") if isinstance(refresh_payload, dict) else False,

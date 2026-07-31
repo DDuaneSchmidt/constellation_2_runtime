@@ -14,37 +14,26 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_primary_aegis_navigation_matches_workflow_model() -> None:
+def test_primary_aegis_navigation_matches_ai_cio_model() -> None:
     nav = _text(NAV)
 
-    assert 'section: "OPERATOR WORKFLOW"' in nav
-    for label in ['label: "Dashboard"', 'label: "Candidates"', 'label: "Hypotheses"', 'label: "Captured Trades"', 'label: "System Health"']:
-        assert label in nav.split("export const LEGACY_NAVIGATION_REFERENCE", 1)[0]
+    assert 'section: "AI CIO"' in nav
+    primary_nav = nav.split("export const ENGINEERING_NAVIGATION_SCHEMA", 1)[0]
+    for label in ['label: "CIO Briefing"', 'label: "Capital Map"', 'label: "Portfolios"', 'label: "Research Lab"', 'label: "Opportunities"', 'label: "Retirement Simulator"', 'label: "Advisor Oversight"', 'label: "Documents"', 'label: "Carolyn"']:
+        assert label in primary_nav
     for old_primary in [
-        'label: "Opportunities"',
-        'label: "Edge Lab"',
-        'label: "Performance"',
-        'label: "Journal"',
-        'label: "EOD Queue"',
-        'label: "Operator Inbox"',
-        'label: "Runtime Truth"',
-        'label: "Receipts / Outcomes"',
-        'label: "Sleeve Performance"',
-        'label: "AI Feedback / EOD-EOW Review"',
-        'label: "Feature Completion Audit"',
+        'label: "Dashboard"',
+        'label: "Candidate Funnel"',
+        'label: "Captured Trades"',
+        'label: "Runtime Timeline"',
+        'label: "Verified Runtime"',
+        'label: "Repair Center"',
+        'label: "Command Center"',
+        'label: "Positions"',
     ]:
-        assert old_primary not in nav.split("export const LEGACY_NAVIGATION_REFERENCE", 1)[0]
-    primary_nav = nav.split("export function flattenNavigation", 1)[0]
-    assert "Drilldown" not in primary_nav
-    dashboard_block = nav.split('id: "aegis_dashboard"', 1)[1].split('id: "aegis_candidates"', 1)[0]
-    candidates_block = nav.split('id: "aegis_candidates"', 1)[1].split('id: "research_pipeline"', 1)[0]
-    research_block = nav.split('id: "research_pipeline"', 1)[1].split('id: "captured_trades"', 1)[0]
-    health_block = nav.split('id: "system_health"', 1)[1].split("],", 1)[0]
-    assert "Event Trigger Drilldown" not in dashboard_block
-    assert "Receipts / Outcomes Drilldown" not in health_block
-    assert "Sleeve Performance Drilldown" not in health_block
-    assert "Research Lab Drilldown" not in research_block
-    assert "Adaptive Intelligence Drilldown" not in candidates_block
+        assert old_primary not in primary_nav
+    assert "hidden_by_default: true" in nav
+    assert "available_in_engineering_mode: true" in nav
 
 
 def test_obsolete_primary_labels_are_absent_from_active_ui_copy() -> None:
@@ -69,7 +58,7 @@ def test_new_operator_routes_are_exposed_by_shell_and_server() -> None:
     pages = pages_source_v1(ROOT)
     server = _text(SERVER)
 
-    for route in ["/aegis-opportunities", "/aegis-edge-lab", "/aegis-performance", "/aegis-journal", "/aegis-today", "/aegis-review", "/aegis-research", "/aegis-history", "/aegis-operator-cockpit"]:
+    for route in ["/aegis-command-center", "/aegis-positions", "/aegis-history", "/aegis-research-workspace", "/aegis-trading-desk", "/aegis-operations", "/aegis-audit-evidence", "/aegis-opportunities", "/aegis-edge-lab", "/aegis-performance", "/aegis-journal", "/aegis-today", "/aegis-review", "/aegis-research", "/aegis-operator-cockpit"]:
         assert route in pages
         assert route in server
     assert "renderAegisWorkflowPage" in pages

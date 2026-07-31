@@ -16,13 +16,16 @@ from ops.aegis.event_append_transaction_v1 import canonical_vs_quarantine_report
 from ops.aegis.decision_ledger_v1 import write_decision_ledger_v1
 from ops.aegis.manual_intent_v1 import manual_intent_report_v1
 
+from ops.aegis.context_requirement_profile_v1 import load_or_build_context_requirement_profile_v1, profile_summary_for_output_v1
 from ops.aegis.intelligence_common_v1 import intelligence_summaries_v1
+from ops.aegis.mode_readiness_v1 import build_mode_readiness_v1, write_mode_readiness_v1
 
 
 KERNEL_VERSION = "aegis_runtime_truth_kernel.v1"
 DEFAULT_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TARGET_OPERATING_MODE = "HUMAN_APPROVED_ADVISORY_RUNTIME"
+PAPER_REVIEW_OPERATING_MODE = "HUMAN_REVIEWED_PAPER_MODE"
 LIVE_BROKER_TRADING_POLICY = "DISABLED_BY_DESIGN"
 AUTONOMOUS_EXECUTION_POLICY = "DISABLED_BY_DESIGN"
 
@@ -39,6 +42,10 @@ CAPABILITIES = [
     "BROKER_LIVE_LIFECYCLE_PROVEN",
     "ADVISORY_READY",
     "TRADE_ADVICE_ALLOWED",
+    "PAPER_CANDIDATES_READY",
+    "PAPER_REVIEW_ALLOWED",
+    "MANUAL_PAPER_RECEIPT_ALLOWED",
+    "PAPER_TRADE_CREATION_ALLOWED",
     "MANUAL_TRADE_CAPTURE_ALLOWED",
     "PAPER_TRADE_READY",
     "LIVE_TRADE_READY",
@@ -89,6 +96,30 @@ ARTIFACT_REGISTRY: tuple[ArtifactSpec, ...] = (
         evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
     ),
     ArtifactSpec(
+        artifact_id="aegis_strategic_operating_status",
+        domain="report",
+        required=True,
+        expected_path="reports/aegis_strategic_operating_status_v1/{day}/strategic_operating_status.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_aegis_strategic_operating_status_v1.py --truth-root {truth_root} --day {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("DATA_READY", "TRADE_ADVICE_ALLOWED", "MANUAL_TRADE_CAPTURE_ALLOWED"),
+        claim_implications=("Strategic operating status is missing or not current.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc", "generated_at_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="aegis_research_eod_summary",
+        domain="research",
+        required=True,
+        expected_path="reports/aegis_research_eod_summary_v1/{day}/research_eod_summary.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_aegis_research_eod_summary_v1.py --truth-root {truth_root} --day {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("DATA_READY", "TRADE_ADVICE_ALLOWED", "MANUAL_TRADE_CAPTURE_ALLOWED"),
+        claim_implications=("Research EOD summary is missing or not current.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc", "generated_at_utc"),
+    ),
+    ArtifactSpec(
         artifact_id="operator_execution_queue",
         domain="candidate",
         required=True,
@@ -101,6 +132,92 @@ ARTIFACT_REGISTRY: tuple[ArtifactSpec, ...] = (
         evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
     ),
     ArtifactSpec(
+        artifact_id="market_data_inputs",
+        domain="data",
+        required=False,
+        expected_path="reports/market_data_inputs_v1/{day}/market_data_inputs.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_aegis_market_data_inputs_v1.py --truth_root {truth_root} --day_utc {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_CANDIDATES_READY", "PAPER_TRADE_READY", "PAPER_TRADE_CREATION_ALLOWED"),
+        claim_implications=("Current market data inputs are missing for paper candidate readiness.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="candidate_review_packet",
+        domain="candidate",
+        required=False,
+        expected_path="reports/aegis_candidate_review_packet_v1/{day}/candidate_review_packet.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/write_aegis_paper_review_queue_v1.py --truth_root {truth_root} --day {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_CANDIDATES_READY", "PAPER_REVIEW_ALLOWED", "MANUAL_PAPER_RECEIPT_ALLOWED", "PAPER_TRADE_READY"),
+        claim_implications=("Candidate review packet is missing or not current.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="paper_review_queue",
+        domain="candidate",
+        required=False,
+        expected_path="reports/aegis_paper_review_queue_v1/{day}/paper_review_queue.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/write_aegis_paper_review_queue_v1.py --truth_root {truth_root} --day {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_CANDIDATES_READY", "PAPER_REVIEW_ALLOWED", "MANUAL_PAPER_RECEIPT_ALLOWED", "PAPER_TRADE_READY"),
+        claim_implications=("Paper review queue is missing or not current.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="paper_trade_outcomes",
+        domain="candidate",
+        required=False,
+        expected_path="reports/aegis_paper_trade_outcomes_v1/{day}/paper_trade_outcomes.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/run_aegis_paper_receipt_v1.py --truth_root {truth_root} --day {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=(),
+        claim_implications=("Paper trade outcomes are missing or not current.",),
+        evidence_fields_required=("schema_id", "artifact_id", "day_utc"),
+    ),
+
+    ArtifactSpec(
+        artifact_id="paper_session_authority",
+        domain="paper",
+        required=False,
+        expected_path="reports/paper_session_authority_v1/{day}/paper_session_authority.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_paper_session_authority_v1.py --truth_root {truth_root} --day_utc {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_TRADE_CREATION_ALLOWED",),
+        claim_implications=("Paper session authority is missing or does not allow paper-open creation.",),
+        evidence_fields_required=("schema_id", "day_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="paper_session_ledger",
+        domain="paper",
+        required=False,
+        expected_path="reports/paper_session_ledger_v1/{day}/paper_session_ledger.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_paper_session_ledger_v1.py --truth_root {truth_root} --day_utc {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_TRADE_CREATION_ALLOWED",),
+        claim_implications=("Paper session ledger evidence is missing for paper lifecycle proof.",),
+        evidence_fields_required=("schema_id", "day_utc"),
+    ),
+    ArtifactSpec(
+        artifact_id="paper_trade_construction",
+        domain="paper",
+        required=False,
+        expected_path="reports/paper_trade_construction_v1/{day}/paper_trade_construction.v1.json",
+        freshness_window_hours=24,
+        generated_by_command="python3 ops/tools/build_paper_trade_construction_v1.py --truth_root {truth_root} --day_utc {day}",
+        validates_with_command="npm run aegis:audit",
+        downstream_capabilities_blocked=("PAPER_TRADE_CREATION_ALLOWED",),
+        claim_implications=("Paper trade construction evidence is missing or blocked.",),
+        evidence_fields_required=("schema_id", "artifact_id", "source_day"),
+    ),
+
+    ArtifactSpec(
         artifact_id="manual_trade_packet",
         domain="candidate",
         required=True,
@@ -108,7 +225,7 @@ ARTIFACT_REGISTRY: tuple[ArtifactSpec, ...] = (
         freshness_window_hours=24,
         generated_by_command="python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --truth_root {truth_root} --day_utc {day} --manual-only --allow-not-ready-exit-zero",
         validates_with_command="npm run aegis:audit",
-        downstream_capabilities_blocked=("TRADE_ADVICE_ALLOWED", "MANUAL_TRADE_CAPTURE_ALLOWED", "PAPER_TRADE_READY"),
+        downstream_capabilities_blocked=("TRADE_ADVICE_ALLOWED", "MANUAL_TRADE_CAPTURE_ALLOWED"),
         claim_implications=("No current manual trade packet is present.",),
         evidence_fields_required=("schema_id", "artifact_id", "date"),
     ),
@@ -120,7 +237,7 @@ ARTIFACT_REGISTRY: tuple[ArtifactSpec, ...] = (
         freshness_window_hours=168,
         generated_by_command="python3 ops/tools/write_manual_execution_receipt_evidence_v1.py --truth_root {truth_root} --day_utc {day} --receipt_type NONE_DECLARED",
         validates_with_command="npm run aegis:audit",
-        downstream_capabilities_blocked=("MANUAL_TRADE_CAPTURE_ALLOWED", "PAPER_TRADE_READY"),
+        downstream_capabilities_blocked=("MANUAL_TRADE_CAPTURE_ALLOWED",),
         claim_implications=("Manual execution receipt state has not been evaluated for today.",),
         evidence_fields_required=("schema_id", "artifact_id", "day_utc", "receipt_type", "result"),
     ),
@@ -132,7 +249,7 @@ ARTIFACT_REGISTRY: tuple[ArtifactSpec, ...] = (
         freshness_window_hours=24,
         generated_by_command="python3 ops/tools/write_broker_lifecycle_proof_v1.py --truth_root {truth_root} --day_utc {day} --lifecycle_mode SIMULATED",
         validates_with_command="npm run aegis:audit",
-        downstream_capabilities_blocked=("BROKER_SIMULATION_PROVEN", "BROKER_PAPER_LIFECYCLE_PROVEN", "PAPER_TRADE_READY", "MANUAL_TRADE_CAPTURE_ALLOWED"),
+        downstream_capabilities_blocked=("BROKER_SIMULATION_PROVEN", "BROKER_PAPER_LIFECYCLE_PROVEN", "MANUAL_TRADE_CAPTURE_ALLOWED"),
         claim_implications=("Broker lifecycle evidence has not been evaluated, simulated, or proven.",),
         evidence_fields_required=("schema_id", "artifact_id", "day_utc", "lifecycle_mode", "result"),
     ),
@@ -314,6 +431,8 @@ def _apply_runtime_evaluation_authority_v1(payload: dict[str, Any], evaluation: 
     payload["runtime_evaluation"] = evaluation
     payload["runtime_evaluation_hash"] = evaluation.get("deterministic_output_hash")
     payload["trade_advice_allowed"] = bool((caps.get("TRADE_ADVICE_ALLOWED") or {}).get("allowed", False))
+    payload["paper_review_allowed"] = bool((caps.get("PAPER_REVIEW_ALLOWED") or {}).get("allowed", False))
+    payload["manual_paper_receipt_allowed"] = bool((caps.get("MANUAL_PAPER_RECEIPT_ALLOWED") or {}).get("allowed", False))
     payload["manual_trade_capture_allowed"] = bool((caps.get("MANUAL_TRADE_CAPTURE_ALLOWED") or {}).get("allowed", False))
     payload["blocked_capabilities"] = sorted(cap for cap, row in caps.items() if isinstance(row, dict) and not bool(row.get("allowed", False)))
     payload["allowed_capabilities"] = sorted(cap for cap, row in caps.items() if isinstance(row, dict) and bool(row.get("allowed", False)))
@@ -333,6 +452,7 @@ def build_runtime_truth_kernel_v1(
     root = Path(truth_root).expanduser().resolve()
     generated_at = generated_at_utc or now_utc_v1()
     generated_dt = _parse_time(generated_at) or datetime.now(UTC).replace(microsecond=0)
+    context_requirement_profile = load_or_build_context_requirement_profile_v1(truth_root=root, day_utc=day_utc, generated_at_utc=generated_at)
     artifact_statuses = [_evaluate_artifact(root=root, day_utc=day_utc, generated_dt=generated_dt, spec=spec) for spec in ARTIFACT_REGISTRY]
     statuses_by_id = {row["artifact_id"]: row for row in artifact_statuses}
     runtime_truth = _runtime_truth_classification_from_artifacts(artifact_statuses)
@@ -364,6 +484,12 @@ def build_runtime_truth_kernel_v1(
         if str(row.get("policy_status") or "") in {"OPTIONAL_NOT_REQUIRED", "NOT_REQUIRED_FOR_TARGET_MODE"}
     )
     kernel_authority = build_kernel_authority_summary_v1()
+    mode_readiness = build_mode_readiness_v1(
+        truth_root=root,
+        day_utc=day_utc,
+        generated_at_utc=generated_at,
+        global_missing_or_stale_sources=all_missing_stale,
+    )
     runtime_evaluation = read_canonical_runtime_evaluation_v1(truth_root=root, day_utc=day_utc)
     runtime_eval_caps = runtime_evaluation.get("capabilities") if isinstance(runtime_evaluation.get("capabilities"), dict) else {}
     if runtime_evaluation:
@@ -379,6 +505,12 @@ def build_runtime_truth_kernel_v1(
         "generated_at_utc": generated_at,
         "truth_root": str(root),
         "target_operating_mode": TARGET_OPERATING_MODE,
+        "paper_review_operating_mode": PAPER_REVIEW_OPERATING_MODE,
+        "active_mode": mode_readiness.get("active_mode"),
+        "active_mode_readiness_status": mode_readiness.get("active_mode_readiness_status"),
+        "mode_readiness": mode_readiness,
+        "active_context_requirement_profile": profile_summary_for_output_v1(context_requirement_profile),
+        "context_requirement_profile": context_requirement_profile,
         "live_broker_trading_policy": LIVE_BROKER_TRADING_POLICY,
         "autonomous_execution_policy": AUTONOMOUS_EXECUTION_POLICY,
         "broker_submit_transmit_policy": "DISABLED_BY_DESIGN",
@@ -469,6 +601,7 @@ def write_runtime_truth_kernel_reports_v1(*, truth_root: Path, payload: dict[str
         "readiness_dependencies": out_dir / "readiness_dependencies.v1.json",
         "runtime_evaluation": out_dir / "runtime_evaluation.v1.json",
         "runtime_policy_bundle": out_dir / "runtime_policy_bundle.v1.json",
+        "mode_readiness": Path(truth_root).expanduser().resolve() / "reports" / "aegis_mode_readiness_v1" / str(payload["day_utc"]) / "mode_readiness.v1.json",
         "producer_contract_coverage_json": out_dir / "producer_contract_coverage.v1.json",
         "producer_contract_coverage_txt": out_dir / "producer_contract_coverage.v1.txt",
         "blocker_states_json": out_dir / "blocker_states.v1.json",
@@ -494,6 +627,7 @@ def write_runtime_truth_kernel_reports_v1(*, truth_root: Path, payload: dict[str
         },
     )
     paths["recovery_plan"].write_text(render_recovery_plan_v1(payload), encoding="utf-8")
+    write_mode_readiness_v1(truth_root=root, day_utc=str(payload["day_utc"]), payload=payload.get("mode_readiness") if isinstance(payload.get("mode_readiness"), dict) else {})
     _write_json(
         paths["readiness_dependencies"],
         {
@@ -505,6 +639,9 @@ def write_runtime_truth_kernel_reports_v1(*, truth_root: Path, payload: dict[str
             "layers": payload["layers"],
             "highest_readiness_layer": payload["highest_readiness_layer"],
             "blocked_capabilities": payload["blocked_capabilities"],
+            "active_mode": payload.get("active_mode"),
+            "active_mode_readiness_status": payload.get("active_mode_readiness_status"),
+            "mode_readiness_path": str(paths["mode_readiness"]),
         },
     )
     for artifact_path in (paths["missing_stale_sources"], paths["readiness_dependencies"]):
@@ -785,8 +922,25 @@ def render_recovery_plan_v1(payload: dict[str, Any]) -> str:
         f"missing_or_stale_source_count: {payload.get('missing_or_stale_source_count')}",
         "",
     ]
+    root_blockers = []
+    runtime_evaluation = payload.get("runtime_evaluation") if isinstance(payload.get("runtime_evaluation"), dict) else {}
+    if isinstance(runtime_evaluation.get("root_blockers"), list):
+        root_blockers = [row for row in runtime_evaluation.get("root_blockers") if isinstance(row, dict)]
     if not items:
-        lines.append("No missing, stale, or invalid runtime truth artifacts were detected.")
+        if root_blockers:
+            lines.append("No missing or stale source artifacts were detected, but runtime truth remains blocked by explicit root blockers:")
+            for index, blocker in enumerate(root_blockers, start=1):
+                lines.extend(
+                    [
+                        f"{index}. {blocker.get('blocker_id') or blocker.get('schema_id')}",
+                        f"   What failed: {blocker.get('reason')}",
+                        f"   Repairability: {blocker.get('repairability') or blocker.get('state')}",
+                        f"   Next safe action: {blocker.get('next_safe_action') or 'Inspect the authoritative source before repair.'}",
+                        "",
+                    ]
+                )
+        else:
+            lines.append("No missing, stale, or invalid runtime truth artifacts were detected.")
     for index, item in enumerate(items, start=1):
         lines.extend(
             [
@@ -905,7 +1059,20 @@ def _runtime_truth_classification_from_artifacts(artifact_statuses: list[dict[st
 
 
 def _artifact_relevant_to_target_mode(row: dict[str, Any]) -> bool:
-    return str(row.get("artifact_id") or "") not in {"broker_lifecycle_proof", "selected_intent_promotion", "promoted_candidate_evidence"}
+    return str(row.get("artifact_id") or "") not in {
+        "broker_lifecycle_proof",
+        "selected_intent_promotion",
+        "promoted_candidate_evidence",
+        "candidate_review_packet",
+        "paper_review_queue",
+        "paper_trade_outcomes",
+        "market_data_inputs",
+        "paper_session_authority",
+        "paper_session_ledger",
+        "paper_trade_construction",
+        "aegis_lite_operating_status",
+        "aegis_lite_eod_report",
+    }
 
 
 def _apply_runtime_truth_to_capabilities(runtime_truth: str, graph: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -926,7 +1093,7 @@ def _evaluate_capabilities(statuses_by_id: dict[str, dict[str, Any]]) -> dict[st
         return all(statuses_by_id.get(artifact_id, {}).get("status") == "OK" for artifact_id in artifact_ids)
 
     graph = {
-        "DATA_READY": _cap(ok("aegis_lite_operating_status", "aegis_lite_eod_report", "operator_execution_queue", "event_market_snapshot"), ["aegis_lite_operating_status", "aegis_lite_eod_report", "operator_execution_queue", "event_market_snapshot"], statuses_by_id),
+        "DATA_READY": _cap(ok("aegis_strategic_operating_status", "aegis_research_eod_summary", "operator_execution_queue", "event_market_snapshot"), ["aegis_strategic_operating_status", "aegis_research_eod_summary", "operator_execution_queue", "event_market_snapshot"], statuses_by_id),
         "RESEARCH_READY": _cap(ok("research_dataset_binding", "research_task_queue"), ["research_dataset_binding", "research_task_queue"], statuses_by_id),
         "EVENT_READY": _cap(ok("event_monitoring_status", "event_rules_registry", "event_market_snapshot", "event_validity_gate"), ["event_monitoring_status", "event_rules_registry", "event_market_snapshot", "event_validity_gate"], statuses_by_id),
         "FEEDBACK_READY": _cap(ok("ai_feedback_review"), ["ai_feedback_review"], statuses_by_id),
@@ -970,6 +1137,69 @@ def _evaluate_capabilities(statuses_by_id: dict[str, dict[str, Any]]) -> dict[st
         "depends_on_artifacts": [],
         "missing_or_blocking_artifacts": [],
         "reason": "Read-only advisory surface remains available; execution claims stay blocked by downstream capability gates.",
+    }
+    graph["PAPER_CANDIDATES_READY"] = _derived_cap(
+        "PAPER_CANDIDATES_READY",
+        graph,
+        [],
+        ["market_data_inputs", "candidate_review_packet", "paper_review_queue"],
+        statuses_by_id,
+    )
+    paper_candidate_count = _paper_candidate_count(statuses_by_id)
+    graph["PAPER_CANDIDATES_READY"]["candidate_count"] = paper_candidate_count
+    graph["PAPER_CANDIDATES_READY"]["policy_status"] = "ALLOWED_IN_PAPER_ONLY_MODE"
+    graph["PAPER_CANDIDATES_READY"]["target_mode_requirement"] = PAPER_REVIEW_OPERATING_MODE
+    graph["PAPER_CANDIDATES_READY"]["readiness_relevant"] = False
+    graph["PAPER_CANDIDATES_READY"]["paper_candidate_semantics"] = {
+        "paper_only": True,
+        "trade_advice_allowed": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
+        "live_trade_eligible": False,
+    }
+    if graph["PAPER_CANDIDATES_READY"]["allowed"] and paper_candidate_count <= 0:
+        graph["PAPER_CANDIDATES_READY"]["allowed"] = False
+        graph["PAPER_CANDIDATES_READY"]["missing_or_blocking_artifacts"] = [
+            *graph["PAPER_CANDIDATES_READY"].get("missing_or_blocking_artifacts", []),
+            "paper_review_queue:NO_PAPER_CANDIDATES",
+        ]
+        graph["PAPER_CANDIDATES_READY"]["reason"] = "Paper candidate packet and queue are current, but no paper-eligible candidates were found."
+    elif graph["PAPER_CANDIDATES_READY"]["allowed"]:
+        graph["PAPER_CANDIDATES_READY"]["reason"] = f"Paper candidate evidence is current with {paper_candidate_count} paper-eligible candidate(s)."
+
+    graph["PAPER_REVIEW_ALLOWED"] = _derived_cap(
+        "PAPER_REVIEW_ALLOWED",
+        graph,
+        ["PAPER_CANDIDATES_READY"],
+        ["candidate_review_packet", "paper_review_queue"],
+        statuses_by_id,
+    )
+    graph["PAPER_REVIEW_ALLOWED"]["policy_status"] = "ALLOWED_IN_PAPER_ONLY_MODE"
+    graph["PAPER_REVIEW_ALLOWED"]["target_mode_requirement"] = PAPER_REVIEW_OPERATING_MODE
+    graph["PAPER_REVIEW_ALLOWED"]["paper_review_semantics"] = {
+        "paper_only": True,
+        "human_review_required": True,
+        "trade_advice_allowed": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
+        "live_trade_eligible": False,
+        "disclaimer": "Paper review may produce packets and simulated receipts only. No broker execution path exists.",
+    }
+    graph["MANUAL_PAPER_RECEIPT_ALLOWED"] = _derived_cap(
+        "MANUAL_PAPER_RECEIPT_ALLOWED",
+        graph,
+        ["PAPER_REVIEW_ALLOWED"],
+        ["paper_review_queue"],
+        statuses_by_id,
+    )
+    graph["MANUAL_PAPER_RECEIPT_ALLOWED"]["policy_status"] = "ALLOWED_IN_PAPER_ONLY_MODE"
+    graph["MANUAL_PAPER_RECEIPT_ALLOWED"]["target_mode_requirement"] = PAPER_REVIEW_OPERATING_MODE
+    graph["MANUAL_PAPER_RECEIPT_ALLOWED"]["manual_capture_semantics"] = {
+        "receipt_type": "SIMULATED_PAPER",
+        "operator_entered": True,
+        "trade_advice_allowed": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
     }
     graph["TRADE_ADVICE_ALLOWED"] = _derived_cap(
         "TRADE_ADVICE_ALLOWED",
@@ -1021,6 +1251,13 @@ def _evaluate_capabilities(statuses_by_id: dict[str, dict[str, Any]]) -> dict[st
             "manual_capture_cli",
         ]
         graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["reason"] = "Manual capture CLI is missing; receipt journaling is unavailable."
+    if graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["allowed"] and _manual_execution_receipt_is_simulated_paper(statuses_by_id.get("manual_execution_receipt", {})):
+        graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["allowed"] = False
+        graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["missing_or_blocking_artifacts"] = [
+            *graph["MANUAL_TRADE_CAPTURE_ALLOWED"].get("missing_or_blocking_artifacts", []),
+            "manual_execution_receipt:SIMULATED_PAPER_REHEARSAL_ONLY",
+        ]
+        graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["reason"] = "SIMULATED_PAPER rehearsal receipts prove the paper rehearsal chain only; they cannot enable real manual capture."
     graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["manual_capture_semantics"] = {
         "capability_type": "JOURNALING_AUDIT_ONLY",
         "broker_submit_required": False,
@@ -1031,18 +1268,46 @@ def _evaluate_capabilities(statuses_by_id: dict[str, dict[str, Any]]) -> dict[st
         "requires_live_alert_transport": False,
         "disclaimer": "Manual capture records operator-entered fills only; Aegis does not submit, transmit, or place orders.",
     }
+    graph["PAPER_TRADE_CREATION_ALLOWED"] = _derived_cap(
+        "PAPER_TRADE_CREATION_ALLOWED",
+        graph,
+        ["PAPER_CANDIDATES_READY"],
+        ["paper_session_authority", "paper_session_ledger", "paper_trade_construction"],
+        statuses_by_id,
+    )
+    graph["PAPER_TRADE_CREATION_ALLOWED"]["policy_status"] = "ALLOWED_IN_PAPER_ONLY_MODE"
+    graph["PAPER_TRADE_CREATION_ALLOWED"]["target_mode_requirement"] = PAPER_REVIEW_OPERATING_MODE
+    graph["PAPER_TRADE_CREATION_ALLOWED"]["readiness_relevant"] = False
+    graph["PAPER_TRADE_CREATION_ALLOWED"]["paper_creation_semantics"] = {
+        "requires_trade_advice_allowed": False,
+        "requires_live_broker_lifecycle": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
+        "live_trade_eligible": False,
+    }
+    _apply_paper_creation_evidence_checks(graph["PAPER_TRADE_CREATION_ALLOWED"], statuses_by_id)
+
     graph["PAPER_TRADE_READY"] = _derived_cap(
         "PAPER_TRADE_READY",
         graph,
-        ["TRADE_ADVICE_ALLOWED", "BROKER_PAPER_LIFECYCLE_PROVEN"],
+        ["PAPER_CANDIDATES_READY"],
         [],
         statuses_by_id,
     )
-    graph["PAPER_TRADE_READY"]["policy_status"] = "OPTIONAL_NOT_REQUIRED"
-    graph["PAPER_TRADE_READY"]["target_mode_requirement"] = "NOT_REQUIRED_FOR_TARGET_MODE"
+    graph["PAPER_TRADE_READY"]["policy_status"] = "ALLOWED_IN_PAPER_ONLY_MODE"
+    graph["PAPER_TRADE_READY"]["target_mode_requirement"] = PAPER_REVIEW_OPERATING_MODE
     graph["PAPER_TRADE_READY"]["readiness_relevant"] = False
-    if not graph["PAPER_TRADE_READY"]["allowed"]:
-        graph["PAPER_TRADE_READY"]["reason"] = "Paper broker readiness is optional and not required for human-approved advisory runtime."
+    graph["PAPER_TRADE_READY"]["candidate_count"] = paper_candidate_count
+    graph["PAPER_TRADE_READY"]["paper_trade_semantics"] = {
+        "readiness_scope": "PAPER_CANDIDATE_CREATION",
+        "requires_trade_advice_allowed": False,
+        "requires_live_broker_lifecycle": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
+        "live_trade_eligible": False,
+    }
+    if graph["PAPER_TRADE_READY"]["allowed"]:
+        graph["PAPER_TRADE_READY"]["reason"] = f"Paper candidate creation readiness is backed by current canonical packet and queue evidence with {paper_candidate_count} candidate(s)."
     graph["LIVE_TRADE_READY"] = {
         "capability_id": "LIVE_TRADE_READY",
         "allowed": False,
@@ -1195,6 +1460,93 @@ def _trade_advice_requirements() -> list[str]:
     ]
 
 
+def _paper_candidate_count(statuses_by_id: dict[str, dict[str, Any]]) -> int:
+    rows = _paper_candidate_rows(statuses_by_id)
+    if rows:
+        return len(rows)
+    packet_row = statuses_by_id.get("candidate_review_packet", {})
+    if packet_row.get("status") == "OK":
+        payload = _read_json_object(Path(str(packet_row.get("path") or "")))
+        try:
+            return int(payload.get("candidate_count") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _paper_candidate_rows(statuses_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for artifact_id, collection_keys in (
+        ("candidate_review_packet", ("review_candidates", "candidates", "paper_candidates")),
+        ("paper_review_queue", ("rows", "queue", "items")),
+    ):
+        status_row = statuses_by_id.get(artifact_id, {})
+        if status_row.get("status") != "OK":
+            continue
+        payload = _read_json_object(Path(str(status_row.get("path") or "")))
+        for key in collection_keys:
+            value = payload.get(key)
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("paper_trade_eligible") is False:
+                    continue
+                row_id = str(item.get("candidate_id") or item.get("trade_candidate_id") or item.get("id") or _stable_hash(item)[:16])
+                if row_id in seen:
+                    continue
+                seen.add(row_id)
+                rows.append(item)
+    return rows
+
+
+def _apply_paper_creation_evidence_checks(row: dict[str, Any], statuses_by_id: dict[str, dict[str, Any]]) -> None:
+    blockers = list(row.get("missing_or_blocking_artifacts") or [])
+    authority = _payload_for_status(statuses_by_id.get("paper_session_authority", {}))
+    if authority:
+        authority_status = str(authority.get("authority_status") or "").upper()
+        submission_authorized = bool(authority.get("submission_authorized", False) or authority.get("paper_open_allowed", False))
+        if authority_status in {"DENIED", "BLOCKED", "FAILED", "FAIL"} or not submission_authorized:
+            blockers.append("paper_session_authority:PAPER_OPEN_NOT_AUTHORIZED")
+    construction = _payload_for_status(statuses_by_id.get("paper_trade_construction", {}))
+    if construction:
+        if bool(construction.get("broker_execution_allowed", False)) or bool(construction.get("live_trading_allowed", False)) or bool(construction.get("order_routing_allowed", False)):
+            blockers.append("paper_trade_construction:LIVE_OR_BROKER_ROUTING_NOT_DISABLED")
+        status = str(construction.get("trade_construction_status") or "").upper()
+        if status.startswith("BLOCKED") or status in {"FAILED", "FAIL", "INVALID"}:
+            detailed = []
+            diagnostics = construction.get("market_data_diagnostics") if isinstance(construction.get("market_data_diagnostics"), list) else []
+            for item in diagnostics:
+                if not isinstance(item, dict):
+                    continue
+                missing_field = str(item.get("missing_field") or "").strip()
+                if not missing_field:
+                    continue
+                symbol = str(item.get("symbol") or "UNKNOWN").strip().upper() or "UNKNOWN"
+                state = str(item.get("status") or "MISSING").strip().upper() or "MISSING"
+                artifact = str(item.get("expected_source_artifact") or "market_data_inputs_v1").strip()
+                path_checked = str(item.get("artifact_path_checked") or "").strip()
+                detailed.append(f"paper_trade_construction:MISSING_MARKET_DATA:{symbol}:{missing_field}:{artifact}:{state}:{path_checked}")
+            if detailed:
+                blockers.extend(detailed[:25])
+            else:
+                codes = construction.get("blocker_codes") if isinstance(construction.get("blocker_codes"), list) else []
+                suffix = ":" + ",".join(str(code) for code in codes[:6]) if codes else ""
+                blockers.append("paper_trade_construction:" + status + suffix)
+    if blockers:
+        row["allowed"] = False
+        row["missing_or_blocking_artifacts"] = sorted(set(str(item) for item in blockers if str(item)))
+        row["reason"] = "Paper candidate evidence exists, but paper trade creation is blocked by specific paper/session evidence."
+
+
+def _payload_for_status(row: dict[str, Any]) -> dict[str, Any]:
+    if row.get("status") != "OK":
+        return {}
+    return _read_json_object(Path(str(row.get("path") or "")))
+
+
 def _advisory_candidate_count(statuses_by_id: dict[str, dict[str, Any]]) -> int:
     return len(_advisory_candidate_rows(statuses_by_id))
 
@@ -1240,6 +1592,10 @@ def _readiness_layers(*, runtime_truth_classification: str, dependency_graph: di
         "BROKER_LIVE_LIFECYCLE_PROVEN": bool(dependency_graph["BROKER_LIVE_LIFECYCLE_PROVEN"]["allowed"]),
         "ADVISORY_READY": bool(dependency_graph["ADVISORY_READY"]["allowed"]),
         "TRADE_ADVICE_ALLOWED": bool(dependency_graph["TRADE_ADVICE_ALLOWED"]["allowed"]),
+        "PAPER_CANDIDATES_READY": bool(dependency_graph["PAPER_CANDIDATES_READY"]["allowed"]),
+        "PAPER_REVIEW_ALLOWED": bool(dependency_graph["PAPER_REVIEW_ALLOWED"]["allowed"]),
+        "MANUAL_PAPER_RECEIPT_ALLOWED": bool(dependency_graph["MANUAL_PAPER_RECEIPT_ALLOWED"]["allowed"]),
+        "PAPER_TRADE_CREATION_ALLOWED": bool(dependency_graph["PAPER_TRADE_CREATION_ALLOWED"]["allowed"]),
         "MANUAL_CAPTURE_CAPABILITY_READY": bool(dependency_graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["allowed"]),
         "MANUAL_TRADE_CAPTURE_ALLOWED": bool(dependency_graph["MANUAL_TRADE_CAPTURE_ALLOWED"]["allowed"]),
         "HUMAN_APPROVED_ADVISORY_RUNTIME_READY": bool(advisory_state.get("human_approved_advisory_runtime_ready", False))
@@ -1255,6 +1611,11 @@ def _readiness_layers(*, runtime_truth_classification: str, dependency_graph: di
         ("HUMAN_APPROVED_ADVISORY_RUNTIME_READY", "HUMAN_APPROVED_ADVISORY_RUNTIME_READY"),
         ("MANUAL_TRADE_CAPTURE_ALLOWED", "MANUAL_TRADE_CAPTURE_ALLOWED"),
         ("TRADE_ADVICE_ALLOWED", "TRADE_ADVICE_ALLOWED"),
+        ("PAPER_TRADE_CREATION_ALLOWED", "PAPER_TRADE_CREATION_ALLOWED"),
+        ("PAPER_TRADE_READY", "PAPER_TRADE_READY"),
+        ("MANUAL_PAPER_RECEIPT_ALLOWED", "MANUAL_PAPER_RECEIPT_ALLOWED"),
+        ("PAPER_REVIEW_ALLOWED", "PAPER_REVIEW_ALLOWED"),
+        ("PAPER_CANDIDATES_READY", "PAPER_CANDIDATES_READY"),
         ("ADVISORY_READY", "ADVISORY_ONLY"),
     ]
     highest = "BLOCKED"
@@ -1269,7 +1630,6 @@ def _readiness_layers(*, runtime_truth_classification: str, dependency_graph: di
         "layers": layers,
         "target_operating_mode": TARGET_OPERATING_MODE,
         "disabled_or_optional_layers": {
-            "PAPER_TRADE_READY": "OPTIONAL_NOT_REQUIRED",
             "LIVE_TRADE_READY": "DISABLED_BY_POLICY",
             "AUTONOMOUS_EXECUTION_ALLOWED": "DISABLED_BY_POLICY",
             "BROKER_SUBMIT_TRANSMIT": "DISABLED_BY_POLICY",
@@ -1490,7 +1850,7 @@ def _stable_hash(value: Any) -> str:
 
 
 def _artifact_timestamp(payload: dict[str, Any]) -> str:
-    for key in ("generated_at_utc", "generated_at", "timestamp_utc", "created_at_utc", "updated_at", "produced_utc"):
+    for key in ("generated_at_utc", "generated_at", "timestamp_utc", "created_at_utc", "updated_at", "produced_utc", "evaluated_at_utc"):
         value = str(payload.get(key) or "")
         if value:
             return value
@@ -1679,6 +2039,13 @@ def _event_validity_no_event_packet(row: dict[str, Any]) -> bool:
     payload = _read_json_object(Path(str(row.get("path") or "")))
     return str(payload.get("validity_status") or "").upper() == "NO_EVENT_PACKET"
 
+
+
+def _manual_execution_receipt_is_simulated_paper(row: dict[str, Any]) -> bool:
+    if row.get("status") != "OK":
+        return False
+    payload = _read_json_object(Path(str(row.get("path") or "")))
+    return str(payload.get("receipt_type") or "").strip().upper() == "SIMULATED_PAPER"
 
 def _manual_execution_receipt_summary(row: dict[str, Any]) -> dict[str, Any]:
     if row.get("status") != "OK":

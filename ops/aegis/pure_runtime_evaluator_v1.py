@@ -20,7 +20,7 @@ DEFAULT_RUNTIME_POLICY_BUNDLE_V1: dict[str, Any] = {
     "dag_version": DEFAULT_DAG_VERSION,
     "capability_dag": {
         "DATA_READY": {
-            "evidence": ["aegis_lite_operating_status", "aegis_lite_eod_report", "operator_execution_queue", "event_market_snapshot"],
+            "evidence": ["aegis_strategic_operating_status", "aegis_research_eod_summary", "operator_execution_queue", "event_market_snapshot"],
             "capabilities": [],
         },
         "RESEARCH_READY": {
@@ -43,6 +43,36 @@ DEFAULT_RUNTIME_POLICY_BUNDLE_V1: dict[str, Any] = {
             "evidence": ["manual_execution_receipt"],
             "capabilities": ["DATA_READY", "RESEARCH_READY", "EVENT_READY", "FEEDBACK_READY"],
         },
+        "PAPER_CANDIDATES_READY": {
+            "evidence": ["candidate_review_packet", "paper_review_queue"],
+            "capabilities": [],
+            "policy_allowed": True,
+            "policy_reason": "Paper candidate readiness is allowed in paper-only mode from canonical candidate packet and paper queue evidence; market-data lineage remains audited on the packet itself.",
+        },
+        "PAPER_REVIEW_ALLOWED": {
+            "evidence": ["candidate_review_packet", "paper_review_queue"],
+            "capabilities": ["PAPER_CANDIDATES_READY"],
+            "policy_allowed": True,
+            "policy_reason": "Human-reviewed paper review is allowed in paper-only mode.",
+        },
+        "MANUAL_PAPER_RECEIPT_ALLOWED": {
+            "evidence": ["paper_review_queue"],
+            "capabilities": ["PAPER_REVIEW_ALLOWED"],
+            "policy_allowed": True,
+            "policy_reason": "Manual paper receipt journaling is allowed in paper-only mode.",
+        },
+        "PAPER_TRADE_READY": {
+            "evidence": [],
+            "capabilities": ["PAPER_CANDIDATES_READY"],
+            "policy_allowed": True,
+            "policy_reason": "Paper trade readiness means paper candidate creation readiness; it does not require trade advice or broker lifecycle.",
+        },
+        "PAPER_TRADE_CREATION_ALLOWED": {
+            "evidence": ["paper_session_authority", "paper_trade_construction"],
+            "capabilities": ["PAPER_CANDIDATES_READY"],
+            "policy_allowed": True,
+            "policy_reason": "Paper trade creation is allowed only with explicit paper-open authority, current paper construction evidence, and no live broker routing.",
+        },
         "TRADE_ADVICE_ALLOWED": {
             "evidence": ["manual_trade_packet", "promoted_candidate_evidence"],
             "capabilities": ["DATA_READY", "RESEARCH_READY", "EVENT_READY", "FEEDBACK_READY"],
@@ -56,6 +86,7 @@ DEFAULT_RUNTIME_POLICY_BUNDLE_V1: dict[str, Any] = {
             "policy_reason": "Autonomous execution is disabled by design.",
         },
     },
+    "paper_review_operating_mode": "HUMAN_REVIEWED_PAPER_MODE",
     "producer_contract_registry_version": contract_registry_version_v1(),
     "producer_contract_registry_hash": stable_hash_v1(load_producer_contract_registry_v1()),
     "freshness_policy": {
@@ -65,6 +96,9 @@ DEFAULT_RUNTIME_POLICY_BUNDLE_V1: dict[str, Any] = {
             "promoted_candidate_evidence": 604800,
             "research_task_queue": 604800,
             "ai_feedback_review": 604800,
+            "paper_session_authority": 86400,
+            "paper_session_ledger": 86400,
+            "paper_trade_construction": 86400,
         },
     },
 }
@@ -128,7 +162,7 @@ def evaluate_runtime(day_utc: str, evidence_snapshot: dict[str, Any], policy_bun
             errors=["Evidence event hash chain is invalid."],
         )
 
-    latest = evidence_snapshot.get("latest_by_schema_id") if isinstance(evidence_snapshot.get("latest_by_schema_id"), dict) else {}
+    latest = _latest_evidence_by_schema_before_v1(evidence_snapshot=evidence_snapshot, generated_dt=generated_dt)
     evidence_results = {
         schema_id: _evaluate_evidence(schema_id=schema_id, event=latest.get(schema_id), generated_dt=generated_dt, policy_bundle=policy_bundle, day_utc=day_utc)
         for schema_id in _all_required_evidence(policy_bundle)
@@ -218,6 +252,31 @@ def _evaluate_capability_graph(*, policy_bundle: dict[str, Any], evidence_result
             resolved[forced]["blocker_chain"] = [resolved[forced]["reason"]]
     return {key: resolved[key] for key in sorted(resolved)}
 
+
+
+def _latest_evidence_by_schema_before_v1(*, evidence_snapshot: dict[str, Any], generated_dt: datetime) -> dict[str, dict[str, Any]]:
+    events = evidence_snapshot.get("events") if isinstance(evidence_snapshot.get("events"), list) else []
+    by_schema: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event_type") or "") not in {"EvidenceProduced", "EvidenceValidated", "EvidenceRejected", "EvidenceExpired", "ArtifactTampered"}:
+            continue
+        created = _parse_utc(str(event.get("created_at_utc") or ""))
+        if created is not None and created > generated_dt:
+            continue
+        schema_id = str(event.get("schema_id") or "")
+        if schema_id:
+            by_schema.setdefault(schema_id, []).append(event)
+    latest = {
+        schema_id: sorted(rows, key=lambda row: (str(row.get("created_at_utc") or ""), str(row.get("event_id") or "")))[-1]
+        for schema_id, rows in sorted(by_schema.items())
+        if rows
+    }
+    if latest:
+        return latest
+    fallback = evidence_snapshot.get("latest_by_schema_id")
+    return fallback if isinstance(fallback, dict) else {}
 
 def _evaluate_evidence(*, schema_id: str, event: Any, generated_dt: datetime, policy_bundle: dict[str, Any], day_utc: str) -> dict[str, Any]:
     if not isinstance(event, dict):
@@ -402,6 +461,12 @@ def _highest_readiness_layer(*, capabilities: dict[str, Any], runtime_truth: str
         return "BLOCKED"
     if capabilities.get("MANUAL_TRADE_CAPTURE_ALLOWED", {}).get("allowed") is True:
         return "MANUAL_TRADE_CAPTURE_ALLOWED"
+    if capabilities.get("PAPER_TRADE_CREATION_ALLOWED", {}).get("allowed") is True:
+        return "PAPER_TRADE_CREATION_ALLOWED"
+    if capabilities.get("PAPER_TRADE_READY", {}).get("allowed") is True:
+        return "PAPER_TRADE_READY"
+    if capabilities.get("PAPER_CANDIDATES_READY", {}).get("allowed") is True:
+        return "PAPER_CANDIDATES_READY"
     if all(capabilities.get(cap, {}).get("allowed") is True for cap in ("DATA_READY", "RESEARCH_READY", "EVENT_READY", "FEEDBACK_READY")):
         return "ADVISORY_ONLY"
     return "BLOCKED"

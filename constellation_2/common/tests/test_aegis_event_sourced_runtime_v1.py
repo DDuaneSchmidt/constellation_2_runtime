@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from ops.aegis.evidence_event_store_v1 import append_evidence_event_v1, evidence_events_path_v1, rebuild_evidence_snapshot_v1
 from ops.aegis.intelligence_common_v1 import write_json_v1
@@ -23,7 +28,6 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 
 DAY = "2026-05-15"
 NOW = "2026-05-15T20:55:00Z"
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _event(schema_id: str, *, day: str = DAY, created_at: str = NOW, validation_status: str = "VALID") -> dict:
@@ -81,6 +85,24 @@ def test_runtime_evaluation_hash_is_deterministic_for_same_bundle(tmp_path: Path
     assert first["capabilities"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
     assert first["capabilities"]["AUTONOMOUS_EXECUTION_ALLOWED"]["allowed"] is False
 
+
+
+def test_paper_trade_creation_ignores_rejected_legacy_ledger_when_authority_and_construction_are_valid(tmp_path: Path) -> None:
+    for schema_id in ("candidate_review_packet", "paper_review_queue", "paper_session_authority", "paper_trade_construction"):
+        append_evidence_event_v1(truth_root=tmp_path, day_utc=DAY, event=_event(schema_id))
+    rejected = _event("paper_session_ledger", validation_status="INVALID")
+    rejected["event_type"] = "EvidenceRejected"
+    append_evidence_event_v1(truth_root=tmp_path, day_utc=DAY, event=rejected)
+    snapshot = rebuild_evidence_snapshot_v1(truth_root=tmp_path, day_utc=DAY)
+    policy = runtime_policy_bundle_v1(run_id="paper-run", parent_run_id="", generated_at_utc=NOW, git_sha="abc1234")
+
+    evaluation = evaluate_runtime(DAY, snapshot, policy)
+
+    assert evaluation["capabilities"]["PAPER_CANDIDATES_READY"]["allowed"] is True
+    assert evaluation["capabilities"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is True
+    assert "paper_session_ledger" not in evaluation["capabilities"]["PAPER_TRADE_CREATION_ALLOWED"]["required_evidence"]
+    assert evaluation["capabilities"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
+    assert evaluation["capabilities"]["AUTONOMOUS_EXECUTION_ALLOWED"]["allowed"] is False
 
 def test_event_store_rejects_tampered_previous_event(tmp_path: Path) -> None:
     append_evidence_event_v1(truth_root=tmp_path, day_utc=DAY, event=_event("event_market_snapshot"))

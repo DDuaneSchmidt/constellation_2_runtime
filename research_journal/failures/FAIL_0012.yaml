@@ -1,0 +1,6 @@
+id: FAIL_0012
+what_we_expected: Macro readiness gaps could be resolved by expanding workflow behavior.
+what_failed: Governance kept macro readiness research-only and blocked fabrication or autonomous sleeve creation.
+why_failed: Missing or immature data cannot be repaired by inventing authority.
+what_to_try_next: Preserve research-only review until data evidence matures.
+status: OPEN

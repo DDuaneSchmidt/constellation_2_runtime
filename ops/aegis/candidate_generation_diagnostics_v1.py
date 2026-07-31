@@ -6,8 +6,12 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from ops.aegis.candidate_contracts_v1 import build_candidate_contracts_v1, write_candidate_contracts_v1
 from ops.aegis.candidate_lifecycle_v1 import build_candidate_lifecycle_v1
 from ops.aegis.intelligence_common_v1 import latest_json_v1, now_utc_v1, write_json_v1
+from ops.aegis.real_signal_death_report_v1 import build_real_signal_death_report_v1, write_real_signal_death_report_v1
+from ops.aegis.signal_evidence_graph_v1 import build_signal_evidence_graph_v1, write_signal_evidence_graph_v1
+from ops.aegis.human_reviewed_paper_mode_v1 import build_candidate_review_packet_v1, build_paper_review_queue_v1, build_paper_trade_outcomes_v1, write_candidate_review_packet_v1, write_paper_review_queue_v1, write_paper_trade_outcomes_v1
 
 
 REPORT_FAMILY = "aegis_candidate_generation_diagnostics_v1"
@@ -36,11 +40,31 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
     candidate_lineage_path, candidate_lineage_payload = latest_json_v1(root, "candidate_lineage_v1", day_utc, "candidate_lineage.v1.json")
     intent_arbitration_path, intent_arbitration_payload = latest_json_v1(root, "intent_arbitration_v1", day_utc, "intent_arbitration.v1.json")
     selected_intent_promotion_path, selected_intent_promotion_payload = latest_json_v1(root, "aegis_selected_intent_promotion_v1", day_utc, "selected_intent_promotion.v1.json")
+    breadth_drop_validation_path, breadth_drop_validation_payload = latest_json_v1(root, "aegis_breadth_drop_validation_v1", day_utc, "breadth_drop_validation.v1.json")
+    vix_source_verification_path, vix_source_verification_payload = latest_json_v1(root, "aegis_vix_source_verification_v1", day_utc, "vix_source_verification.v1.json")
+    context_readiness_repair_path, context_readiness_repair_payload = latest_json_v1(root, "aegis_context_readiness_repair_v1", day_utc, "context_readiness_repair.v1.json")
+    market_context_demand_path, market_context_demand_payload = latest_json_v1(root, "aegis_market_context_demand_v1", day_utc, "market_context_demand.v1.json")
+    signal_evidence_graph_path, signal_evidence_graph_payload = latest_json_v1(root, "aegis_signal_evidence_graph_v1", day_utc, "signal_evidence_graph.v1.json")
+    candidate_contracts_path, candidate_contracts_payload = latest_json_v1(root, "aegis_candidate_contracts_v1", day_utc, "candidate_contracts.v1.json")
     runtime_path, runtime_payload = latest_json_v1(root, "aegis_runtime_truth_kernel_v1", day_utc, "runtime_truth_kernel.v1.json")
     market_data_path, market_data_payload = latest_json_v1(root, "aegis_market_data_v1", day_utc, "market_data.v1.json")
     data_registry_path, data_registry_payload = latest_json_v1(root, "aegis_data_registry_v1", day_utc, "data_registry.v1.json")
     contracts_path, contracts_payload = latest_json_v1(root, "aegis_sleeve_input_contracts_v1", day_utc, "sleeve_input_contracts.v1.json")
     readiness_path, readiness_payload = latest_json_v1(root, "aegis_sleeve_readiness_v1", day_utc, "sleeve_readiness.v1.json")
+    if not signal_evidence_graph_payload:
+        signal_evidence_graph_payload = build_signal_evidence_graph_v1(truth_root=root, day_utc=day_utc, repo_root=repo)
+        signal_evidence_graph_path = root / "reports" / "aegis_signal_evidence_graph_v1" / day_utc / "signal_evidence_graph.v1.json"
+    if not candidate_contracts_payload:
+        candidate_contracts_payload = build_candidate_contracts_v1(truth_root=root, day_utc=day_utc, repo_root=repo)
+    candidate_review_packet_path, candidate_review_packet_payload = latest_json_v1(root, "aegis_candidate_review_packet_v1", day_utc, "candidate_review_packet.v1.json")
+    paper_review_queue_path, paper_review_queue_payload = latest_json_v1(root, "aegis_paper_review_queue_v1", day_utc, "paper_review_queue.v1.json")
+    paper_trade_outcomes_path, paper_trade_outcomes_payload = latest_json_v1(root, "aegis_paper_trade_outcomes_v1", day_utc, "paper_trade_outcomes.v1.json")
+    if not candidate_review_packet_payload:
+        candidate_review_packet_payload = build_candidate_review_packet_v1(truth_root=root, day_utc=day_utc)
+    if not paper_review_queue_payload:
+        paper_review_queue_payload = build_paper_review_queue_v1(truth_root=root, day_utc=day_utc, packet_payload=candidate_review_packet_payload)
+    if not paper_trade_outcomes_payload:
+        paper_trade_outcomes_payload = build_paper_trade_outcomes_v1(truth_root=root, day_utc=day_utc)
     if not lifecycle_payload and runs_payload:
         lifecycle_payload = build_candidate_lifecycle_v1(truth_root=root, day_utc=day_utc)
 
@@ -55,17 +79,33 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
     )
     decisions = trigger_payload.get("decisions") if isinstance(trigger_payload.get("decisions"), list) else []
     runs = runs_payload.get("runs") if isinstance(runs_payload.get("runs"), list) else []
-    candidates = lifecycle_payload.get("candidates") if isinstance(lifecycle_payload.get("candidates"), list) else []
-    candidate_counts = _candidate_counts_by_sleeve(candidates)
+    all_candidates = lifecycle_payload.get("candidates") if isinstance(lifecycle_payload.get("candidates"), list) else []
+    paper_rehearsal_candidates = [row for row in all_candidates if _is_paper_rehearsal_candidate(row)]
+    candidates = [row for row in all_candidates if not _is_paper_rehearsal_candidate(row)]
+    candidate_counts = _merge_count_maps(
+        _candidate_counts_by_sleeve(candidates),
+        _candidate_counts_by_sleeve(candidate_contracts_payload.get("candidate_contracts") if isinstance(candidate_contracts_payload.get("candidate_contracts"), list) else []),
+    )
     run_sleeves = _run_sleeves(runs)
     rejected_by_sleeve = _rejection_reasons_by_sleeve(runs)
     data_status = _data_status(trigger_payload=trigger_payload, runtime_payload=runtime_payload, runtime_path=runtime_path)
     readiness_by_id = _readiness_by_id(readiness_payload)
-    raw_signal_rejections = _raw_signal_rejections(
-        candidate_manifest_payload=candidate_manifest_payload,
-        candidate_lineage_payload=candidate_lineage_payload,
-        intent_arbitration_payload=intent_arbitration_payload,
-        selected_intent_promotion_payload=selected_intent_promotion_payload,
+    death_report = build_real_signal_death_report_v1(truth_root=root, day_utc=day_utc, repo_root=repo)
+    raw_signal_inventory = _merge_signal_inventory(
+        _raw_signal_inventory(
+            candidate_manifest_payload=candidate_manifest_payload,
+            intent_arbitration_payload=intent_arbitration_payload,
+        ),
+        _raw_signal_inventory_from_death_report(death_report),
+    )
+    raw_signal_rejections = _merge_rejection_rows(
+        _raw_signal_rejections(
+            candidate_manifest_payload=candidate_manifest_payload,
+            candidate_lineage_payload=candidate_lineage_payload,
+            intent_arbitration_payload=intent_arbitration_payload,
+            selected_intent_promotion_payload=selected_intent_promotion_payload,
+        ),
+        _raw_signal_rejections_from_death_report(death_report),
     )
     raw_signal_rejections_by_sleeve = _raw_signal_rejections_by_sleeve(raw_signal_rejections)
     sleeves = _sleeve_rows(
@@ -80,12 +120,21 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
         readiness_by_id=readiness_by_id,
         raw_signal_rejections_by_sleeve=raw_signal_rejections_by_sleeve,
     )
-    total_raw_signals = sum(int(row.get("raw_signal_count") or 0) for row in sleeves)
-    total_candidates = sum(int(row.get("candidate_count") or 0) for row in sleeves)
-    if candidates and total_candidates == 0:
-        total_candidates = len(candidates)
-    total_rejected = sum(int(row.get("rejected_count") or 0) for row in sleeves)
-    total_run = sum(1 for row in sleeves if row.get("run_status") == "RAN")
+    production_sleeves = [row for row in sleeves if not row.get("excluded_from_candidate_generation_totals")]
+    total_raw_signals = max(
+        sum(int(row.get("raw_signal_count") or 0) for row in production_sleeves),
+        len(raw_signal_inventory),
+        int(death_report.get("total_raw_signals") or 0),
+    )
+    diagnostic_candidate_outputs = len(candidates)
+    valid_candidate_contracts = int(candidate_contracts_payload.get("candidates_created") or 0)
+    rejected_candidate_contracts = int(candidate_contracts_payload.get("candidates_rejected") or len(candidate_contracts_payload.get("rejected_raw_signals") or []))
+    total_candidates = valid_candidate_contracts
+    total_rejected = max(sum(int(row.get("rejected_count") or 0) for row in production_sleeves), rejected_candidate_contracts)
+    total_run = max(
+        sum(1 for row in production_sleeves if row.get("run_status") == "RAN"),
+        len([item for item in death_report.get("sleeves_that_ran") or [] if str(item).strip() and str(item).strip().upper() != SIMULATOR_ENGINE_ID]),
+    )
     status = _candidate_generation_status(
         trigger_path=trigger_path,
         runs_path=runs_path,
@@ -132,9 +181,9 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
         "total_sleeves_run": total_run,
         "total_sleeves_ready": int(readiness_payload.get("ready_count") or 0) if readiness_payload else 0,
         "total_sleeves_ready_with_warnings": int(readiness_payload.get("ready_with_warnings_count") or 0) if readiness_payload else 0,
-        "total_sleeves_skipped": sum(1 for row in sleeves if row.get("run_status") == "SKIPPED"),
-        "total_sleeves_failed": sum(1 for row in sleeves if row.get("run_status") == "FAILED"),
-        "total_sleeves_blocked": sum(1 for row in sleeves if row.get("run_status") == "BLOCKED"),
+        "total_sleeves_skipped": sum(1 for row in production_sleeves if row.get("run_status") == "SKIPPED"),
+        "total_sleeves_failed": sum(1 for row in production_sleeves if row.get("run_status") == "FAILED"),
+        "total_sleeves_blocked": sum(1 for row in production_sleeves if row.get("run_status") == "BLOCKED"),
         "global_data_status": _global_data_status(data_registry_payload),
         "market_data_summary": _market_data_summary(market_data_path=market_data_path, market_data_payload=market_data_payload),
         "per_sleeve_readiness": readiness_payload.get("sleeves") if isinstance(readiness_payload.get("sleeves"), list) else [],
@@ -157,10 +206,70 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
         "repair_command": REPAIR_COMMAND,
         "cannot_repair_reason": _cannot_repair_reason(runtime_payload=runtime_payload, sleeves=sleeves),
         "total_raw_signals": total_raw_signals,
+        "diagnostic_candidate_outputs": diagnostic_candidate_outputs,
+        "valid_candidate_contracts": valid_candidate_contracts,
+        "rejected_candidate_contracts": rejected_candidate_contracts,
         "total_candidates_generated": total_candidates,
+        "candidate_count_semantics": "total_candidates_generated counts validated candidate contracts only; diagnostic_candidate_outputs counts unvalidated lifecycle/diagnostic candidate-like rows.",
+        "paper_rehearsal_candidate_count": len(paper_rehearsal_candidates),
+        "paper_rehearsal_candidates_excluded_from_generation_totals": True,
         "total_candidates_rejected": total_rejected,
+        "symbols_evaluated": _symbols_evaluated(raw_signal_inventory),
+        "raw_signals_by_sleeve": _count_by(raw_signal_inventory, "sleeve_id"),
+        "raw_signals_by_symbol": _count_by(raw_signal_inventory, "symbol"),
         "raw_signal_rejections": raw_signal_rejections,
         "rejected_raw_signal_details": raw_signal_rejections,
+        "signal_evidence_graph_path": str(signal_evidence_graph_path or ""),
+        "signal_evidence_graph": signal_evidence_graph_payload,
+        "candidate_contracts_path": str(candidate_contracts_path or ""),
+        "candidate_contracts": candidate_contracts_payload,
+        "candidate_review_packet_path": str(candidate_review_packet_path or ""),
+        "candidate_review_packet": candidate_review_packet_payload,
+        "paper_review_queue_path": str(paper_review_queue_path or ""),
+        "paper_review_queue": paper_review_queue_payload,
+        "paper_trade_outcomes_path": str(paper_trade_outcomes_path or ""),
+        "paper_trade_outcomes": paper_trade_outcomes_payload,
+        "breadth_drop_validation_path": str(breadth_drop_validation_path or ""),
+        "breadth_drop_validation": breadth_drop_validation_payload if isinstance(breadth_drop_validation_payload, dict) else {},
+        "vix_source_verification_path": str(vix_source_verification_path or ""),
+        "vix_source_verification": vix_source_verification_payload if isinstance(vix_source_verification_payload, dict) else {},
+        "context_readiness_repair_path": str(context_readiness_repair_path or ""),
+        "context_readiness_repair": context_readiness_repair_payload if isinstance(context_readiness_repair_payload, dict) else {},
+        "market_context_demand_path": str(market_context_demand_path or ""),
+        "market_context_demand": market_context_demand_payload if isinstance(market_context_demand_payload, dict) else {},
+        "market_context_provider_health_path": str((market_context_demand_payload.get("provider_health_path") if isinstance(market_context_demand_payload, dict) else "") or ""),
+        "market_context_provider_health": market_context_demand_payload.get("provider_health") if isinstance(market_context_demand_payload.get("provider_health"), dict) else {},
+        "market_context_status_counts": market_context_demand_payload.get("status_counts") if isinstance(market_context_demand_payload, dict) else {},
+        "market_context_blockers": [
+            {
+                "context_item_id": row.get("context_item_id"),
+                "status": row.get("fulfillment_status"),
+                "failure_reason": row.get("failure_reason"),
+                "formula_version": row.get("formula_version"),
+                "provider": row.get("provider"),
+                "next_repair_command": row.get("next_repair_command") or "npm run aegis:repair-runtime-readiness",
+                "source_artifact_paths": row.get("source_artifact_paths") or [],
+            }
+            for row in (market_context_demand_payload.get("market_context_items") or [])
+            if isinstance(row, dict) and str(row.get("fulfillment_status") or "") != "CONTEXT_CERTIFIED"
+        ],
+        "real_candidate_contracts": candidate_contracts_payload.get("candidate_contracts") if isinstance(candidate_contracts_payload.get("candidate_contracts"), list) else [],
+        "certified_price_symbols": sorted({str(row.get("symbol") or "").strip().upper() for row in (candidate_contracts_payload.get("candidate_contracts") or []) if isinstance(row, dict) and str(row.get("entry_reference_price") or "").strip()}),
+        "missing_price_symbols": sorted({str(row.get("entry_reference_price_missing_symbol") or row.get("symbol") or "").strip().upper() for row in (candidate_contracts_payload.get("rejected_raw_signals") or []) if isinstance(row, dict) and str(row.get("rejection_reason") or "").startswith("ENTRY_REFERENCE_PRICE_")}),
+        "candidate_contracts_created_after_price_coverage": int(candidate_contracts_payload.get("candidates_created") or 0),
+        "remaining_rejected_symbols": [
+            {
+                "symbol": str(row.get("symbol") or "").strip().upper(),
+                "reason": str(row.get("rejection_reason") or ""),
+            }
+            for row in (candidate_contracts_payload.get("rejected_raw_signals") or [])
+            if isinstance(row, dict) and str(row.get("symbol") or "").strip()
+        ],
+        "real_signal_death_report_path": "",
+        "real_signal_death_report": death_report,
+        "rejection_stage_counts": death_report.get("rejection_stage_counts") if isinstance(death_report.get("rejection_stage_counts"), dict) else {},
+        "top_missing_candidate_fields": candidate_contracts_payload.get("top_missing_contract_fields") if isinstance(candidate_contracts_payload.get("top_missing_contract_fields"), list) else (death_report.get("top_missing_contract_fields") if isinstance(death_report.get("top_missing_contract_fields"), list) else []),
+        "paper_golden_path_comparison_summary": death_report.get("comparison_to_paper_golden_path") if isinstance(death_report.get("comparison_to_paper_golden_path"), dict) else {},
         "selected_intent_promotion": _selected_intent_promotion_summary(selected_intent_promotion_payload),
         "zero_candidate_explanation": explanation,
         "operator_interpretation": interpretation,
@@ -180,6 +289,13 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
             "candidate_ranking": str(ranking_path or ""),
             "candidate_generation_manifest": str(candidate_manifest_path or ""),
             "candidate_lineage": str(candidate_lineage_path or ""),
+            "signal_evidence_graph": str(signal_evidence_graph_path or ""),
+            "candidate_contracts": str(candidate_contracts_path or ""),
+            "breadth_drop_validation": str(breadth_drop_validation_path or ""),
+            "vix_source_verification": str(vix_source_verification_path or ""),
+            "context_readiness_repair": str(context_readiness_repair_path or ""),
+            "market_context_demand": str(market_context_demand_path or ""),
+            "market_context_provider_health": str((market_context_demand_payload.get("provider_health_path") if isinstance(market_context_demand_payload, dict) else "") or ""),
             "intent_arbitration": str(intent_arbitration_path or ""),
             "selected_intent_promotion": str(selected_intent_promotion_path or ""),
             "runtime_truth": str(runtime_path or ""),
@@ -204,17 +320,52 @@ def build_candidate_generation_diagnostics_v1(*, truth_root: Path, repo_root: Pa
 
 def write_candidate_generation_diagnostics_v1(*, truth_root: Path, day_utc: str, payload: dict[str, Any]) -> dict[str, str]:
     out_dir = Path(truth_root).expanduser().resolve() / "reports" / REPORT_FAMILY / day_utc
+    graph_paths = {}
+    signal_evidence_graph = payload.get("signal_evidence_graph") if isinstance(payload.get("signal_evidence_graph"), dict) else {}
+    if signal_evidence_graph:
+        graph_paths = write_signal_evidence_graph_v1(truth_root=truth_root, day_utc=day_utc, payload=signal_evidence_graph)
+        payload["signal_evidence_graph_path"] = graph_paths.get("json", "")
+    contract_paths = {}
+    candidate_contracts = payload.get("candidate_contracts") if isinstance(payload.get("candidate_contracts"), dict) else {}
+    if candidate_contracts:
+        contract_paths = write_candidate_contracts_v1(truth_root=truth_root, day_utc=day_utc, payload=candidate_contracts)
+        payload["candidate_contracts_path"] = contract_paths.get("json", "")
+    candidate_review_packet_paths = {}
+    candidate_review_packet = payload.get("candidate_review_packet") if isinstance(payload.get("candidate_review_packet"), dict) else {}
+    if candidate_review_packet:
+        candidate_review_packet_paths = {"json": str(write_candidate_review_packet_v1(truth_root=truth_root, day_utc=day_utc, payload=candidate_review_packet))}
+        payload["candidate_review_packet_path"] = candidate_review_packet_paths.get("json", "")
+    paper_review_queue_paths = {}
+    paper_review_queue = payload.get("paper_review_queue") if isinstance(payload.get("paper_review_queue"), dict) else {}
+    if paper_review_queue:
+        paper_review_queue_paths = {"json": str(write_paper_review_queue_v1(truth_root=truth_root, day_utc=day_utc, payload=paper_review_queue))}
+        payload["paper_review_queue_path"] = paper_review_queue_paths.get("json", "")
+    paper_trade_outcomes_paths = {}
+    paper_trade_outcomes = payload.get("paper_trade_outcomes") if isinstance(payload.get("paper_trade_outcomes"), dict) else {}
+    if paper_trade_outcomes:
+        paper_trade_outcomes_paths = {"json": str(write_paper_trade_outcomes_v1(truth_root=truth_root, day_utc=day_utc, payload=paper_trade_outcomes))}
+        payload["paper_trade_outcomes_path"] = paper_trade_outcomes_paths.get("json", "")
+    death_report_paths = {}
+    death_report = payload.get("real_signal_death_report") if isinstance(payload.get("real_signal_death_report"), dict) else {}
+    if death_report:
+        death_report_paths = write_real_signal_death_report_v1(truth_root=truth_root, day_utc=day_utc, payload=death_report)
+        payload["real_signal_death_report_path"] = death_report_paths.get("json", "")
     json_path = write_json_v1(out_dir / "candidate_generation_diagnostics.v1.json", payload)
     summary_path = out_dir / "candidate_generation_diagnostics.summary.txt"
     matrix_path = out_dir / "candidate_generation_diagnostics.matrix.csv"
     summary_path.write_text(render_candidate_generation_diagnostics_summary_v1(payload), encoding="utf-8")
     matrix_path.write_text(render_candidate_generation_diagnostics_matrix_csv_v1(payload), encoding="utf-8")
-    return {"json": str(json_path), "summary": str(summary_path), "matrix": str(matrix_path)}
+    return {"json": str(json_path), "summary": str(summary_path), "matrix": str(matrix_path), **({"signal_evidence_graph": graph_paths.get("json", "")} if graph_paths else {}), **({"candidate_contracts": contract_paths.get("json", "")} if contract_paths else {}), **({"candidate_review_packet": candidate_review_packet_paths.get("json", "")} if candidate_review_packet_paths else {}), **({"paper_review_queue": paper_review_queue_paths.get("json", "")} if paper_review_queue_paths else {}), **({"paper_trade_outcomes": paper_trade_outcomes_paths.get("json", "")} if paper_trade_outcomes_paths else {}), **({"real_signal_death_report": death_report_paths.get("json", "")} if death_report_paths else {})}
 
 
 def render_candidate_generation_diagnostics_summary_v1(payload: dict[str, Any]) -> str:
     market_data = payload.get("market_data_summary") if isinstance(payload.get("market_data_summary"), dict) else {}
     market_config = market_data.get("provider_config") if isinstance(market_data.get("provider_config"), dict) else {}
+    top_missing_fields = ", ".join(
+        f"{row.get('field')}={row.get('count')}"
+        for row in (payload.get("top_missing_candidate_fields") or [])
+        if isinstance(row, dict)
+    ) or "none"
     lines = [
         "AEGIS CANDIDATE GENERATION DIAGNOSTICS v1",
         f"day_utc: {payload.get('day_utc')}",
@@ -230,8 +381,14 @@ def render_candidate_generation_diagnostics_summary_v1(payload: dict[str, Any]) 
         f"total_sleeves_failed: {payload.get('total_sleeves_failed')}",
         f"total_sleeves_blocked: {payload.get('total_sleeves_blocked')}",
         f"total_raw_signals: {payload.get('total_raw_signals')}",
+        f"diagnostic_candidate_outputs: {payload.get('diagnostic_candidate_outputs')}",
+        f"valid_candidate_contracts: {payload.get('valid_candidate_contracts')}",
+        f"rejected_candidate_contracts: {payload.get('rejected_candidate_contracts')}",
         f"total_candidates_generated: {payload.get('total_candidates_generated')}",
         f"total_candidates_rejected: {payload.get('total_candidates_rejected')}",
+        f"symbols_evaluated: {', '.join(payload.get('symbols_evaluated') or []) or 'none'}",
+        f"raw_signals_by_sleeve: {_compact_counts(payload.get('raw_signals_by_sleeve'))}",
+        f"raw_signals_by_symbol: {_compact_counts(payload.get('raw_signals_by_symbol'))}",
         f"exact_blocker: {payload.get('exact_blocker')}",
         f"market_data_status: {market_data.get('status') or 'UNKNOWN'}",
         f"market_data_failure_reason: {market_data.get('failure_reason') or ''}",
@@ -240,6 +397,16 @@ def render_candidate_generation_diagnostics_summary_v1(payload: dict[str, Any]) 
         f"missing_symbols: {', '.join(market_data.get('missing_symbols') or [])}",
         f"stale_symbols: {', '.join(market_data.get('stale_symbols') or [])}",
         f"repair_command: {payload.get('repair_command')}",
+        f"certified_price_symbols: {', '.join(payload.get('certified_price_symbols') or []) or 'none'}",
+        f"missing_price_symbols: {', '.join(payload.get('missing_price_symbols') or []) or 'none'}",
+        f"candidate_contracts_created_after_price_coverage: {payload.get('candidate_contracts_created_after_price_coverage')}",
+        f"market_context_demand_path: {payload.get('market_context_demand_path') or ''}",
+        f"market_context_status_counts: {_compact_counts(payload.get('market_context_status_counts'))}",
+        f"signal_evidence_graph_path: {payload.get('signal_evidence_graph_path') or ''}",
+        f"real_signal_death_report_path: {payload.get('real_signal_death_report_path') or ""}",
+        f"rejection_stage_counts: {_compact_counts(payload.get('rejection_stage_counts'))}",
+        f"top_missing_candidate_fields: {top_missing_fields}",
+        f"paper_golden_path_comparison_summary: {((payload.get('paper_golden_path_comparison_summary') if isinstance(payload.get('paper_golden_path_comparison_summary'), dict) else {}).get('summary') or "")}",
         f"zero_candidate_explanation: {payload.get('zero_candidate_explanation')}",
         "",
         "sleeves:",
@@ -263,7 +430,9 @@ def render_candidate_generation_diagnostics_summary_v1(payload: dict[str, Any]) 
             lines.append(
                 "- "
                 f"{row.get('raw_signal_id')}: sleeve={row.get('sleeve_id')} stage={row.get('rejection_stage')} "
-                f"reason={row.get('rejection_reason')} explanation={row.get('human_readable_explanation')}"
+                f"reason={row.get('rejection_reason')} candidate_gate_failed={str(row.get('candidate_gate_failed') is True).lower()} "
+                f"promotion_gate_failed={str(row.get('promotion_gate_failed') is True).lower()} "
+                f"evidence={row.get('evidence_path') or ''} explanation={row.get('human_readable_explanation')}"
             )
     else:
         lines.append("- none")
@@ -304,6 +473,7 @@ def render_candidate_generation_diagnostics_matrix_csv_v1(payload: dict[str, Any
             "rejected_count",
             "rejection_reasons",
             "raw_signal_rejections",
+            "symbols_evaluated",
             "data_status",
             "regime_filter_status",
             "thresholds_applied",
@@ -327,6 +497,7 @@ def render_candidate_generation_diagnostics_matrix_csv_v1(payload: dict[str, Any
                 "rejected_count": row.get("rejected_count", 0),
                 "rejection_reasons": "|".join(row.get("rejection_reasons") or []),
                 "raw_signal_rejections": "|".join(str(item.get("rejection_reason") or "") for item in row.get("raw_signal_rejections") or [] if isinstance(item, dict)),
+                "symbols_evaluated": "|".join(row.get("symbols_evaluated") or []),
                 "data_status": row.get("data_status", ""),
                 "regime_filter_status": row.get("regime_filter_status", ""),
                 "thresholds_applied": "|".join(row.get("thresholds_applied") or []),
@@ -342,16 +513,16 @@ def _authoritative_sleeve_inventory(*, repo_root: Path) -> dict[str, Any]:
     registry = _read_json(registry_path)
     raw_rows = registry.get("engines") if isinstance(registry.get("engines"), list) else []
     registered: list[dict[str, Any]] = []
-    excluded: list[str] = []
+    diagnostic_only: list[str] = []
     for raw in raw_rows:
         if not isinstance(raw, dict):
             continue
         sleeve_id = str(raw.get("engine_id") or "").strip().upper()
         if not sleeve_id:
             continue
-        if sleeve_id == SIMULATOR_ENGINE_ID:
-            excluded.append(sleeve_id)
-            continue
+        is_diagnostic_only = sleeve_id == SIMULATOR_ENGINE_ID
+        if is_diagnostic_only:
+            diagnostic_only.append(sleeve_id)
         activation = str(raw.get("activation_status") or "").strip().upper()
         runner_rel = str(raw.get("engine_runner_path") or "").strip()
         allowed_symbols = [str(item).strip().upper() for item in raw.get("allowed_symbols") or [] if str(item).strip()]
@@ -361,8 +532,10 @@ def _authoritative_sleeve_inventory(*, repo_root: Path) -> dict[str, Any]:
             "definition_path": str((Path(repo_root).resolve() / runner_rel).resolve()) if runner_rel else "",
             "activation_status": activation or "UNKNOWN",
             "enabled": activation == "ACTIVE",
-            "expected_today": activation == "ACTIVE",
-            "expected_cadence": "DAILY_ADVISORY_CANDIDATE_GENERATION",
+            "expected_today": activation == "ACTIVE" and not is_diagnostic_only,
+            "diagnostic_only": is_diagnostic_only,
+            "excluded_from_candidate_generation_totals": is_diagnostic_only,
+            "expected_cadence": "DIAGNOSTIC_ONLY_OPTIONAL_SIMULATION" if is_diagnostic_only else "DAILY_ADVISORY_CANDIDATE_GENERATION",
             "required_inputs": [
                 f"{ENGINE_REGISTRY_RELPATH}",
                 runner_rel or "engine_runner_path",
@@ -373,7 +546,7 @@ def _authoritative_sleeve_inventory(*, repo_root: Path) -> dict[str, Any]:
             "runner_command": _registry_runner_command(repo_root=repo_root, runner_rel=runner_rel, allowed_symbols=allowed_symbols),
         }
         registered.append(row)
-    enabled = [row for row in registered if row["enabled"]]
+    enabled = [row for row in registered if row["enabled"] and not row.get("diagnostic_only")]
     expected = [row for row in enabled if row["expected_today"]]
     legacy_path = (Path(repo_root).resolve() / LEGACY_EXECUTION_SLEEVE_REGISTRY_RELPATH).resolve()
     legacy_sleeves = _legacy_execution_sleeves(legacy_path)
@@ -393,7 +566,8 @@ def _authoritative_sleeve_inventory(*, repo_root: Path) -> dict[str, Any]:
         "registry_path": registry_path,
         "legacy_registry_path": legacy_path,
         "registry_mismatches": mismatches,
-        "excluded_engine_ids": excluded,
+        "excluded_engine_ids": [],
+        "diagnostic_only_engine_ids": diagnostic_only,
         "registered_sleeves": registered,
         "enabled_sleeves": enabled,
         "expected_sleeves": expected,
@@ -402,6 +576,18 @@ def _authoritative_sleeve_inventory(*, repo_root: Path) -> dict[str, Any]:
     }
 
 
+
+def _is_paper_rehearsal_candidate(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    contract = row.get("promotion_contract") if isinstance(row.get("promotion_contract"), dict) else {}
+    if str(contract.get("mode") or "").strip().upper() == "PAPER_REHEARSAL":
+        return True
+    candidate_id = str(row.get("candidate_id") or "").lower()
+    raw_signal_id = str(row.get("raw_signal_id") or row.get("intent_id") or "").lower()
+    artifacts = row.get("evidence_artifacts") if isinstance(row.get("evidence_artifacts"), list) else []
+    return "paper_rehearsal" in candidate_id or "paper_rehearsal" in raw_signal_id or any("paper_rehearsal" in str(path).lower() for path in artifacts)
+
 def _candidate_counts_by_sleeve(candidates: list[Any]) -> dict[str, int]:
     out: dict[str, int] = {}
     for row in candidates:
@@ -409,6 +595,13 @@ def _candidate_counts_by_sleeve(candidates: list[Any]) -> dict[str, int]:
             continue
         sleeve = str(row.get("sleeve_id") or "UNKNOWN").strip().upper() or "UNKNOWN"
         out[sleeve] = out.get(sleeve, 0) + 1
+    return out
+
+def _merge_count_maps(*maps: dict[str, int]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for payload in maps:
+        for key, value in payload.items():
+            out[str(key)] = max(int(value or 0), out.get(str(key), 0))
     return out
 
 
@@ -632,6 +825,151 @@ def _market_data_summary(*, market_data_path: Path | None, market_data_payload: 
     }
 
 
+def _raw_signal_inventory(*, candidate_manifest_payload: dict[str, Any], intent_arbitration_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(raw: dict[str, Any], *, source: str) -> None:
+        raw_signal_id = str(raw.get("raw_intent_id") or raw.get("intent_id") or raw.get("raw_intent_hash") or raw.get("intent_hash") or raw.get("candidate_id") or "").strip()
+        if not raw_signal_id or raw_signal_id in seen:
+            return
+        sleeve_id = str(raw.get("engine_id") or raw.get("sleeve_id") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        symbol = str(raw.get("symbol_or_pair") or raw.get("symbol") or "").strip().upper()
+        if not symbol:
+            return
+        seen.add(raw_signal_id)
+        rows.append(
+            {
+                "raw_signal_id": raw_signal_id,
+                "sleeve_id": sleeve_id,
+                "symbol": symbol,
+                "status": str(raw.get("status") or raw.get("lifecycle_decision") or "").strip().upper(),
+                "evidence_path": str(raw.get("raw_intent_path") or raw.get("intent_path") or ""),
+                "source": source,
+            }
+        )
+
+    manifest_rows = candidate_manifest_payload.get("candidate_rows") if isinstance(candidate_manifest_payload.get("candidate_rows"), list) else []
+    for row in manifest_rows:
+        if not isinstance(row, dict):
+            continue
+        if not str(row.get("raw_intent_id") or row.get("raw_intent_hash") or "").strip():
+            continue
+        add(row, source="candidate_generation_manifest")
+
+    for key in ("raw_candidate_intents", "candidate_intents", "rejected_or_filtered_intents"):
+        for row in intent_arbitration_payload.get(key) if isinstance(intent_arbitration_payload.get(key), list) else []:
+            if isinstance(row, dict):
+                add(row, source=f"intent_arbitration.{key}")
+    selected = intent_arbitration_payload.get("selected_intent") if isinstance(intent_arbitration_payload.get("selected_intent"), dict) else {}
+    if selected:
+        add(selected, source="intent_arbitration.selected_intent")
+    return rows
+
+
+def _symbols_evaluated(rows: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(row.get("symbol") or "").strip().upper() for row in rows if str(row.get("symbol") or "").strip()})
+
+
+def _count_by(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "").strip().upper()
+        if not value:
+            continue
+        out[value] = out.get(value, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def _raw_signal_inventory_from_death_report(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for row in payload.get("signals") if isinstance(payload.get("signals"), list) else []:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "raw_signal_id": str(row.get("raw_signal_id") or "").strip(),
+                "sleeve_id": str(row.get("sleeve_id") or "").strip().upper(),
+                "symbol": str(row.get("symbol") or "").strip().upper(),
+                "status": str(row.get("rejection_stage") or "").strip().upper(),
+                "evidence_path": str(row.get("evidence_path") or "").strip(),
+                "source": "real_signal_death_report",
+            }
+        )
+    return rows
+
+
+def _merge_signal_inventory(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in [*left, *right]:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("sleeve_id") or "").strip().upper(), str(row.get("symbol") or "").strip().upper(), str(row.get("raw_signal_id") or "").strip())
+        if not key[0] or not key[1] or not key[2] or key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _raw_signal_rejections_from_death_report(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for row in payload.get("signals") if isinstance(payload.get("signals"), list) else []:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "raw_signal_id": row.get("raw_signal_id"),
+                "candidate_id": row.get("raw_signal_id"),
+                "sleeve_id": row.get("sleeve_id"),
+                "symbol": row.get("symbol"),
+                "rejection_stage": row.get("rejection_stage"),
+                "rejection_reason": row.get("rejection_reason"),
+                "candidate_gate_failed": str(row.get("rejection_stage") or "") in {"CANDIDATE_CONVERSION", "INTENT_ARBITRATION", "PORTFOLIO_SCORING"},
+                "promotion_gate_failed": str(row.get("rejection_stage") or "") == "SELECTED_INTENT_PROMOTION",
+                "evidence_path": row.get("evidence_path"),
+                "human_readable_explanation": row.get("rejection_reason"),
+                "required_next_action": row.get("next_repair_action"),
+                "selected_intent_promotion_status": row.get("selected_intent_promotion_status"),
+                "selected_intent_promotion_missing_contract_fields": row.get("failed_promotion_fields") or [],
+                "failed_candidate_contract_fields": row.get("failed_candidate_contract_fields") or [],
+                "failed_arbitration_fields": row.get("failed_arbitration_fields") or [],
+                "failed_promotion_fields": row.get("failed_promotion_fields") or [],
+                "failed_evidence_fields": row.get("failed_evidence_fields") or [],
+                "detail_reason_codes": row.get("detail_reason_codes") if isinstance(row.get("detail_reason_codes"), list) else [],
+                "entry_reference_price_certification_status": row.get("entry_reference_price_certification_status") or "",
+                "entry_reference_price_certification_reason_codes": row.get("entry_reference_price_certification_reason_codes") if isinstance(row.get("entry_reference_price_certification_reason_codes"), list) else [],
+                "entry_reference_price_certification_id": row.get("entry_reference_price_certification_id") or "",
+                "entry_reference_price_safe_repair_available": bool(row.get("entry_reference_price_safe_repair_available")),
+                "entry_reference_price_timestamp_utc": row.get("entry_reference_price_timestamp_utc") or "",
+                "entry_reference_price_source_path": row.get("entry_reference_price_source_path") or "",
+                "source_artifact_paths": [item for item in [row.get("source_artifact"), row.get("candidate_manifest_path"), row.get("evidence_path")] if str(item or "").strip()],
+            }
+        )
+    return rows
+
+
+def _merge_rejection_rows(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in [*left, *right]:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("sleeve_id") or "").strip().upper(), str(row.get("symbol") or "").strip().upper(), str(row.get("raw_signal_id") or row.get("candidate_id") or row.get("rejection_reason") or "").strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _compact_counts(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return "none"
+    return ", ".join(f"{key}={count}" for key, count in sorted(value.items()))
+
+
 def _raw_signal_rejections(
     *,
     candidate_manifest_payload: dict[str, Any],
@@ -641,11 +979,12 @@ def _raw_signal_rejections(
 ) -> list[dict[str, Any]]:
     manifest_rows = candidate_manifest_payload.get("candidate_rows") if isinstance(candidate_manifest_payload.get("candidate_rows"), list) else []
     if not manifest_rows:
-        return []
+        manifest_rows = []
     lineage_rows = candidate_lineage_payload.get("lineage_rows") if isinstance(candidate_lineage_payload.get("lineage_rows"), list) else []
     arbitration_rejections = intent_arbitration_payload.get("rejected_or_filtered_intents") if isinstance(intent_arbitration_payload.get("rejected_or_filtered_intents"), list) else []
     selected_intent = intent_arbitration_payload.get("selected_intent") if isinstance(intent_arbitration_payload.get("selected_intent"), dict) else {}
     promoted_intent_ids = _promoted_intent_ids(selected_intent_promotion_payload)
+    promotion_failed = _promotion_gate_failed(selected_intent_promotion_payload)
     lineage_by_candidate_id = {
         str(row.get("candidate_id") or ""): row
         for row in lineage_rows
@@ -659,30 +998,46 @@ def _raw_signal_rejections(
     selected_intent_id = str(selected_intent.get("intent_id") or "").strip()
     if selected_intent_id:
         arbitration_by_intent_id[selected_intent_id] = selected_intent
+
+    candidate_rows = [row for row in manifest_rows if isinstance(row, dict) and str(row.get("raw_intent_id") or row.get("raw_intent_hash") or "").strip()]
+    if not candidate_rows:
+        candidate_rows = [row for row in arbitration_rejections if isinstance(row, dict) and str(row.get("intent_id") or row.get("intent_hash") or "").strip()]
+        if selected_intent:
+            candidate_rows.append(selected_intent)
+
     out: list[dict[str, Any]] = []
-    for row in manifest_rows:
+    seen: set[str] = set()
+    for row in candidate_rows:
         if not isinstance(row, dict):
             continue
-        if str(row.get("status") or "").strip().upper() != "CANDIDATE_CREATED":
+        raw_signal_id = str(row.get("raw_intent_id") or row.get("intent_id") or row.get("raw_intent_hash") or row.get("intent_hash") or row.get("candidate_id") or "").strip()
+        if not raw_signal_id or raw_signal_id in seen:
             continue
-        raw_signal_id = str(row.get("raw_intent_id") or row.get("raw_intent_hash") or row.get("candidate_id") or "").strip()
-        if not raw_signal_id:
+        if raw_signal_id in promoted_intent_ids:
             continue
-        candidate_id = str(row.get("candidate_id") or "").strip()
+        candidate_id = str(row.get("candidate_id") or raw_signal_id).strip()
         sleeve_id = str(row.get("engine_id") or row.get("sleeve_id") or "UNKNOWN").strip().upper()
         symbol = str(row.get("symbol_or_pair") or row.get("symbol") or "").strip().upper()
         lineage = lineage_by_candidate_id.get(candidate_id, {})
-        arbitration = arbitration_by_intent_id.get(str(row.get("raw_intent_id") or ""), {})
-        if str(row.get("raw_intent_id") or "").strip() in promoted_intent_ids:
-            continue
-        if _raw_signal_was_promoted(lineage= lineage, arbitration=arbitration):
+        arbitration = arbitration_by_intent_id.get(str(row.get("raw_intent_id") or row.get("intent_id") or ""), {})
+        if _raw_signal_was_promoted(lineage=lineage, arbitration=arbitration):
             continue
         rejection_reason = _raw_signal_rejection_reason(row=row, lineage=lineage, arbitration=arbitration)
         rejection_stage = _raw_signal_rejection_stage(rejection_reason)
         source_paths = _merge_unique(
-            [str(row.get("raw_intent_path") or ""), str(arbitration.get("intent_path") or "")],
+            [str(row.get("raw_intent_path") or row.get("intent_path") or ""), str(arbitration.get("intent_path") or "")],
             [str(path) for path in row.get("output_artifact_paths") or []],
         )
+        if arbitration.get("evidence_paths"):
+            source_paths = _merge_unique(source_paths, [str(path) for path in arbitration.get("evidence_paths") or []])
+        evidence_path = next((path for path in source_paths if path), "")
+        allowed_by_portfolio_gate = _boolish(row.get("allowed_by_portfolio_gate")) or str(row.get("portfolio_gate_decision") or arbitration.get("portfolio_gate_decision") or "").upper() == "ALLOW"
+        selected_by_arbitration = selected_intent_id == str(row.get("raw_intent_id") or row.get("intent_id") or "").strip() and bool(selected_intent_id)
+        executable_value = arbitration.get("executable_eligible")
+        candidate_gate_failed = rejection_stage in {"PORTFOLIO_GATE", "PORTFOLIO_SCORING", "CANDIDATE_LIFECYCLE"} or (executable_value is not None and not _boolish(executable_value))
+        promotion_gate_failed = (rejection_stage == "PROMOTION") or (promotion_failed and (allowed_by_portfolio_gate or selected_by_arbitration))
+        classification = _raw_signal_rejection_classification(rejection_reason)
+        seen.add(raw_signal_id)
         out.append(
             {
                 "raw_signal_id": raw_signal_id,
@@ -691,6 +1046,9 @@ def _raw_signal_rejections(
                 "symbol": symbol,
                 "rejection_stage": rejection_stage,
                 "rejection_reason": rejection_reason,
+                "candidate_gate_failed": candidate_gate_failed,
+                "promotion_gate_failed": promotion_gate_failed,
+                "evidence_path": evidence_path,
                 "human_readable_explanation": _raw_signal_human_explanation(
                     sleeve_id=sleeve_id,
                     symbol=symbol,
@@ -699,21 +1057,27 @@ def _raw_signal_rejections(
                     arbitration=arbitration,
                 ),
                 "required_next_action": _raw_signal_next_action(rejection_reason),
-                "rejection_classification": _raw_signal_rejection_classification(rejection_reason),
-                "expected_rejection": _raw_signal_rejection_classification(rejection_reason) == "EXPECTED",
-                "safety_related": _raw_signal_rejection_classification(rejection_reason) == "SAFETY_RELATED",
-                "error": _raw_signal_rejection_classification(rejection_reason) == "ERROR",
+                "rejection_classification": classification,
+                "expected_rejection": classification == "EXPECTED",
+                "safety_related": classification == "SAFETY_RELATED",
+                "error": classification == "ERROR",
                 "lifecycle_decision": str(row.get("lifecycle_decision") or arbitration.get("lifecycle_decision") or ""),
                 "lifecycle_reason_codes": row.get("lifecycle_reason_codes") if isinstance(row.get("lifecycle_reason_codes"), list) else arbitration.get("lifecycle_reason_codes") if isinstance(arbitration.get("lifecycle_reason_codes"), list) else [],
-                "portfolio_scoring_status": str(arbitration.get("portfolio_scoring_status") or ""),
-                "portfolio_score_total": _optional_text(arbitration.get("portfolio_score_total")),
-                "portfolio_score_rank": arbitration.get("portfolio_score_rank"),
+                "portfolio_scoring_status": str(arbitration.get("portfolio_scoring_status") or arbitration.get("score_status") or ""),
+                "portfolio_score_total": _optional_text(arbitration.get("portfolio_score_total") if arbitration.get("portfolio_score_total") is not None else arbitration.get("score_total")),
+                "portfolio_score_rank": arbitration.get("portfolio_score_rank") if arbitration.get("portfolio_score_rank") is not None else arbitration.get("rank"),
                 "portfolio_scoring_path": str(arbitration.get("portfolio_scoring_path") or intent_arbitration_payload.get("portfolio_scoring_path") or ""),
+                "score_unavailable_reason": str(arbitration.get("score_unavailable_reason") or ""),
+                "scoring_reason_codes": arbitration.get("scoring_reason_codes") if isinstance(arbitration.get("scoring_reason_codes"), list) else arbitration.get("reason_codes") if isinstance(arbitration.get("reason_codes"), list) else [],
+                "executable_eligible": arbitration.get("executable_eligible") if arbitration.get("executable_eligible") is not None else None,
                 "intent_arbitration_status": str(intent_arbitration_payload.get("status") or ""),
-                "selected_by_intent_arbitration": selected_intent_id == str(row.get("raw_intent_id") or "").strip() and bool(selected_intent_id),
+                "selected_by_intent_arbitration": selected_by_arbitration,
                 "portfolio_gate_decision": str(row.get("portfolio_gate_decision") or arbitration.get("portfolio_gate_decision") or ""),
-                "allowed_by_portfolio_gate": bool(row.get("allowed_by_portfolio_gate")),
-                "promotion_status": str(lineage.get("promotion_status") or ""),
+                "portfolio_gate_reason_codes": arbitration.get("portfolio_gate_reason_codes") if isinstance(arbitration.get("portfolio_gate_reason_codes"), list) else row.get("portfolio_gate_reason_codes") if isinstance(row.get("portfolio_gate_reason_codes"), list) else [],
+                "allowed_by_portfolio_gate": allowed_by_portfolio_gate,
+                "promotion_status": str(lineage.get("promotion_status") or selected_intent_promotion_payload.get("promotion_status") or ""),
+                "selected_intent_promotion_status": str(selected_intent_promotion_payload.get("status") or ""),
+                "selected_intent_promotion_missing_contract_fields": selected_intent_promotion_payload.get("missing_contract_fields") if isinstance(selected_intent_promotion_payload.get("missing_contract_fields"), list) else [],
                 "final_state": str(lineage.get("final_state") or ""),
                 "block_reasons": lineage.get("block_reasons") if isinstance(lineage.get("block_reasons"), list) else [],
                 "source_artifact_paths": [path for path in source_paths if path],
@@ -733,7 +1097,35 @@ def _promoted_intent_ids(payload: dict[str, Any]) -> set[str]:
 
 def _selected_intent_promotion_summary(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict) or not payload:
-        return {"available": False, "status": "MISSING", "promoted_candidate_count": 0, "missing_contract_fields": []}
+        return {"available": False, "status": "MISSING", "promoted_candidate_count": 0, "missing_contract_fields": [], "missing_by_stage": {}}
+    checks = payload.get("contract_checks") if isinstance(payload.get("contract_checks"), list) else []
+    missing_by_stage: dict[str, list[str]] = {
+        "arbitration_status": [],
+        "selected_intent": [],
+        "portfolio_scoring": [],
+        "market_price": [],
+        "sleeve_readiness": [],
+        "research_gate": [],
+        "runtime_truth_gate": [],
+    }
+    for row in checks:
+        if not isinstance(row, dict) or str(row.get("status") or "") == "PASS":
+            continue
+        field = str(row.get("field") or "")
+        bucket = "runtime_truth_gate"
+        if field.startswith("intent_arbitration."):
+            bucket = "arbitration_status"
+        elif field.startswith("selected_intent.") or field.startswith("intent."):
+            bucket = "selected_intent"
+        elif field.startswith("portfolio_scoring."):
+            bucket = "portfolio_scoring"
+        elif field.startswith("market.price."):
+            bucket = "market_price"
+        elif field.startswith("sleeve_readiness."):
+            bucket = "sleeve_readiness"
+        elif field.startswith("research."):
+            bucket = "research_gate"
+        missing_by_stage.setdefault(bucket, []).append(field)
     return {
         "available": True,
         "status": str(payload.get("status") or "UNKNOWN"),
@@ -743,6 +1135,7 @@ def _selected_intent_promotion_summary(payload: dict[str, Any]) -> dict[str, Any
         "symbol": str(payload.get("symbol") or ""),
         "promoted_candidate_count": int(payload.get("promoted_candidate_count") or 0),
         "missing_contract_fields": payload.get("missing_contract_fields") if isinstance(payload.get("missing_contract_fields"), list) else [],
+        "missing_by_stage": {key: value for key, value in missing_by_stage.items() if value},
         "promoted_candidate_set_path": str(payload.get("promoted_candidate_set_path") or ""),
         "operator_review_required": bool(payload.get("operator_review_required", True)),
         "broker_execution_allowed": False,
@@ -760,17 +1153,23 @@ def _raw_signal_was_promoted(*, lineage: dict[str, Any], arbitration: dict[str, 
 
 
 def _raw_signal_rejection_reason(*, row: dict[str, Any], lineage: dict[str, Any], arbitration: dict[str, Any]) -> str:
-    if str(arbitration.get("portfolio_scoring_status") or "").strip().upper() == "SCORED" and int(arbitration.get("portfolio_score_rank") or 0) > 0:
-        if not lineage or lineage.get("consumed_by_eod") is not True:
-            return "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY"
     for value in (
         arbitration.get("rejection_reason"),
         row.get("rejection_reason"),
+        arbitration.get("score_unavailable_reason"),
         lineage.get("promotion_reason"),
     ):
         text = str(value or "").strip().upper()
         if text:
             return text
+    scoring_status = str(arbitration.get("portfolio_scoring_status") or arbitration.get("score_status") or "").strip().upper()
+    try:
+        rank = int(arbitration.get("portfolio_score_rank") if arbitration.get("portfolio_score_rank") is not None else arbitration.get("rank") or 0)
+    except (TypeError, ValueError):
+        rank = 0
+    if scoring_status == "SCORED" and rank > 0:
+        if not lineage or lineage.get("consumed_by_eod") is not True:
+            return "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY"
     block_reasons = [str(code).strip().upper() for code in lineage.get("block_reasons") or [] if str(code).strip()]
     if "RAW_CANDIDATES_EXISTED_NOT_CONSUMED" in block_reasons:
         return "RAW_CANDIDATES_EXISTED_NOT_CONSUMED"
@@ -783,7 +1182,7 @@ def _raw_signal_rejection_reason(*, row: dict[str, Any], lineage: dict[str, Any]
 
 def _raw_signal_rejection_stage(rejection_reason: str) -> str:
     reason = str(rejection_reason or "").upper()
-    if reason.startswith("PORTFOLIO_SCORING"):
+    if reason.startswith("PORTFOLIO_SCORING") or reason in {"NON_CERTIFIED_CANDIDATE_SNAPSHOT", "SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT"}:
         return "PORTFOLIO_SCORING"
     if reason.startswith("PORTFOLIO_GATE"):
         return "PORTFOLIO_GATE"
@@ -799,6 +1198,8 @@ def _raw_signal_human_explanation(*, sleeve_id: str, symbol: str, rejection_reas
     label = f"{sleeve_id} produced a raw {symbol or 'UNKNOWN'} signal"
     if reason == "PORTFOLIO_SCORING_MISSING_INTENT_SCORE":
         return f"{label}, but it was not promoted because portfolio scoring did not produce a score for that intent. Aegis failed closed instead of showing an unscored opportunity."
+    if reason in {"NON_CERTIFIED_CANDIDATE_SNAPSHOT", "SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT"}:
+        return f"{label}, but portfolio scoring marked it non-executable because the candidate snapshot was not certified. Aegis failed closed instead of showing a non-certified opportunity."
     if reason == "RAW_CANDIDATES_EXISTED_NOT_CONSUMED":
         return f"{label}, but the EOD/opportunity pipeline did not consume raw candidates into the promoted candidate set."
     if reason == "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY":
@@ -823,6 +1224,8 @@ def _raw_signal_next_action(rejection_reason: str) -> str:
     reason = str(rejection_reason or "").upper()
     if reason == "PORTFOLIO_SCORING_MISSING_INTENT_SCORE":
         return "Regenerate portfolio scoring/intent arbitration, then rerun candidate diagnostics; do not approve this raw signal manually."
+    if reason in {"NON_CERTIFIED_CANDIDATE_SNAPSHOT", "SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT"}:
+        return "Run governed certification/promotion producers and rerun candidate diagnostics; do not approve this raw signal manually."
     if reason == "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY":
         return "Define or run the governed selected-intent-to-opportunity promotion path; do not manually approve or fabricate this raw signal."
     if reason in {"RAW_CANDIDATES_EXISTED_NOT_CONSUMED", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE"}:
@@ -834,7 +1237,7 @@ def _raw_signal_next_action(rejection_reason: str) -> str:
 
 def _raw_signal_rejection_classification(rejection_reason: str) -> str:
     reason = str(rejection_reason or "").upper()
-    if reason in {"PORTFOLIO_SCORING_MISSING_INTENT_SCORE", "MARKET_SNAPSHOT_PARTIAL", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE", "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY"}:
+    if reason in {"PORTFOLIO_SCORING_MISSING_INTENT_SCORE", "NON_CERTIFIED_CANDIDATE_SNAPSHOT", "SCORING_NOT_EXECUTABLE_NON_CERTIFIED_INPUT", "MARKET_SNAPSHOT_PARTIAL", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE", "SELECTED_INTENT_NOT_PROMOTED_TO_OPPORTUNITY"}:
         return "SAFETY_RELATED"
     if reason in {"RAW_CANDIDATES_EXISTED_NOT_CONSUMED", "RAW_SIGNAL_NOT_PROMOTED"}:
         return "ERROR"
@@ -847,6 +1250,17 @@ def _optional_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().upper() in {"1", "TRUE", "YES", "ALLOW", "ALLOWED"}
+
+
+def _promotion_gate_failed(payload: dict[str, Any]) -> bool:
+    status = str(payload.get("status") or payload.get("promotion_status") or "").strip().upper() if isinstance(payload, dict) else ""
+    return status not in {"", "PROMOTED", "PROMOTED_TO_OPERATOR_REVIEW", "OK", "PASS"}
 
 
 def _raw_signal_rejections_by_sleeve(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -872,7 +1286,6 @@ def _sleeve_rows(
 ) -> list[dict[str, Any]]:
     inventory_by_id = {row["sleeve_id"]: row for row in inventory.get("registered_sleeves") or [] if isinstance(row, dict)}
     all_sleeves = sorted(set(expected_sleeves) | set(run_sleeves) | set(candidate_counts) | set(sleeve_eval_by_id) | {key for key in rejected_by_sleeve if key != "UNKNOWN"})
-    all_sleeves = [sleeve for sleeve in all_sleeves if sleeve != SIMULATOR_ENGINE_ID]
     if not all_sleeves and rejected_by_sleeve.get("UNKNOWN"):
         all_sleeves = ["UNKNOWN"]
     rows = []
@@ -890,11 +1303,18 @@ def _sleeve_rows(
         raw_signal_rejections = raw_signal_rejections_by_sleeve.get(sleeve, [])
         reasons = rejected_by_sleeve.get(sleeve, [])
         reasons = _merge_unique(reasons, [str(row.get("rejection_reason") or "") for row in raw_signal_rejections])
+        detail_reason_codes = _merge_unique([], [str(code) for row in raw_signal_rejections for code in (row.get("detail_reason_codes") if isinstance(row.get("detail_reason_codes"), list) else row.get("entry_reference_price_certification_reason_codes") if isinstance(row.get("entry_reference_price_certification_reason_codes"), list) else [])])
+        reasons = _merge_unique(reasons, detail_reason_codes)
         reasons = _merge_unique(
             reasons,
             [] if raw_signal_rejections else _evaluation_rejection_reasons(eval_row=eval_row, run_status=run_status, candidate_count=candidate_count, raw_signal_count=raw_signal_count),
         )
+        post_contract_reason_codes = list(reasons)
+        post_contract_rejection_count = len(raw_signal_rejections)
         rejected_count = max(len(reasons), len(raw_signal_rejections))
+        if candidate_count > 0 and raw_signal_count > 0 and candidate_count >= raw_signal_count:
+            reasons = []
+            rejected_count = 0
         if raw_signal_count > candidate_count and not reasons and candidate_count == 0 and run_status == "RAN":
             reasons = ["NO_QUALIFYING_SETUP"]
             rejected_count = raw_signal_count
@@ -907,6 +1327,8 @@ def _sleeve_rows(
                 "sleeve_id": sleeve,
                 "expected_today": sleeve in expected_sleeves,
                 "enabled": bool(inventory_row.get("enabled", sleeve in expected_sleeves)),
+                "diagnostic_only": bool(inventory_row.get("diagnostic_only")),
+                "excluded_from_candidate_generation_totals": bool(inventory_row.get("excluded_from_candidate_generation_totals")),
                 "activation_status": inventory_row.get("activation_status", ""),
                 "expected_cadence": inventory_row.get("expected_cadence", ""),
                 "run_status": run_status,
@@ -925,7 +1347,15 @@ def _sleeve_rows(
                 "missing_inputs": missing_inputs,
                 "stale_inputs": stale_inputs,
                 "raw_signal_count": raw_signal_count,
+                "symbols_evaluated": sorted({str(item.get("symbol") or "").strip().upper() for item in raw_signal_rejections if isinstance(item, dict) and str(item.get("symbol") or "").strip()}),
                 "raw_signal_rejections": raw_signal_rejections,
+                "post_contract_rejection_count": post_contract_rejection_count,
+                "post_contract_reason_codes": post_contract_reason_codes,
+                "entry_reference_price_detail_reason_codes": detail_reason_codes,
+                "entry_reference_price_certification_statuses": sorted({str(row.get("entry_reference_price_certification_status") or "").strip().upper() for row in raw_signal_rejections if str(row.get("entry_reference_price_certification_status") or "").strip()}),
+                "entry_reference_price_source_artifacts": sorted({str(row.get("entry_reference_price_source_path") or "").strip() for row in raw_signal_rejections if str(row.get("entry_reference_price_source_path") or "").strip()}),
+                "entry_reference_price_timestamps": sorted({str(row.get("entry_reference_price_timestamp_utc") or "").strip() for row in raw_signal_rejections if str(row.get("entry_reference_price_timestamp_utc") or "").strip()}),
+                "entry_reference_price_safe_repair_available": any(bool(row.get("entry_reference_price_safe_repair_available")) for row in raw_signal_rejections),
                 "candidate_count": candidate_count,
                 "rejected_count": rejected_count,
                 "rejection_reasons": reasons,

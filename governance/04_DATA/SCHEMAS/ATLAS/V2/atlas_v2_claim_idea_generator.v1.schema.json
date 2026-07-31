@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_claim_idea_generator.v1.schema.json",
+  "title": "Atlas V2 Claim Idea Generator V1",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/GeneratedResearchClaim"
+    },
+    {
+      "$ref": "#/$defs/ClaimGenerationRun"
+    },
+    {
+      "$ref": "#/$defs/ClaimGenerationSourceSummary"
+    }
+  ],
+  "$defs": {
+    "SourceType": {
+      "enum": [
+        "HISTORICAL_FAILURE",
+        "HISTORICAL_CONTRADICTION",
+        "HISTORICAL_DECISION",
+        "HISTORICAL_RESEARCH_OUTCOME",
+        "MECHANISM_REGISTRY",
+        "CONTRARIAN_GAP",
+        "TRANSCRIPT_CLAIM",
+        "PRIOR_EXPERIENCE_EVENT"
+      ]
+    },
+    "MechanismFamily": {
+      "enum": [
+        "OPENING_RANGE",
+        "BREAKOUT",
+        "MEAN_REVERSION",
+        "TREND_CONTINUATION",
+        "LIQUIDITY_SWEEP",
+        "VOLATILITY_EXPANSION",
+        "PULLBACK",
+        "MOMENTUM",
+        "VWAP_OR_AVERAGE_RECLAIM",
+        "ATR_FILTER",
+        "SESSION_TIMING",
+        "UNKNOWN"
+      ]
+    },
+    "Transition": {
+      "type": "object",
+      "required": [
+        "transitioned_at",
+        "from_status",
+        "to_status",
+        "reason",
+        "triggering_object"
+      ],
+      "properties": {
+        "transitioned_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_status": {
+          "type": "string"
+        },
+        "to_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "triggering_object": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": [
+        "object_type",
+        "created_at",
+        "transition_history"
+      ],
+      "properties": {
+        "object_type": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transition_history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Transition"
+          }
+        }
+      }
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "Score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "GeneratedResearchClaim": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "generated_claim_id",
+            "source_type",
+            "source_reference",
+            "mechanism_family",
+            "claim_text",
+            "rationale",
+            "novelty_basis",
+            "expected_learning_value",
+            "uncertainty_score",
+            "contrarian_prompt",
+            "intended_testability",
+            "authority_boundary_acknowledged",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "GeneratedResearchClaim"
+            },
+            "generated_claim_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "source_reference": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_event_ids": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1}
+            },
+            "source_mechanism_ids": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1}
+            },
+            "mechanism_family": {
+              "$ref": "#/$defs/MechanismFamily"
+            },
+            "claim_text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rationale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "novelty_basis": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_learning_value": {
+              "$ref": "#/$defs/Score"
+            },
+            "uncertainty_score": {
+              "$ref": "#/$defs/Score"
+            },
+            "contrarian_prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "intended_testability": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_boundary_acknowledged": {
+              "const": true
+            },
+            "status": {
+              "enum": [
+                "GENERATED",
+                "DUPLICATE",
+                "INSUFFICIENT_BASIS",
+                "UNSUPPORTED_MECHANISM",
+                "REJECTED_LOW_TESTABILITY"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ClaimGenerationRun": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "run_id",
+            "source_inputs",
+            "max_claims",
+            "claims_generated",
+            "duplicates_detected",
+            "insufficient_basis_count",
+            "mechanism_distribution",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "ClaimGenerationRun"
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_inputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "max_claims": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "claims_generated": {
+              "$ref": "#/$defs/Count"
+            },
+            "duplicates_detected": {
+              "$ref": "#/$defs/Count"
+            },
+            "insufficient_basis_count": {
+              "$ref": "#/$defs/Count"
+            },
+            "mechanism_distribution": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "status": {
+              "enum": [
+                "COMPLETED",
+                "COMPLETED_WITH_REJECTIONS",
+                "NO_ELIGIBLE_SOURCES"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ClaimGenerationSourceSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "summary_id",
+            "run_id",
+            "source_type",
+            "source_count",
+            "generated_count",
+            "duplicate_count",
+            "rejected_count"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "ClaimGenerationSourceSummary"
+            },
+            "summary_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "source_count": {
+              "$ref": "#/$defs/Count"
+            },
+            "generated_count": {
+              "$ref": "#/$defs/Count"
+            },
+            "duplicate_count": {
+              "$ref": "#/$defs/Count"
+            },
+            "rejected_count": {
+              "$ref": "#/$defs/Count"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

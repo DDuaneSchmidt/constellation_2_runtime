@@ -1,0 +1,11 @@
+object_type: observation
+storage: yaml
+directory: observations
+filename_pattern: OBS_XXXX.yaml
+required_fields:
+  - id
+  - date
+  - observation
+  - why_interesting
+  - source
+  - status

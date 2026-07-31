@@ -1,0 +1,10 @@
+id: KNW_0008
+statement: Technical Strategy Factory claims require relationship-specific support, not broad or baseline evidence.
+evidence:
+  - OBS_0003
+  - Alpha factory evidence test v2
+  - Alpha factory POC review
+limitations:
+  - Factory evidence remains early and fixture-dependent
+why_it_matters: Technical claims should not be promoted from weak or false-positive-prone evidence.
+status: SUPPORTED

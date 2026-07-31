@@ -51,8 +51,8 @@ def test_shell_frontend_uses_path_routes_and_shared_kernel_primitives() -> None:
 
 def test_root_html_frames_single_operator_shell_not_dashboard() -> None:
     html = (ROOT / "constellation_2" / "phaseL" / "ui" / "static" / "index.html").read_text(encoding="utf-8")
-    assert "Kernel-Aligned Operator Console" in html
-    assert "Kernel Workspaces" in html
+    assert "Personal Investment Intelligence" in html
+    assert "Daily Navigation" in html
     assert "Single-entry Operations + Advisory Surface" not in html
 
 

@@ -10,6 +10,7 @@ from constellation_2.phaseD.lib.canon_json_v1 import (
     canonical_sha256_hex_v1,
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.aegis.research_lab.research_validation_engine_v1 import resolve_research_promotion_eligibility_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -170,13 +171,14 @@ def _apply_candidate_lane_fields(rows: list[dict[str, Any]], fields: dict[str, A
         enriched.append(next_row)
     return enriched
 
-def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str, Any], run_mode: str = "") -> list[dict[str, Any]]:
+def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str, Any], truth_root: Path, run_mode: str = "") -> list[dict[str, Any]]:
     engine_id = _text(outcome.get("engine_id") or outcome.get("sleeve_id"))
     output_intents = [row for row in _list(outcome.get("output_intents")) if isinstance(row, dict)]
     reason_codes = _strings(outcome.get("reason_codes"))
     lifecycle_reason_codes = _strings(outcome.get("lifecycle_reason_codes"))
     input_paths = _input_paths(outcome)
     output_paths = _output_paths(outcome)
+    research_gate = _research_validation_fields_for_outcome(truth_root=truth_root, day_utc=day_utc, outcome=outcome)
     if output_intents:
         rows: list[dict[str, Any]] = []
         for intent in output_intents:
@@ -198,8 +200,10 @@ def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str
                 "allowed_by_portfolio_gate": False,
                 "input_artifact_paths": input_paths,
                 "output_artifact_paths": output_paths,
+                **research_gate,
                 **_candidate_mode_fields(run_mode),
             }
+            row = _apply_research_validation_to_candidate_row(row)
             row["lineage_hash"] = _row_lineage_hash(row)
             rows.append(row)
         return rows
@@ -224,12 +228,65 @@ def _candidate_rows_from_outcome(*, day_utc: str, run_id: str, outcome: dict[str
             "allowed_by_portfolio_gate": False,
             "input_artifact_paths": input_paths,
             "output_artifact_paths": output_paths,
+            **research_gate,
             **_candidate_mode_fields(run_mode),
         }
+        row = _apply_research_validation_to_candidate_row(row)
         row["lineage_hash"] = _row_lineage_hash(row)
         rows.append(row)
     return rows
 
+
+
+def _research_hypothesis_id_from_outcome(outcome: dict[str, Any]) -> str:
+    for key in ("hypothesis_id", "source_hypothesis_id", "research_hypothesis_id"):
+        text = _text(outcome.get(key))
+        if text:
+            return text
+    for row in _list(outcome.get("output_intents")):
+        if isinstance(row, dict):
+            for key in ("hypothesis_id", "source_hypothesis_id", "research_hypothesis_id"):
+                text = _text(row.get(key))
+                if text:
+                    return text
+    return ""
+
+
+def _research_validation_fields_for_outcome(*, truth_root: Path, day_utc: str, outcome: dict[str, Any]) -> dict[str, Any]:
+    hypothesis_id = _research_hypothesis_id_from_outcome(outcome)
+    hypothesis_version = _text(outcome.get("hypothesis_version")) or "v1"
+    if not hypothesis_id:
+        return {
+            "research_validation_required": False,
+            "hypothesis_id": "",
+            "hypothesis_version": "",
+            "research_validation_result_id": "",
+            "research_promotion_gate_status": "NOT_RESEARCH_DERIVED",
+            "research_promotion_gate_hash": "",
+            "research_validation_enforcement_status": "NOT_RESEARCH_DERIVED",
+        }
+    return resolve_research_promotion_eligibility_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        hypothesis_id=hypothesis_id,
+        hypothesis_version=hypothesis_version,
+    )
+
+
+def _apply_research_validation_to_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
+    if not row.get("research_validation_required"):
+        return row
+    if row.get("research_validation_enforcement_status") == "PASS":
+        return row
+    next_row = dict(row)
+    next_row["status"] = "SUPPRESSED"
+    reason = _text(next_row.get("research_validation_enforcement_status")) or "REJECTED_RESEARCH_VALIDATION_MISSING"
+    next_row["rejection_reason"] = reason
+    next_row["reason_codes"] = sorted(set(_strings(next_row.get("reason_codes")) + [reason]))
+    next_row["manual_capture_eligible"] = False
+    next_row["execution_eligible"] = False
+    next_row["read_only"] = True
+    return next_row
 
 def _apply_portfolio_gate(candidate_rows: list[dict[str, Any]], portfolio_gate: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(portfolio_gate, dict):
@@ -333,7 +390,7 @@ def build_candidate_generation_manifest_v1(
     rows: list[dict[str, Any]] = []
     for outcome in outcomes:
         if isinstance(outcome, dict):
-            rows.extend(_candidate_rows_from_outcome(day_utc=day_utc, run_id=run_id, outcome=outcome, run_mode=run_mode))
+            rows.extend(_candidate_rows_from_outcome(day_utc=day_utc, run_id=run_id, outcome=outcome, truth_root=Path(truth_root), run_mode=run_mode))
     rows = _apply_portfolio_gate(rows, portfolio_gate)
     lineage_fields = _market_data_lineage_fields(Path(truth_root), day_utc, run_mode)
     rows = _apply_candidate_lane_fields(rows, lineage_fields)

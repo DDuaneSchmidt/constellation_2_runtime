@@ -1,0 +1,366 @@
+{
+  "schema_id": "research_adversary_historical_failure_eval_set_v1",
+  "set_id": "historical_failure_eval_set_001",
+  "created_at": "2026-06-05",
+  "purpose": "Curated historical failure recall test set for Research Adversary evaluation.",
+  "authority_boundary": {
+    "evaluation_data_only": true,
+    "alters_original_failure_records": false,
+    "creates_candidates": false,
+    "changes_replay_state": false,
+    "changes_qualification_state": false,
+    "changes_governance_state": false,
+    "changes_paper_forward_state": false,
+    "trade_or_capital_authority": false
+  },
+  "source_notes": [
+    "Cases FAIL_0004 through FAIL_0016 are derived from research_journal/failures/*.yaml.",
+    "Registry cases are derived from reports/atlas_v2_research_os/failures/failure_registry.jsonl and failure_index.json.",
+    "This file is a derived evaluation set only and does not mutate source failure records."
+  ],
+  "case_count": 19,
+  "cases": [
+    {
+      "failure_id": "FAIL_0004",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Architecture maturity was mistaken for evidence maturity.",
+      "known_constraint": "Architecture readiness and empirical validation mature on different timelines.",
+      "hidden_assumption": "A mature architecture implies comparable maturity in outcome evidence, sleeve evidence, and factory claims.",
+      "how_it_was_discovered": "Journal failure record noted evidence maturity lagged architecture readiness across outcomes, sleeves, and factory claims.",
+      "expected_adversary_detection_terms": [
+        "architecture versus evidence",
+        "empirical validation lag",
+        "evidence maturity",
+        "runtime readiness is not validation"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should separate structural readiness from proof of research usefulness."
+    },
+    {
+      "failure_id": "FAIL_0005",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Paper workflow progress was mistaken for runtime readiness progress.",
+      "known_constraint": "Paper lifecycle artifacts and live readiness gates answer different governance questions.",
+      "hidden_assumption": "More paper tracking artifacts mean authority readiness has improved.",
+      "how_it_was_discovered": "Journal failure record found paper tracking progressed while runtime authority remained blocked.",
+      "expected_adversary_detection_terms": [
+        "paper progress is not readiness",
+        "live readiness gate",
+        "authority remains blocked",
+        "separate paper lifecycle from runtime authority"
+      ],
+      "severity": "CRITICAL",
+      "notes": "Adversary should flag authority creep when paper artifacts are used as readiness evidence."
+    },
+    {
+      "failure_id": "FAIL_0006",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Observation accumulation was mistaken for meaningful outcome evidence.",
+      "known_constraint": "Outcome maturation requires elapsed time and closed samples.",
+      "hidden_assumption": "Accumulated observations and open paper positions quickly convert into resolved evidence.",
+      "how_it_was_discovered": "Journal failure record found observations and open paper positions accumulated faster than closed outcomes.",
+      "expected_adversary_detection_terms": [
+        "open observations are not outcomes",
+        "outcome maturation",
+        "closed sample requirement",
+        "resolved evidence"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should ask whether evidence is resolved rather than merely accumulated."
+    },
+    {
+      "failure_id": "FAIL_0007",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Candidate volume was treated as a proxy for candidate quality.",
+      "known_constraint": "Certification, portfolio gates, and evidence quality limit useful candidate flow.",
+      "hidden_assumption": "A larger raw signal or candidate count indicates better research progress.",
+      "how_it_was_discovered": "Journal failure record found volume ignored governance and validation blockers.",
+      "expected_adversary_detection_terms": [
+        "volume is not quality",
+        "certification blocker",
+        "portfolio gate",
+        "evidence quality before throughput"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should challenge throughput claims that lack quality evidence."
+    },
+    {
+      "failure_id": "FAIL_0008",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Standalone technical-indicator claims failed fixture review.",
+      "known_constraint": "Broad support and baseline recoverability do not prove relationship-specific signal quality.",
+      "hidden_assumption": "A technical indicator pattern that appears broadly supported will survive relationship-specific review.",
+      "how_it_was_discovered": "Journal failure record found factory evidence was blocked, false-positive-prone, or insufficient.",
+      "expected_adversary_detection_terms": [
+        "false positive",
+        "relationship-specific support",
+        "baseline recoverability",
+        "fixture review"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should distinguish generic technical patterns from mechanism-specific evidence."
+    },
+    {
+      "failure_id": "FAIL_0009",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Active sleeves did not produce broadly distributed candidate flow.",
+      "known_constraint": "Some sleeves had no signals or lacked required data.",
+      "hidden_assumption": "Active sleeve status implies a sleeve can produce candidate flow.",
+      "how_it_was_discovered": "Journal failure record found candidate production concentrated in a subset of sleeves while others were dormant or blocked.",
+      "expected_adversary_detection_terms": [
+        "sleeve concentration",
+        "dormant sleeve",
+        "missing required data",
+        "no signal condition"
+      ],
+      "severity": "MEDIUM",
+      "notes": "Adversary should check whether source mechanisms are operationally capable before interpreting low output."
+    },
+    {
+      "failure_id": "FAIL_0010",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Research artifacts existed, but no hypotheses were ready for capital review.",
+      "known_constraint": "Evidence remained underpowered or blocked despite richer artifacts.",
+      "hidden_assumption": "Enough research documentation implies readiness for capital review.",
+      "how_it_was_discovered": "Journal failure record found governance still had no hypotheses ready for capital review.",
+      "expected_adversary_detection_terms": [
+        "underpowered evidence",
+        "blocked evidence",
+        "attention allocation not capital review",
+        "capital review not authorized"
+      ],
+      "severity": "CRITICAL",
+      "notes": "Adversary must reject any inference from artifact richness to capital authority."
+    },
+    {
+      "failure_id": "FAIL_0011",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Legacy compatibility layers could not be retired by architecture decision alone.",
+      "known_constraint": "Runtime truth still consumed legacy artifacts.",
+      "hidden_assumption": "Desired architecture state is enough to retire legacy runtime dependencies.",
+      "how_it_was_discovered": "Journal failure record found deprecation readiness depended on runtime dependencies.",
+      "expected_adversary_detection_terms": [
+        "runtime dependency",
+        "verified runtime truth",
+        "legacy artifact still consumed",
+        "deprecation readiness"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should ask whether consumers still rely on supposedly deprecated evidence."
+    },
+    {
+      "failure_id": "FAIL_0012",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Macro readiness gaps could not be repaired by expanding workflow behavior.",
+      "known_constraint": "Missing or immature data cannot be repaired by inventing authority.",
+      "hidden_assumption": "Workflow expansion can compensate for absent macro readiness evidence.",
+      "how_it_was_discovered": "Journal failure record found governance kept macro readiness research-only and blocked fabrication or autonomous sleeve creation.",
+      "expected_adversary_detection_terms": [
+        "missing data",
+        "immature data",
+        "research-only",
+        "do not fabricate authority"
+      ],
+      "severity": "CRITICAL",
+      "notes": "Adversary should treat missing evidence as a constraint, not a reason to expand authority."
+    },
+    {
+      "failure_id": "FAIL_0013",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "A clean audit state was mistaken for mature research understanding.",
+      "known_constraint": "Auditability and understanding maturity are related but not identical.",
+      "hidden_assumption": "Passing or mostly clean audits means the research conclusions are understood.",
+      "how_it_was_discovered": "Journal failure record found daily research integrity still passed with warnings and runtime readiness remained blocked.",
+      "expected_adversary_detection_terms": [
+        "auditability is not understanding",
+        "warnings matter",
+        "runtime readiness blocked",
+        "maturity not proven"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should preserve warnings as evidence for follow-up checks."
+    },
+    {
+      "failure_id": "FAIL_0014",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Low sleeve candidate production was misdiagnosed as poor sleeve quality.",
+      "known_constraint": "Non-production can reflect healthy no-candidate states, valid no-signal states, data needs, or conversion bottlenecks.",
+      "hidden_assumption": "Low output from a sleeve means the sleeve itself is low quality.",
+      "how_it_was_discovered": "Journal failure record found reviewed artifacts did not support poor sleeve quality as the primary cause.",
+      "expected_adversary_detection_terms": [
+        "misdiagnosed sleeve quality",
+        "valid no-signal",
+        "data need",
+        "conversion rejection"
+      ],
+      "severity": "MEDIUM",
+      "notes": "Adversary should demand causal separation before assigning quality blame."
+    },
+    {
+      "failure_id": "FAIL_0015",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Recurring integrity warnings were treated as operational noise.",
+      "known_constraint": "Non-blocking warning status can still represent persistent candidate-integrity and sleeve-health issues.",
+      "hidden_assumption": "A warning that does not block today can be ignored as a cleared or one-day condition.",
+      "how_it_was_discovered": "Journal failure record found warnings recurred for three consecutive available days and escalated into failed integrity audit when graph readiness became blocked.",
+      "expected_adversary_detection_terms": [
+        "recurring warnings",
+        "non-blocking does not mean clean",
+        "candidate integrity follow-through",
+        "graph readiness blocked"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should check recurrence and escalation, not just current pass/fail state."
+    },
+    {
+      "failure_id": "FAIL_0016",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Standalone technical-indicator evidence did not support durable Technical Strategy Factory claims.",
+      "known_constraint": "Claims lacked relationship-specific support, out-of-fixture generalization, or separation from naive baselines.",
+      "hidden_assumption": "Standalone indicator evidence can support durable strategy claims without mechanism and regime specificity.",
+      "how_it_was_discovered": "Journal failure record found standalone and broad discovery claims remained unsupported, false-positive-prone, baseline-recoverable, or non-generalizing.",
+      "expected_adversary_detection_terms": [
+        "out-of-fixture generalization",
+        "naive baseline",
+        "relationship-specific",
+        "mechanism and regime context"
+      ],
+      "severity": "HIGH",
+      "notes": "Adversary should require context-specific evidence before accepting technical structures."
+    },
+    {
+      "failure_id": "failure-demo-opening-range",
+      "source_observation_id": null,
+      "source_claim_id": "q-demo-memory-opening-range",
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Opening-range memory carried a regime mismatch warning.",
+      "known_constraint": "Opening-range evidence was generated-only and not validation.",
+      "hidden_assumption": "A repeated opening-range memory can be reused without testing regime compatibility.",
+      "how_it_was_discovered": "Atlas v2 failure memory recorded REGIME_MISMATCH with retirement status ACTIVE_WARNING.",
+      "expected_adversary_detection_terms": [
+        "regime mismatch",
+        "generated-only",
+        "active warning",
+        "not validation"
+      ],
+      "severity": "MEDIUM",
+      "notes": "Derived from reports/atlas_v2_research_os/memory/failure_patterns.json."
+    },
+    {
+      "failure_id": "failure-2026-06-04-worker-no-compatible-connected-worker-c5b07de5e574",
+      "source_observation_id": null,
+      "source_claim_id": "q-demo-memory-opening-range",
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Selected backlog item had no compatible connected worker.",
+      "known_constraint": "Research item execution requires a compatible connected worker before useful processing can occur.",
+      "hidden_assumption": "A ready backlog item with an artifact can be executed by the available worker set.",
+      "how_it_was_discovered": "Atlas v2 failure registry recorded NO_COMPATIBLE_CONNECTED_WORKER for backlog item lf-regime-gap-bdc03962e812.",
+      "expected_adversary_detection_terms": [
+        "no compatible worker",
+        "worker capability mismatch",
+        "backlog item not executable",
+        "connected worker requirement"
+      ],
+      "severity": "ERROR",
+      "notes": "One representative case selected from repeated worker compatibility failures."
+    },
+    {
+      "failure_id": "failure-2026-06-05-autonomous_research-artifactstoreerror-64d655a35e43",
+      "source_observation_id": null,
+      "source_claim_id": "q-throughput-smoke-claim-20260605",
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Priority or certification path referenced a missing artifact.",
+      "known_constraint": "Artifact lineage must resolve before priority influence or certification can run.",
+      "hidden_assumption": "Referenced source artifacts exist and can be loaded from the artifact store.",
+      "how_it_was_discovered": "Atlas v2 failure registry stack trace recorded ArtifactStoreError: artifact not found: artifact-demo-opening-range.",
+      "expected_adversary_detection_terms": [
+        "missing artifact",
+        "artifact lineage",
+        "artifact store",
+        "priority influence"
+      ],
+      "severity": "ERROR",
+      "notes": "Derived from autonomous research ArtifactStoreError in failure_registry.jsonl."
+    },
+    {
+      "failure_id": "failure-2026-06-05-autonomous_research-artifactstoreerror-c54059bb338d",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Input artifact loading failed for a selected human-review failure-analysis item.",
+      "known_constraint": "Selected backlog work cannot proceed when declared input artifacts are absent.",
+      "hidden_assumption": "Backlog selection implies all input artifacts are available.",
+      "how_it_was_discovered": "Atlas v2 failure registry stack trace recorded ArtifactStoreError: artifact not found: artifact-demo-midday-chop.",
+      "expected_adversary_detection_terms": [
+        "input artifact missing",
+        "backlog input unavailable",
+        "artifact-demo-midday-chop",
+        "load input artifacts"
+      ],
+      "severity": "ERROR",
+      "notes": "Separate from the opening-range artifact miss because the failure occurred during direct input loading."
+    },
+    {
+      "failure_id": "failure-2026-06-05-autonomous_research-safety-gate-failed-794b177f0415",
+      "source_observation_id": null,
+      "source_claim_id": "ros-grc-0fa5779043aa8a0a-a8953ab172864aa1",
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Autonomous research failed closed after certification failure despite lineage and governance passing.",
+      "known_constraint": "All required safety gates must pass; lineage and governance pass status do not compensate for certification failure.",
+      "hidden_assumption": "Passing lineage and governance is enough for autonomous research execution to proceed.",
+      "how_it_was_discovered": "Latest Atlas v2 failure report recorded SAFETY_GATE_FAILED with certification_status FAIL, governance_status PASS, and lineage_status PASS.",
+      "expected_adversary_detection_terms": [
+        "certification failed",
+        "safety gate failed",
+        "failed closed",
+        "partial gate pass is insufficient"
+      ],
+      "severity": "ERROR",
+      "notes": "Latest unresolved autonomous research failure as of the source registry."
+    },
+    {
+      "failure_id": "failure-2026-06-05-certification-certification-block-0d8cd9475db6",
+      "source_observation_id": null,
+      "source_claim_id": null,
+      "source_hypothesis_id": null,
+      "known_failure_mode": "Research OS certification remained blocked even after blocker count dropped.",
+      "known_constraint": "Reduced blocker count is not equivalent to certification pass.",
+      "hidden_assumption": "A smaller blocker count means the certification state is close enough for execution.",
+      "how_it_was_discovered": "Atlas v2 failure registry recorded CERTIFICATION_BLOCK with blocker_count 3 and warning_count 1.",
+      "expected_adversary_detection_terms": [
+        "certification block",
+        "blocker count",
+        "warnings still present",
+        "not certified"
+      ],
+      "severity": "CERTIFICATION_BLOCK",
+      "notes": "Selected to test whether the adversary catches residual blockers rather than only high blocker counts."
+    }
+  ]
+}

@@ -254,3 +254,38 @@ def test_every_raw_hypothesis_maps_to_exactly_one_visible_card() -> None:
     assert model["unmapped_hypothesis_ids"] == []
     assert all(section["count"] == len(section["visible_items"]) for section in model["sections"].values())
     assert any(item["hypothesis_id"] == "hyp_ambiguous" for item in model["sections"]["ready_to_start"]["visible_items"])
+
+
+def test_pipeline_result_review_without_run_ledger_shows_recommendation_ready() -> None:
+    projection = research_run_projection_for_hypothesis_v1(
+        {
+            "hypothesis_id": "hyp_result_review",
+            "current_gate": "RESULT_REVIEW",
+            "current_status": "NEEDS_OPERATOR",
+            "latest_result_summary": "Evidence-backed findings are ready.",
+        },
+        [],
+    )
+
+    assert projection["user_facing_status"] == "Recommendation Ready"
+    assert projection["primary_action_label"] == "View Recommendation"
+    assert "operator review" in projection["user_facing_explanation"]
+
+
+def test_hypothesis_view_items_preserve_command_contracts() -> None:
+    rows = [
+        {
+            "hypothesis_id": "hyp_ready",
+            "title": "Ready idea",
+            "user_facing_status": "Ready to Start",
+            "primary_command": {"command_id": "START_RESEARCH", "label": "Start Research", "enabled": True},
+            "secondary_commands": [{"command_id": "VIEW_BLOCKER", "label": "View Blocker"}],
+        }
+    ]
+
+    model = build_hypothesis_view_model_v1(rows)
+    item = model["sections"]["ready_to_start"]["visible_items"][0]
+
+    assert item["primary_command"]["command_id"] == "START_RESEARCH"
+    assert item["primary_command"]["enabled"] is True
+    assert item["secondary_commands"][0]["command_id"] == "VIEW_BLOCKER"

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/portal_runtime_model.v1.schema.json",
+  "title": "Aegis Portal Runtime Model v1",
+  "type": "object",
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "day_utc",
+    "generated_at",
+    "generator_name",
+    "generator_version",
+    "git_commit_hash",
+    "input_artifact_hashes",
+    "output_hash",
+    "portal_status",
+    "derivation_source",
+    "readiness_inference_policy",
+    "runtime_truth",
+    "capabilities",
+    "surfaces",
+    "blockers",
+    "safety_invariants",
+    "graph_status",
+    "runtime_readiness_status",
+    "top_blockers",
+    "evidence_hash_verification",
+    "allowed_actions",
+    "forbidden_actions",
+    "do_not_claim"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "portal_runtime_model"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generator_name": {
+      "const": "build_aegis_verified_runtime_graph_v1"
+    },
+    "generator_version": {
+      "const": "aegis_verified_runtime_graph.v1"
+    },
+    "git_commit_hash": {
+      "type": "string"
+    },
+    "input_artifact_hashes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "output_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "portal_status": {
+      "enum": [
+        "READY",
+        "BLOCKED"
+      ]
+    },
+    "derivation_source": {
+      "const": "verified_runtime_graph.v1.json"
+    },
+    "readiness_inference_policy": {
+      "const": "NO_INDEPENDENT_PORTAL_READINESS_INFERENCE"
+    },
+    "runtime_truth": {
+      "type": "object"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "safety_invariants": {
+      "type": "object"
+    },
+    "graph_status": {
+      "type": "string"
+    },
+    "runtime_readiness_status": {
+      "type": "string"
+    },
+    "top_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_hash_verification": {
+      "type": "object"
+    },
+    "allowed_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "forbidden_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "do_not_claim": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

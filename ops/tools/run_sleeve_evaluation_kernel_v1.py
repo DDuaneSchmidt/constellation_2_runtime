@@ -267,6 +267,188 @@ def _allowed_symbols(row: dict[str, Any]) -> list[str]:
     return [str(symbol).strip().upper() for symbol in raw if str(symbol).strip()]
 
 
+
+
+def _json_objects_from_text(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in str(text or "").splitlines():
+        start = line.find("{")
+        if start < 0:
+            continue
+        chunk = line[start:].strip()
+        try:
+            value = json.loads(chunk)
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except Exception:
+        return None
+
+
+def _nearest_miss_telemetry_from_stdout(*, engine_id: str, stdout: str, requested_symbols: list[str]) -> dict[str, Any]:
+    rows = _json_objects_from_text(stdout)
+    requested = sorted({str(symbol).strip().upper() for symbol in requested_symbols if str(symbol).strip()})
+    if engine_id == "C2_EVENT_DISLOCATION_V1":
+        return _event_dislocation_nearest_miss(rows=rows, requested_symbols=requested)
+    if engine_id == "C2_MEAN_REVERSION_EQ_V1":
+        return _mean_reversion_nearest_miss(rows=rows, requested_symbols=requested)
+    if engine_id == "C2_VOL_INCOME_DEFINED_RISK_V1":
+        return _vol_income_nearest_miss(rows=rows, requested_symbols=requested)
+    return {"status": "NOT_APPLICABLE", "engine_id": engine_id, "nearest_miss_count": 0, "top_nearest_misses": []}
+
+
+def _event_dislocation_nearest_miss(*, rows: list[dict[str, Any]], requested_symbols: list[str]) -> dict[str, Any]:
+    gap_threshold = 0.02
+    range_threshold = 0.03
+    evaluated: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        gap = _float_or_none(row.get("gap_abs_pct"))
+        range_pct = _float_or_none(row.get("range_pct"))
+        if gap is None and range_pct is None:
+            reasons = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+            blocked.append({"symbol": symbol, "status": str(row.get("status") or "NO_INTENT"), "reason_codes": [str(item) for item in reasons]})
+            continue
+        gap_distance = max(0.0, gap_threshold - abs(gap or 0.0))
+        range_distance = max(0.0, range_threshold - (range_pct or 0.0))
+        trigger_distance = min(gap_distance, range_distance)
+        evaluated.append(
+            {
+                "symbol": symbol,
+                "gap_abs_pct": gap,
+                "range_pct": range_pct,
+                "gap_abs_enter": gap_threshold,
+                "range_enter": range_threshold,
+                "gap_distance_to_threshold": gap_distance,
+                "range_distance_to_threshold": range_distance,
+                "trigger_distance_to_threshold": trigger_distance,
+                "nearest_rule": "gap_abs" if gap_distance <= range_distance else "range",
+                "rule": str(row.get("rule") or ""),
+            }
+        )
+    evaluated.sort(key=lambda item: float(item.get("trigger_distance_to_threshold") or 999.0))
+    evaluated_symbols = {str(row.get("symbol") or "") for row in evaluated + blocked}
+    missing = sorted(set(requested_symbols) - evaluated_symbols) if requested_symbols else []
+    return {
+        "schema_id": "sleeve_nearest_miss_telemetry",
+        "schema_version": "v1",
+        "engine_id": "C2_EVENT_DISLOCATION_V1",
+        "status": "COMPLETE" if not missing else "PARTIAL",
+        "requested_symbol_count": len(requested_symbols),
+        "evaluated_symbol_count": len(evaluated),
+        "blocked_symbol_count": len(blocked),
+        "missing_telemetry_symbols": missing,
+        "thresholds": {"gap_abs_enter": gap_threshold, "range_enter": range_threshold},
+        "nearest_miss_count": len(evaluated),
+        "top_nearest_misses": evaluated[:20],
+        "blocked_symbols": blocked[:20],
+    }
+
+
+def _mean_reversion_nearest_miss(*, rows: list[dict[str, Any]], requested_symbols: list[str]) -> dict[str, Any]:
+    threshold = -2.0
+    evaluated: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        z = _float_or_none(row.get("z"))
+        if z is None:
+            reasons = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+            blocked.append({"symbol": symbol, "status": str(row.get("status") or "NO_INTENT"), "reason_codes": [str(item) for item in reasons]})
+            continue
+        distance = max(0.0, z - threshold)
+        evaluated.append(
+            {
+                "symbol": symbol,
+                "z": z,
+                "z_enter": threshold,
+                "distance_to_threshold": distance,
+                "window_days": row.get("window_days"),
+                "mean": _float_or_none(row.get("mean")),
+                "stdev": _float_or_none(row.get("stdev")),
+                "rule": str(row.get("rule") or ""),
+            }
+        )
+    evaluated.sort(key=lambda item: float(item.get("distance_to_threshold") or 999.0))
+    evaluated_symbols = {str(row.get("symbol") or "") for row in evaluated + blocked}
+    missing = sorted(set(requested_symbols) - evaluated_symbols) if requested_symbols else []
+    return {
+        "schema_id": "sleeve_nearest_miss_telemetry",
+        "schema_version": "v1",
+        "engine_id": "C2_MEAN_REVERSION_EQ_V1",
+        "status": "COMPLETE" if not missing else "PARTIAL",
+        "requested_symbol_count": len(requested_symbols),
+        "evaluated_symbol_count": len(evaluated),
+        "blocked_symbol_count": len(blocked),
+        "missing_telemetry_symbols": missing,
+        "thresholds": {"z_enter": threshold},
+        "nearest_miss_count": len(evaluated),
+        "top_nearest_misses": evaluated[:20],
+        "blocked_symbols": blocked[:20],
+    }
+
+
+def _vol_income_nearest_miss(*, rows: list[dict[str, Any]], requested_symbols: list[str]) -> dict[str, Any]:
+    threshold = 0.75
+    evaluated: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        pct_rank = _float_or_none(row.get("pct_rank"))
+        if pct_rank is None:
+            reasons = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+            blocked.append({"symbol": symbol, "status": str(row.get("status") or "NO_INTENT"), "reason_codes": [str(item) for item in reasons]})
+            continue
+        distance = max(0.0, threshold - pct_rank)
+        trend_ok = row.get("trend_ok") is True
+        evaluated.append(
+            {
+                "symbol": symbol,
+                "pct_rank": pct_rank,
+                "enter_percentile": threshold,
+                "distance_to_threshold": distance,
+                "trend_ok": trend_ok,
+                "vol_today": _float_or_none(row.get("vol_today")),
+                "close": _float_or_none(row.get("close")),
+                "sma_filter": _float_or_none(row.get("sma_filter")),
+                "stdev_window": row.get("stdev_window"),
+                "percentile_window": row.get("percentile_window"),
+                "rule": str(row.get("rule") or ""),
+            }
+        )
+    evaluated.sort(key=lambda item: (float(item.get("distance_to_threshold") or 999.0), not bool(item.get("trend_ok"))))
+    evaluated_symbols = {str(row.get("symbol") or "") for row in evaluated + blocked}
+    missing = sorted(set(requested_symbols) - evaluated_symbols) if requested_symbols else []
+    return {
+        "schema_id": "sleeve_nearest_miss_telemetry",
+        "schema_version": "v1",
+        "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+        "status": "COMPLETE" if not missing else "PARTIAL",
+        "requested_symbol_count": len(requested_symbols),
+        "evaluated_symbol_count": len(evaluated),
+        "blocked_symbol_count": len(blocked),
+        "missing_telemetry_symbols": missing,
+        "thresholds": {"enter_percentile": threshold},
+        "nearest_miss_count": len(evaluated),
+        "top_nearest_misses": evaluated[:20],
+        "blocked_symbols": blocked[:20],
+    }
 def _stale_artifact_guard(*, rejected_intents: list[dict[str, Any]], active_symbol_universe: list[str]) -> dict[str, Any]:
     active = sorted({str(symbol).strip().upper() for symbol in active_symbol_universe if str(symbol).strip()})
     active_set = set(active)
@@ -471,6 +653,15 @@ def _requested_registry_symbols(rows: list[dict[str, Any]]) -> list[str]:
     return sorted(requested)
 
 
+
+def _requested_allowed_symbols(rows: list[dict[str, Any]]) -> list[str]:
+    requested: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or _status_from_registry(row) != "ACTIVE":
+            continue
+        requested.update(str(symbol).strip().upper() for symbol in (row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else []) if str(symbol).strip())
+    return sorted(requested)
+
 def align_registry_market_data_symbols_v1(*, intent_truth_root: Path, requested_symbols: list[str]) -> dict[str, Any]:
     requested = sorted({str(symbol).strip().upper() for symbol in requested_symbols if str(symbol).strip()})
     local_root = Path(intent_truth_root).resolve()
@@ -562,12 +753,27 @@ def _market_data_symbol_preflight(*, intent_truth_root: Path, requested_symbols:
     canonical_root = _canonical_truth_root()
     canonical_manifest, canonical_symbols = _manifest_symbols(canonical_root) if str(canonical_root) else (Path(""), set())
     requested = sorted({str(symbol).strip().upper() for symbol in requested_symbols if str(symbol).strip()})
+    _, _local_payload, local_entries = _manifest_file_entries_by_symbol(intent_truth_root)
     missing_local = sorted(symbol for symbol in requested if symbol not in local_symbols)
     present_canonical = sorted(symbol for symbol in missing_local if symbol in canonical_symbols)
     missing_everywhere = sorted(symbol for symbol in missing_local if symbol not in canonical_symbols)
+    hash_mismatches: list[dict[str, str]] = []
+    local_snapshot_root = Path(intent_truth_root).resolve() / "market_data_snapshot_v1"
+    for symbol in requested:
+        for entry in local_entries.get(symbol, []):
+            rel_file = str(entry.get("file") or "").strip()
+            expected_sha = str(entry.get("sha256") or "").strip().lower()
+            file_path = local_snapshot_root / rel_file
+            if rel_file and expected_sha and file_path.is_file():
+                actual_sha = _sha256_file(file_path).lower()
+                if actual_sha != expected_sha:
+                    hash_mismatches.append({"symbol": symbol, "file": rel_file, "expected_sha256": expected_sha, "actual_sha256": actual_sha, "path": str(file_path)})
     status = "PASS"
     blocker = ""
-    if present_canonical:
+    if hash_mismatches:
+        status = "BLOCKED"
+        blocker = "MARKET_DATA_SHA_MISMATCH"
+    elif present_canonical:
         status = "BLOCKED"
         blocker = "TRUTH_ROOT_MARKET_DATA_ALIGNMENT_MISSING"
     elif missing_everywhere:
@@ -586,6 +792,7 @@ def _market_data_symbol_preflight(*, intent_truth_root: Path, requested_symbols:
         "missing_in_local_truth_root": missing_local,
         "present_in_canonical_truth_root": present_canonical,
         "missing_in_both_truth_roots": missing_everywhere,
+        "hash_mismatches": hash_mismatches,
     }
 
 
@@ -952,8 +1159,8 @@ def _evaluate_active_engine(
             rejected_intents.extend(_intent_rows(mismatched_new, artifact_source="PRODUCER_OUTPUT"))
             if exit_code != 0:
                 producer_blocker = _classify_nonzero(stdout, stderr)
-                blocker = "ALLOWED_SYMBOL_MISMATCH" if rejected_intents else producer_blocker
-                reason_codes = sorted(set([blocker, producer_blocker] + (["STALE_MISMATCHED_INTENT_REJECTED"] if rejected_intents else [])))
+                blocker = producer_blocker
+                reason_codes = sorted(set([producer_blocker] + (["STALE_MISMATCHED_INTENT_REJECTED"] if rejected_intents else [])))
                 status = "BLOCKED"
                 actual_intents = _intent_rows(matching_new)
             elif matching_new:
@@ -993,6 +1200,7 @@ def _evaluate_active_engine(
     completed = _now_iso()
     rejected_intents = rejected_intents if "rejected_intents" in locals() else []
     stale_artifact_guard = _stale_artifact_guard(rejected_intents=rejected_intents, active_symbol_universe=allowed_symbols)
+    nearest_miss_telemetry = _nearest_miss_telemetry_from_stdout(engine_id=engine_id, stdout=stdout if "stdout" in locals() else "", requested_symbols=producer_requested_symbols or allowed_symbols)
     output_intents = actual_intents if "actual_intents" in locals() else []
     primary = output_intents[0] if output_intents else {}
     evidence_intent = primary or (rejected_intents[0] if rejected_intents else {})
@@ -1062,6 +1270,7 @@ def _evaluate_active_engine(
         "output_count": len(output_intents),
         "rejected_intents": rejected_intents,
         "rejected_count": len(rejected_intents),
+        "nearest_miss_telemetry": nearest_miss_telemetry,
         "exposure_intent_batch": exposure_intent_batch,
         **stale_artifact_guard,
         "output_intent_path": str(primary.get("intent_path") or ""),
@@ -1199,7 +1408,7 @@ def build_sleeve_evaluation_kernel(*, day_utc: str, truth_root: Path, environmen
         ) if isinstance(row, dict) else row
         for row in raw_rows
     ]
-    align_registry_market_data_symbols_v1(intent_truth_root=intent_truth_root, requested_symbols=_requested_registry_symbols(resolved_rows))
+    align_registry_market_data_symbols_v1(intent_truth_root=intent_truth_root, requested_symbols=_requested_allowed_symbols(resolved_rows))
     existing_by_engine = _existing_intents_by_engine(intent_truth_root=intent_truth_root, day_utc=day_utc)
     readiness_by_id = _readiness_by_sleeve(readiness_path)
     raw_outcomes: list[dict[str, Any]] = []

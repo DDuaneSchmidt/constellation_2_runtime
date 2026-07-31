@@ -58,10 +58,13 @@ from decimal import Decimal, InvalidOperation, getcontext
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()

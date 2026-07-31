@@ -1,0 +1,6 @@
+id: OBS_0007
+date: 2026-06-03
+observation: Candidate generation volume alone did not imply candidate quality.
+why_interesting: Throughput counts may overstate research progress without quality evidence.
+source: AEGIS candidate generation diagnostics review
+status: OPEN

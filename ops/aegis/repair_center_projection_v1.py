@@ -20,6 +20,13 @@ SECTIONS = [
     ("repair_completed", "Repair completed"),
 ]
 
+TERMINAL_REPAIR_STATUSES = {
+    "COMPLETED",
+    "SOURCE_CONFIGURED",
+    "NOT_APPLICABLE_FOR_CURRENT_MODE",
+    "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT",
+}
+
 
 def _read_command_audit_rows(truth_root: Path, day_utc: str) -> list[dict[str, Any]]:
     path = command_audit_path_v1(truth_root=truth_root, day_utc=day_utc)
@@ -43,7 +50,7 @@ def _latest_repair_command_by_domain(rows: list[dict[str, Any]]) -> dict[str, di
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:
         command_id = str(row.get("command_id") or "")
-        if command_id not in {"REPAIR_DOMAIN", "VALIDATE_SOURCE", "RECHECK_DOMAIN", "UPLOAD_SOURCE", "DOWNLOAD_EOD_SOURCE_TEMPLATE", "CERTIFY_SOURCE", "VIEW_REPAIR_JOB"}:
+        if command_id not in {"REPAIR_DOMAIN", "VALIDATE_SOURCE", "RECHECK_DOMAIN", "UPLOAD_SOURCE", "VIEW_SOURCE_SETUP", "DOWNLOAD_SOURCE_TEMPLATE", "DOWNLOAD_EOD_SOURCE_TEMPLATE", "CERTIFY_SOURCE", "VIEW_REPAIR_JOB"}:
             continue
         target_id = str(row.get("target_id") or "")
         if not target_id:
@@ -138,6 +145,142 @@ def _repair_mode(plan: dict[str, Any]) -> str:
     return "MANUAL_ADMIN_ACTION"
 
 
+def _source_config_key(plan: dict[str, Any]) -> str:
+    contract = plan.get("source_contract") if isinstance(plan.get("source_contract"), dict) else {}
+    keys = contract.get("required_config_keys") if isinstance(contract.get("required_config_keys"), list) else []
+    for key in keys:
+        value = str(key or "").strip()
+        if value:
+            return value
+    domain_id = str(plan.get("domain_id") or "")
+    return {
+        "US_EQUITIES_EOD": "AEGIS_US_EQUITIES_EOD_SOURCE_FILE",
+        "MACRO_CALENDAR": "AEGIS_MACRO_CALENDAR_SOURCE_FILE",
+        "EARNINGS_EVENTS": "AEGIS_EARNINGS_EVENTS_SOURCE_FILE",
+        "CORPORATE_ACTIONS": "AEGIS_CORPORATE_ACTIONS_SOURCE_FILE",
+        "US_EQUITIES_INTRADAY": "AEGIS_MARKET_DATA_INTRADAY_PROVIDER",
+        "VOLATILITY": "AEGIS_MARKET_DATA_INTRADAY_PROVIDER",
+        "RATES_BONDS": "AEGIS_MARKET_DATA_INTRADAY_PROVIDER",
+    }.get(domain_id, "")
+
+
+def _source_options_for_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    domain_id = str(plan.get("domain_id") or "")
+    source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
+    contract = plan.get("source_contract") if isinstance(plan.get("source_contract"), dict) else {}
+    required_fields = contract.get("required_fields") if isinstance(contract.get("required_fields"), list) else []
+    if not required_fields:
+        required_fields = {
+            "MACRO_CALENDAR": ["event_name", "time", "country", "importance", "source"],
+            "EARNINGS_EVENTS": ["symbol", "company", "report_date", "report_time", "confirmed_or_estimated", "source"],
+            "CORPORATE_ACTIONS": ["symbol", "action_type", "effective_date", "source"],
+        }.get(domain_id, [])
+    return {
+        "existing_internal_builder": bool(plan.get("rebuild_command")),
+        "available_provider_or_api": str(source.get("provider_or_source") or contract.get("provider_or_source") or "External governed source/API or operator-uploaded file required."),
+        "static_manual_artifact_format": "JSON object with status/validation_status and rows under events/actions/calendar_rows.",
+        "minimum_valid_artifact": {
+            "path": str(source.get("path") or ""),
+            "required_fields": list(required_fields),
+            "status_fields": ["status=READY", "validation_status=VALID"],
+        },
+        "can_generate_from_existing_data": False,
+        "generation_assessment": "No complete governed source is available in the current truth store; creating this artifact without an external source would fabricate coverage.",
+        "not_system_failure_explanation": "Requires external source; not a system failure.",
+    }
+
+
+def _source_setup_workflow_for_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    domain_id = str(plan.get("domain_id") or "")
+    source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
+    contract = plan.get("source_contract") if isinstance(plan.get("source_contract"), dict) else {}
+    fields = contract.get("required_fields") if isinstance(contract.get("required_fields"), list) else []
+    if not fields:
+        fields = _source_options_for_plan(plan).get("minimum_valid_artifact", {}).get("required_fields", [])
+    rows_key = {"MACRO_CALENDAR": "events", "EARNINGS_EVENTS": "events", "CORPORATE_ACTIONS": "actions"}.get(domain_id, "rows")
+    example_rows = {
+        "MACRO_CALENDAR": {"event_name": "REPLACE_WITH_EVENT_NAME", "time": "2026-05-22T13:30:00Z", "country": "US", "importance": "HIGH", "source": "REPLACE_WITH_GOVERNED_SOURCE"},
+        "EARNINGS_EVENTS": {"symbol": "REPLACE_WITH_SYMBOL", "company": "REPLACE_WITH_COMPANY", "report_date": "2026-05-22", "report_time": "AFTER_MARKET", "confirmed_or_estimated": "CONFIRMED", "source": "REPLACE_WITH_GOVERNED_SOURCE"},
+        "CORPORATE_ACTIONS": {"symbol": "REPLACE_WITH_SYMBOL", "action_type": "DIVIDEND", "effective_date": "2026-05-22", "source": "REPLACE_WITH_GOVERNED_SOURCE"},
+    }
+    what = {
+        "MACRO_CALENDAR": "A governed daily macro-event calendar used to identify scheduled economic events that can affect event-dislocation sleeves.",
+        "EARNINGS_EVENTS": "A governed earnings-event calendar for tracked symbols and hypothesis/candidate universes.",
+        "CORPORATE_ACTIONS": "A governed split, dividend, and corporate-action source for tracked symbols.",
+    }.get(domain_id, "A governed external source required by this domain.")
+    why = {
+        "MACRO_CALENDAR": "Aegis needs it to decide whether event-driven sleeves have complete context before certification.",
+        "EARNINGS_EVENTS": "Aegis needs it to prevent event blind spots in earnings-sensitive hypotheses and candidates.",
+        "CORPORATE_ACTIONS": "Aegis needs it to avoid stale or adjusted-price mistakes around splits, dividends, and other actions.",
+    }.get(domain_id, "Aegis needs it to certify domain context without fabricating coverage.")
+    return {
+        "schema_id": "aegis_source_setup_workflow.v1",
+        "domain_id": domain_id,
+        "title": "External source required — not a system failure",
+        "what_this_source_is": what,
+        "why_aegis_needs_it": why,
+        "affected_sleeves": list(plan.get("affected_sleeves") or []),
+        "affected_hypotheses": list(plan.get("affected_hypotheses") or []),
+        "required_config_key": _source_config_key(plan),
+        "required_file_path": str(source.get("path") or ""),
+        "required_json_fields": list(fields),
+        "example_valid_json_template": {
+            "schema_id": contract.get("required_source") or f"{domain_id.lower()}_v1",
+            "day_utc": str(plan.get("day_utc") or "2026-05-22"),
+            "status": "READY",
+            "validation_status": "VALID",
+            rows_key: [example_rows.get(domain_id, {str(field): f"REPLACE_WITH_{str(field).upper()}" for field in fields})],
+        },
+        "upload_or_configure_option": "Set the required config key to a governed JSON source file, or place the completed JSON at the required file path.",
+        "validation_action": "Run Validate Source after the file is configured.",
+        "certification_action": "Run Re-run certification after validation succeeds.",
+        "do_not_fabricate_data": True,
+    }
+
+
+def _exact_external_requirement_result(plan: dict[str, Any], *, status: str) -> dict[str, Any]:
+    source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
+    contract = plan.get("source_contract") if isinstance(plan.get("source_contract"), dict) else {}
+    domain_id = str(plan.get("domain_id") or "Domain")
+    label = str(source.get("label") or source.get("artifact_type") or domain_id)
+    path = str(source.get("path") or "")
+    config_key = _source_config_key(plan)
+    setup = str(source.get("setup_required_message") or contract.get("setup_required_message") or "")
+    provider = str(source.get("provider_or_source") or contract.get("provider_or_source") or "")
+    if status == "SOURCE_CONFIGURED":
+        message = f"Source configured for {domain_id}: {label}{f' at {path}' if path else ''}."
+        next_step = str(plan.get("validation_command") or plan.get("certification_command") or "Validate the configured source and re-run domain certification.")
+        status_label = "Source configured"
+    elif str(plan.get("repair_mode") or "") == "PROVIDER_WAIT":
+        message = f"{domain_id} is blocked by provider data freshness/availability for {label}{f' at {path}' if path else ''}."
+        next_step = setup or provider or "Configure a current provider/source for this domain, rebuild the artifact, then re-run domain certification."
+        status_label = "External source required — not a system failure"
+    else:
+        requirement = setup or f"Provide {label}{f' at {path}' if path else ''}."
+        if config_key and config_key not in requirement:
+            requirement = f"Set {config_key} or provide the required artifact. {requirement}"
+        requirement = f"Requires external source; not a system failure. {requirement}"
+        message = f"{domain_id} cannot be repaired automatically because an external source is missing. {requirement}"
+        next_step = requirement
+        status_label = "External source required — not a system failure"
+    return {
+        "schema_id": "aegis_command_result_panel.v1",
+        "status_label": status_label,
+        "result_status": status,
+        "plain_english_result": message,
+        "next_required_step": next_step,
+        "job_id": "",
+        "audit_id": "",
+        "timestamp": "",
+        "missing_source_name": label if status != "SOURCE_CONFIGURED" else "",
+        "expected_source_path": path,
+        "copy_required_path": path,
+        "failure_reason": "" if status == "SOURCE_CONFIGURED" else str(plan.get("reason") or "EXTERNAL_REQUIREMENT_MISSING"),
+        "source_config_key": config_key,
+        "provider_or_source": provider,
+    }
+
+
 def _status_for(plan: dict[str, Any], latest_result: dict[str, Any]) -> str:
     result_status = str(latest_result.get("result_status") or "").upper()
     status_label = str(latest_result.get("status_label") or "").upper()
@@ -153,8 +296,14 @@ def _status_for(plan: dict[str, Any], latest_result: dict[str, Any]) -> str:
         return "COMPLETED"
     if result_status in {"FAILED", "REPAIR_JOB_UNAVAILABLE", "NO_REPAIR_PLAN", "VALIDATION_FAILED", "SOURCE_MISSING"}:
         return "FAILED"
-    if _repair_mode(plan) == "SOURCE_SETUP_REQUIRED":
-        return "WAITING_FOR_INPUT"
+    if result_status in {"SOURCE_CONFIGURED", "NOT_APPLICABLE_FOR_CURRENT_MODE", "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT"}:
+        return result_status
+    mode = _repair_mode(plan)
+    source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
+    if mode == "SOURCE_SETUP_REQUIRED":
+        return "SOURCE_CONFIGURED" if bool(source.get("exists")) else "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT"
+    if mode == "PROVIDER_WAIT" and result_status in {"", "RECERTIFICATION_STILL_DELAYED", "SOURCE_SETUP_REQUIRED"}:
+        return "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT"
     return "OPEN"
 
 
@@ -165,7 +314,7 @@ def _section_for(item: dict[str, Any]) -> str:
         return "repair_running"
     if status == "FAILED":
         return "repair_failed"
-    if status == "COMPLETED":
+    if status in {"COMPLETED", "SOURCE_CONFIGURED", "NOT_APPLICABLE_FOR_CURRENT_MODE"}:
         return "repair_completed"
     if mode == "SOURCE_SETUP_REQUIRED":
         return "source_setup_required"
@@ -225,11 +374,13 @@ def _primary_command(item: dict[str, Any], day_utc: str) -> dict[str, Any]:
         return command_instance_v1("VIEW_REPAIR_JOB", target_type="repair_item", target_id=domain_id, label="View Job", payload=payload)
     if status == "FAILED":
         return command_instance_v1("RECHECK_DOMAIN", target_type="domain_certification", target_id=domain_id, label="Recheck Domain", payload=payload)
+    if status == "SOURCE_CONFIGURED":
+        return command_instance_v1("VALIDATE_SOURCE", target_type="domain_source", target_id=domain_id, label="Validate Source", payload=payload)
     if mode == "SOURCE_SETUP_REQUIRED":
         source = item.get("required_source") if isinstance(item.get("required_source"), dict) else {}
         if source.get("exists"):
             return command_instance_v1("VALIDATE_SOURCE", target_type="domain_source", target_id=domain_id, label="Validate Source", payload=payload)
-        return command_instance_v1("UPLOAD_SOURCE", target_type="domain_source", target_id=domain_id, label="Upload/configure source", payload=payload)
+        return command_instance_v1("VIEW_SOURCE_SETUP", target_type="domain_source", target_id=domain_id, label="View setup requirements", payload=payload)
     return command_instance_v1("REPAIR_DOMAIN", target_type="domain_certification", target_id=domain_id, label="Queue Repair", payload=payload)
 
 
@@ -246,7 +397,10 @@ def _secondary_commands(item: dict[str, Any], day_utc: str) -> list[dict[str, An
             commands.insert(2, command_instance_v1("VALIDATE_SOURCE", target_type="domain_source", target_id=domain_id, label="Validate source file", payload=payload))
             commands.insert(3, command_instance_v1("CERTIFY_SOURCE", target_type="domain_source", target_id=domain_id, label="Certify from source file", payload=payload))
         else:
-            commands.insert(1, command_instance_v1("VALIDATE_SOURCE", target_type="domain_source", target_id=domain_id, label="Validate Source", payload=payload))
+            commands.insert(1, command_instance_v1("DOWNLOAD_SOURCE_TEMPLATE", target_type="domain_source", target_id=domain_id, label="Download template", payload=payload))
+            commands.insert(2, command_instance_v1("UPLOAD_SOURCE", target_type="domain_source", target_id=domain_id, label="Configure source path", payload=payload))
+            commands.insert(3, command_instance_v1("VALIDATE_SOURCE", target_type="domain_source", target_id=domain_id, label="Validate Source", payload=payload))
+        commands = [dict(command, label="Re-run certification") if command.get("command_id") == "RECHECK_DOMAIN" else command for command in commands]
     return commands
 
 
@@ -261,6 +415,12 @@ def _repair_item_from_plan(plan: dict[str, Any], *, day_utc: str, latest_row: di
     if status == "DETECTED":
         status = "OPEN"
     source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
+    projected_status = _status_for(plan, result)
+    if status in {"SOURCE_SETUP_REQUIRED", "WAITING_FOR_INPUT", "OPEN"} and projected_status in {"SOURCE_CONFIGURED", "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT", "NOT_APPLICABLE_FOR_CURRENT_MODE"}:
+        status = projected_status
+    if status in {"SOURCE_CONFIGURED", "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT", "NOT_APPLICABLE_FOR_CURRENT_MODE"}:
+        exact_result = _exact_external_requirement_result(plan, status=status)
+        result = {**exact_result, "audit_id": str(result.get("audit_id") or exact_result.get("audit_id") or ""), "timestamp": str(result.get("timestamp") or exact_result.get("timestamp") or "")}
     requested_at = str(latest_row.get("requested_at") if latest_row else "")
     job_id = str(result.get("job_id") or (latest_row or {}).get("state_after", {}).get("job_id") if latest_row else "")
     problem_text = _problem_text(plan, mode)
@@ -302,8 +462,11 @@ def _repair_item_from_plan(plan: dict[str, Any], *, day_utc: str, latest_row: di
         "next_retry": str(lifecycle.get("next_retry_utc") or plan.get("next_retry") or ""),
         "operator_action_required": bool(plan.get("operator_action_required") or mode == "SOURCE_SETUP_REQUIRED"),
         "provider_feed_name": str(source.get("artifact_type") or source.get("label") or ""),
-        "source_config_key": "AEGIS_US_EQUITIES_EOD_SOURCE_FILE" if str(plan.get("domain_id") or "") == "US_EQUITIES_EOD" else "",
+        "source_config_key": _source_config_key(plan),
         "diagnostics": plan.get("diagnostics") if isinstance(plan.get("diagnostics"), dict) else {},
+        "source_options": _source_options_for_plan(plan),
+        "source_setup_workflow": _source_setup_workflow_for_plan(plan) if mode == "SOURCE_SETUP_REQUIRED" else {},
+        "not_system_failure_explanation": "Requires external source; not a system failure." if status == "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT" else "",
         "timeout_escalation_threshold": "Escalate if still unresolved after the next retry window.",
         "progress_stages": ["Queued", "Running", "Artifact rebuild", "Validation", "Domain recertification", "Complete / Failed"],
     }
@@ -459,12 +622,24 @@ def build_repair_center_projection_v1(*, truth_root: Path | str, day_utc: str) -
         visible = [item for item in items if item.get("section_id") == section_id]
         sections.append({"section_id": section_id, "label": label, "count": len(visible), "items": visible})
     summary = {
-        "total_open": len([item for item in items if item.get("status") not in {"COMPLETED"}]),
+        "total_open": len([item for item in items if item.get("status") not in TERMINAL_REPAIR_STATUSES]),
         "automatic_available": len([item for item in items if item.get("section_id") == "automatic_repair_available"]),
         "source_setup_required": len([item for item in items if item.get("section_id") == "source_setup_required"]),
+        "blocked_external_requirements": len([item for item in items if item.get("status") == "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT"]),
+        "source_configured": len([item for item in items if item.get("status") == "SOURCE_CONFIGURED"]),
+        "not_applicable_for_current_mode": len([item for item in items if item.get("status") == "NOT_APPLICABLE_FOR_CURRENT_MODE"]),
         "repair_running": len([item for item in items if item.get("section_id") == "repair_running"]),
         "repair_failed": len([item for item in items if item.get("section_id") == "repair_failed"]),
         "repair_completed": len([item for item in items if item.get("section_id") == "repair_completed"]),
+    }
+    summary_banner = {
+        "title": "Core system operational" if summary.get("repair_failed", 0) == 0 else "Repair attention required",
+        "message": f"Core system operational. {int((report.get('summary') or {}).get('certified_domains') or 0)} domains certified. {int(summary.get('blocked_external_requirements') or 0)} external source requirements remain. {int((report.get('summary') or {}).get('blocked_sleeves') or 0)} sleeve blocked by macro-calendar source.",
+        "core_system_operational": summary.get("repair_failed", 0) == 0,
+        "certified_domains": int((report.get("summary") or {}).get("certified_domains") or 0),
+        "external_source_requirements_remaining": int(summary.get("blocked_external_requirements") or 0),
+        "blocked_sleeves": int((report.get("summary") or {}).get("blocked_sleeves") or 0),
+        "blocking_source_domain": "MACRO_CALENDAR" if any(str(item.get("domain_id") or "") == "MACRO_CALENDAR" and item.get("status") == "BLOCKED_WITH_EXACT_EXTERNAL_REQUIREMENT" for item in items) else "",
     }
     payload = {
         "schema_id": SCHEMA_ID,
@@ -472,6 +647,7 @@ def build_repair_center_projection_v1(*, truth_root: Path | str, day_utc: str) -
         "day_utc": day_utc,
         "generated_at_utc": report.get("generated_at_utc") or "",
         "summary": summary,
+        "summary_banner": summary_banner,
         "sections": sections,
         "repair_items": items,
         "domain_certification_summary": report.get("summary") or {},

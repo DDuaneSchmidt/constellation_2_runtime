@@ -1,0 +1,22 @@
+{
+  "artifact_count": 7,
+  "backtest_id": "BACKTEST_003",
+  "certification": {
+    "capital_allocation_recommendation": false,
+    "claim_001_certified": false,
+    "imp_003_certified": false
+  },
+  "claim_id": "CLAIM_001",
+  "data_source_type": "tiingo_cache",
+  "data_vendor": "Tiingo cached local CSV",
+  "date_range": {
+    "end_date": "2026-06-02",
+    "start_date": "2000-01-03"
+  },
+  "implementation_id": "IMP_003",
+  "run_classification": "PRIMARY_ADJUSTED_OHLC",
+  "run_quality": "PRIMARY_ADJUSTED_OHLC",
+  "run_timestamp": "2026-06-03T17:20:05Z",
+  "status": "EVIDENCE_GENERATED_NOT_CERTIFIED",
+  "ticker": "SPY"
+}

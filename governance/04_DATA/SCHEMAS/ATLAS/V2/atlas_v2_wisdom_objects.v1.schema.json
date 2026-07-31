@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_wisdom_objects.v1.schema.json",
+  "title": "Atlas V2 Wisdom Formation Objects",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/CandidateWisdom" },
+    { "$ref": "#/$defs/WisdomValidation" },
+    { "$ref": "#/$defs/WisdomEvent" },
+    { "$ref": "#/$defs/WisdomRetirement" }
+  ],
+  "$defs": {
+    "Transition": {
+      "type": "object",
+      "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"],
+      "properties": {
+        "transitioned_at": { "type": "string", "format": "date-time" },
+        "from_status": { "type": "string" },
+        "to_status": { "type": "string" },
+        "reason": { "type": "string", "minLength": 1 },
+        "triggering_object": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": ["object_type", "created_at", "transition_history"],
+      "properties": {
+        "object_type": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "transition_history": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Transition" }
+        }
+      }
+    },
+    "WisdomScore": {
+      "type": "object",
+      "required": ["importance", "behavior_change_frequency", "future_decision_impact", "calibration_impact", "adaptation_impact", "total"],
+      "properties": {
+        "importance": { "type": "number", "minimum": 0, "maximum": 1 },
+        "behavior_change_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "future_decision_impact": { "type": "number", "minimum": 0, "maximum": 1 },
+        "calibration_impact": { "type": "number", "minimum": 0, "maximum": 1 },
+        "adaptation_impact": { "type": "number", "minimum": 0, "maximum": 1 },
+        "total": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "CandidateWisdom": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "type": "object",
+          "required": ["wisdom_id", "statement", "originating_experience_ids", "supporting_outcome_ids", "supporting_count", "contradicting_count", "confidence", "status", "wisdom_score"],
+          "properties": {
+            "object_type": { "const": "CandidateWisdom" },
+            "wisdom_id": { "type": "string", "minLength": 1 },
+            "statement": { "type": "string", "minLength": 1 },
+            "originating_experience_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "supporting_outcome_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "supporting_count": { "type": "integer", "minimum": 0 },
+            "contradicting_count": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "status": { "enum": ["EMERGING", "SUPPORTED", "STRONG", "CONTESTED", "RETIRED"] },
+            "wisdom_score": { "$ref": "#/$defs/WisdomScore" }
+          }
+        }
+      ]
+    },
+    "WisdomValidation": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "type": "object",
+          "required": ["validation_id", "wisdom_id", "prediction_affected", "decision_affected", "behavior_changed", "validation_result"],
+          "properties": {
+            "object_type": { "const": "WisdomValidation" },
+            "validation_id": { "type": "string", "minLength": 1 },
+            "wisdom_id": { "type": "string", "minLength": 1 },
+            "prediction_affected": { "type": "string", "minLength": 1 },
+            "decision_affected": { "type": "string", "minLength": 1 },
+            "behavior_changed": { "const": true },
+            "validation_result": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "WisdomEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "type": "object",
+          "required": ["event_id", "wisdom_id", "triggering_experience", "previous_behavior", "new_behavior", "expected_impact", "actual_impact"],
+          "properties": {
+            "object_type": { "const": "WisdomEvent" },
+            "event_id": { "type": "string", "minLength": 1 },
+            "wisdom_id": { "type": "string", "minLength": 1 },
+            "triggering_experience": { "type": "string", "minLength": 1 },
+            "previous_behavior": { "type": "string", "minLength": 1 },
+            "new_behavior": { "type": "string", "minLength": 1 },
+            "expected_impact": { "type": "string", "minLength": 1 },
+            "actual_impact": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "WisdomRetirement": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "type": "object",
+          "required": ["retirement_id", "wisdom_id", "reason", "contradicting_evidence"],
+          "properties": {
+            "object_type": { "const": "WisdomRetirement" },
+            "retirement_id": { "type": "string", "minLength": 1 },
+            "wisdom_id": { "type": "string", "minLength": 1 },
+            "reason": { "type": "string", "minLength": 1 },
+            "contradicting_evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "replacement_wisdom": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

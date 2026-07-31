@@ -1,0 +1,12 @@
+id: KNW_0016
+statement: Daily research integrity warnings should be treated as reusable caution signals until recurrence or clearance is checked across days.
+evidence:
+  - OBS_0019 evidence review
+  - Daily integrity audits were WARN with 0 blockers on 2026-06-01, 2026-06-02, and 2026-06-03
+  - Recurrent warnings included candidate stale inputs and sleeve-health follow-through items
+  - The 2026-06-04 audit escalated to FAIL because verified graph readiness was blocked
+limitations:
+  - Reviewed only available artifacts from 2026-06-01 through 2026-06-04
+  - The 2026-06-04 failure reflects graph readiness and may not share the exact same cause as prior warnings
+why_it_matters: Researchers should not ignore warnings just because they are non-blocking; repeated warnings can identify persistent evidence-quality work.
+status: SUPPORTED

@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_cheap_experiments.v1.schema.json",
+  "title": "Atlas V2 Cheap Experiment Objects",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CheapExperiment"
+    },
+    {
+      "$ref": "#/$defs/LearningVelocityMetric"
+    },
+    {
+      "$ref": "#/$defs/ExperimentTierSummary"
+    },
+    {
+      "$ref": "#/$defs/PromotionGateDecision"
+    },
+    {
+      "$ref": "#/$defs/CheapExperimentBatch"
+    },
+    {
+      "$ref": "#/$defs/RunnerBudget"
+    }
+  ],
+  "$defs": {
+    "Transition": {
+      "type": "object",
+      "required": [
+        "transitioned_at",
+        "from_status",
+        "to_status",
+        "reason",
+        "triggering_object"
+      ],
+      "properties": {
+        "transitioned_at": {
+          "type": "string"
+        },
+        "from_status": {
+          "type": "string"
+        },
+        "to_status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "triggering_object": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": [
+        "object_type",
+        "created_at",
+        "transition_history"
+      ],
+      "properties": {
+        "object_type": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "transition_history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Transition"
+          }
+        }
+      }
+    },
+    "Tier": {
+      "enum": [
+        "TIER_0_DEDUPE",
+        "TIER_1_SANITY",
+        "TIER_2_LIGHTWEIGHT_VALIDATION",
+        "TIER_3_ROBUST_VALIDATION",
+        "TIER_4_MATURITY_TRACKING"
+      ]
+    },
+    "CheapExperiment": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "experiment_id",
+            "originating_object_id",
+            "originating_object_type",
+            "tier",
+            "prediction_statement",
+            "expected_learning_value",
+            "attention_cost_estimate",
+            "data_scope",
+            "method_summary",
+            "outcome_summary",
+            "actual_learning_value",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "CheapExperiment"
+            },
+            "experiment_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "originating_object_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "originating_object_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tier": {
+              "$ref": "#/$defs/Tier"
+            },
+            "prediction_statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_learning_value": {
+              "type": "number",
+              "minimum": 0
+            },
+            "attention_cost_estimate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "data_scope": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method_summary": {
+              "type": "string",
+              "minLength": 1
+            },
+            "outcome_summary": {
+              "type": "string"
+            },
+            "actual_learning_value": {
+              "type": "number",
+              "minimum": 0
+            },
+            "status": {
+              "type": "string"
+            },
+            "promotion_gate_id": {
+              "type": "string"
+            },
+            "evidence_maturity_rationale": {
+              "type": "string"
+            },
+            "linked_experience_event_id": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "LearningVelocityMetric": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "metric_id",
+            "period_start",
+            "period_end",
+            "prediction_outcome_cycles",
+            "cheap_experiments_completed",
+            "actual_learning_total",
+            "average_learning_per_cycle",
+            "rejection_count",
+            "promotion_count",
+            "promotion_rate",
+            "importance_weighted_regret_total"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "LearningVelocityMetric"
+            },
+            "metric_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "period_start": {
+              "type": "string"
+            },
+            "period_end": {
+              "type": "string"
+            },
+            "prediction_outcome_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "cheap_experiments_completed": {
+              "type": "number",
+              "minimum": 0
+            },
+            "actual_learning_total": {
+              "type": "number",
+              "minimum": 0
+            },
+            "average_learning_per_cycle": {
+              "type": "number",
+              "minimum": 0
+            },
+            "rejection_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "promotion_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "promotion_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "importance_weighted_regret_total": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "ExperimentTierSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "summary_id",
+            "period_start",
+            "period_end",
+            "tier",
+            "experiments_run",
+            "experiments_rejected",
+            "experiments_promoted",
+            "actual_learning_total",
+            "average_cost_estimate",
+            "average_learning_value"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "ExperimentTierSummary"
+            },
+            "summary_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "period_start": {
+              "type": "string"
+            },
+            "period_end": {
+              "type": "string"
+            },
+            "tier": {
+              "$ref": "#/$defs/Tier"
+            },
+            "experiments_run": {
+              "type": "number",
+              "minimum": 0
+            },
+            "experiments_rejected": {
+              "type": "number",
+              "minimum": 0
+            },
+            "experiments_promoted": {
+              "type": "number",
+              "minimum": 0
+            },
+            "actual_learning_total": {
+              "type": "number",
+              "minimum": 0
+            },
+            "average_cost_estimate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "average_learning_value": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "PromotionGateDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "gate_id",
+            "experiment_id",
+            "from_tier",
+            "to_tier",
+            "decision",
+            "reason",
+            "expected_incremental_learning",
+            "required_evidence",
+            "forbidden_authority_acknowledged"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "PromotionGateDecision"
+            },
+            "gate_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "experiment_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "from_tier": {
+              "$ref": "#/$defs/Tier"
+            },
+            "to_tier": {
+              "$ref": "#/$defs/Tier"
+            },
+            "decision": {
+              "enum": [
+                "APPROVED",
+                "REJECTED",
+                "DEFERRED"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_incremental_learning": {
+              "type": "number",
+              "minimum": 0
+            },
+            "required_evidence": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "forbidden_authority_acknowledged": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "CheapExperimentBatch": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "batch_id",
+            "batch_type",
+            "data_mode",
+            "fixture_count",
+            "accepted_count",
+            "rejected_count",
+            "emitted_record_counts",
+            "allowed_tiers",
+            "forbidden_authority_acknowledged",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "CheapExperimentBatch"
+            },
+            "batch_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "batch_type": {
+              "const": "MOCK_HISTORICAL_CHEAP_EXPERIMENT_BATCH"
+            },
+            "data_mode": {
+              "enum": [
+                "fixture",
+                "mock_historical"
+              ]
+            },
+            "fixture_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "accepted_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "rejected_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "emitted_record_counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "allowed_tiers": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "TIER_0_DEDUPE",
+                  "TIER_1_SANITY",
+                  "TIER_2_LIGHTWEIGHT_VALIDATION",
+                  "TIER_3_ROBUST_VALIDATION",
+                  "TIER_4_MATURITY_TRACKING"
+                ]
+              }
+            },
+            "forbidden_authority_acknowledged": {
+              "const": true
+            },
+            "status": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "RunnerBudget": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "runner_id",
+            "max_experiments_per_run",
+            "max_experiments_per_day",
+            "allowed_tiers",
+            "max_tier_2_per_day",
+            "tier_3_enabled",
+            "tier_4_enabled",
+            "stop_on_error_count",
+            "dry_run"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "RunnerBudget"
+            },
+            "runner_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max_experiments_per_run": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_experiments_per_day": {
+              "type": "number",
+              "minimum": 0
+            },
+            "allowed_tiers": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Tier"
+              }
+            },
+            "max_tier_2_per_day": {
+              "type": "number",
+              "minimum": 0
+            },
+            "tier_3_enabled": {
+              "type": "boolean"
+            },
+            "tier_4_enabled": {
+              "type": "boolean"
+            },
+            "stop_on_error_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "dry_run": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

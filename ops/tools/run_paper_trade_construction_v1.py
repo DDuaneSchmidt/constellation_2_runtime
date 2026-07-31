@@ -20,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--truth_root", "--truth-root", dest="truth_root", required=True)
     parser.add_argument("--day_utc", "--day", dest="day_utc", required=True)
     parser.add_argument("--rebuild_operator_state", choices=["YES", "NO"], default="YES")
+    parser.add_argument(
+        "--allow-not-ready-exit-zero",
+        action="store_true",
+        help="Write the diagnostic artifact and exit zero when construction is deterministically not ready.",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.truth_root).expanduser().resolve()
@@ -51,12 +56,14 @@ def main(argv: list[str] | None = None) -> int:
                 "live_trading_allowed": False,
                 "order_routing_allowed": False,
                 "capital_allocation_allowed": False,
-                "paper_submit_created": False,
+                "paper_submit_created": bool(payload.get("paper_submit_created") is True),
             },
             sort_keys=True,
         )
     )
-    return 0 if payload["trade_construction_status"] == "complete" else 2
+    if payload["trade_construction_status"] == "complete" or args.allow_not_ready_exit_zero:
+        return 0
+    return 2
 
 
 if __name__ == "__main__":

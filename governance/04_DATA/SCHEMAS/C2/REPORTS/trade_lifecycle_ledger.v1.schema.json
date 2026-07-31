@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/trade_lifecycle_ledger.v1.schema.json",
+  "title": "Trade Lifecycle Ledger v1",
+  "type": "object",
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "rows",
+    "content_hash",
+    "broker_submit_transmit_allowed",
+    "broker_execution_allowed",
+    "autonomous_execution_allowed",
+    "trade_advice_allowed"
+  ],
+  "properties": {
+    "schema_id": { "const": "trade_lifecycle_ledger" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "row_count": { "type": "integer", "minimum": 0 },
+    "content_hash": { "type": "string" },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "trade_lifecycle_id",
+          "trade_id",
+          "event_type",
+          "event_time",
+          "source_artifact",
+          "content_hash"
+        ],
+        "properties": {
+          "trade_lifecycle_id": { "type": "string" },
+          "trade_id": { "type": "string" },
+          "symbol": { "type": "string" },
+          "side": { "type": "string" },
+          "quantity": {},
+          "sleeve_id": { "type": "string" },
+          "hypothesis_id": { "type": "string" },
+          "candidate_id": { "type": "string" },
+          "recommendation_id": { "type": "string" },
+          "capture_ticket_id": { "type": "string" },
+          "manual_receipt_id": { "type": "string" },
+          "event_type": {
+            "enum": [
+              "RECOMMENDATION_CREATED",
+              "CAPTURE_TICKET_CREATED",
+              "MANUAL_CAPTURE_RECORDED",
+              "MANUAL_RECEIPT_RECORDED",
+              "NO_MANUAL_EXECUTION_DECLARED",
+              "OPEN_POSITION_ESTABLISHED",
+              "MARK_TO_MARKET_UPDATED",
+              "EXIT_RECORDED",
+              "OUTCOME_FINALIZED",
+              "SLEEVE_HYPOTHESIS_FEEDBACK_GENERATED"
+            ]
+          },
+          "event_time": { "type": "string" },
+          "operational_day": { "type": "string" },
+          "source_artifact": { "type": "string" },
+          "content_hash": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "source_artifacts": { "type": "array", "items": { "type": "string" } },
+    "broker_submit_transmit_allowed": { "const": false },
+    "broker_execution_allowed": { "const": false },
+    "order_routing_allowed": { "const": false },
+    "autonomous_execution_allowed": { "const": false },
+    "trade_advice_allowed": { "const": false }
+  },
+  "additionalProperties": true
+}

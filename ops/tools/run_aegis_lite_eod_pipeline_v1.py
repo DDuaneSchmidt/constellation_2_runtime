@@ -648,6 +648,13 @@ def _required_symbols_v1(rows: list[dict[str, Any]]) -> list[str]:
 def _certified_eod_universe_v1(*, truth_root: Path, day_utc: str) -> tuple[list[str], str]:
     path = Path(truth_root).resolve() / "reports" / "final_eod_market_data_v1" / day_utc / "final_eod_market_data.v1.json"
     payload = _read_json_or_empty(path)
+    resolved_path = path
+    if payload.get("schema_id") == "final_eod_market_data_current_manifest.v1":
+        artifact_path = Path(str(payload.get("current_artifact_path") or ""))
+        artifact = _read_json_or_empty(artifact_path) if artifact_path.exists() else {}
+        if artifact:
+            payload = artifact
+            resolved_path = artifact_path
     symbols = payload.get("final_eod_symbols")
     if not isinstance(symbols, list):
         symbols = payload.get("fetched_symbols")
@@ -660,7 +667,7 @@ def _certified_eod_universe_v1(*, truth_root: Path, day_utc: str) -> tuple[list[
     if not isinstance(symbols, list):
         records = payload.get("normalized_records") if isinstance(payload.get("normalized_records"), list) else []
         symbols = [row.get("canonical_symbol") for row in records if isinstance(row, dict)]
-    return sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()}), str(path if path.exists() else "")
+    return sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()}), str(resolved_path if resolved_path.exists() else "")
 
 
 def _operator_queue_empty_reason_v1(*, input_contract: dict[str, Any], candidates: list[dict[str, Any]]) -> str:

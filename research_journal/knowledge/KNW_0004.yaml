@@ -1,0 +1,11 @@
+id: KNW_0004
+statement: Architecture readiness can exceed evidence maturity even when the verified graph is auditable.
+evidence:
+  - OBS_0005 evidence review
+  - Verified graph READY while runtime readiness was BLOCKED
+  - Outcome and research quality artifacts showed underpowered evidence
+limitations:
+  - Based on 2026-06-03 artifacts only
+  - Broad observation still needs narrower follow-up
+why_it_matters: Architecture should not be treated as proof of empirical readiness.
+status: SUPPORTED

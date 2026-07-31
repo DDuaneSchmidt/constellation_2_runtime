@@ -53,7 +53,7 @@ def selected_intent_pointer_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "pointers" / "selected_intent_pointer.v1.json"
 
 
-def _candidate_rows(rollup: dict[str, Any]) -> list[dict[str, Any]]:
+def _candidate_rows(rollup: dict[str, Any], *, truth_root: Path | None = None, day_utc: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     outcomes = rollup.get("outcomes") if isinstance(rollup.get("outcomes"), list) else rollup.get("sleeve_outcomes")
     for outcome in outcomes if isinstance(outcomes, list) else []:
@@ -86,6 +86,38 @@ def _candidate_rows(rollup: dict[str, Any]) -> list[dict[str, Any]]:
                     "selection_reason": "",
                 }
             )
+    if truth_root is not None and day_utc:
+        contract_path = Path(truth_root).resolve() / "reports" / "aegis_candidate_contracts_v1" / day_utc / "candidate_contracts.v1.json"
+        if contract_path.exists():
+            contracts = read_json_object_v1(contract_path)
+            existing_ids = {str(row.get("intent_id") or "").strip() for row in rows if isinstance(row, dict)}
+            for row in contracts.get("candidate_contracts") if isinstance(contracts.get("candidate_contracts"), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                intent_id = str(row.get("intent_id") or "").strip()
+                if not intent_id or intent_id in existing_ids:
+                    continue
+                rows.append(
+                    {
+                        "intent_id": intent_id,
+                        "sleeve_id": str(row.get("sleeve_id") or "").strip(),
+                        "engine_id": str(row.get("sleeve_id") or row.get("engine_id") or "").strip(),
+                        "intent_path": str(row.get("evidence_path") or "").strip(),
+                        "intent_hash": str(row.get("intent_hash") or "").strip(),
+                        "symbol": str(row.get("symbol") or "").strip().upper(),
+                        "risk_class": "",
+                        "raw_signal_id": str(row.get("raw_signal_id") or "").strip(),
+                        "lifecycle_state_path": str(contract_path),
+                        "lifecycle_decision": "CANDIDATE_CONTRACT_VALID",
+                        "lifecycle_reason_codes": row.get("lifecycle_reason_codes") if isinstance(row.get("lifecycle_reason_codes"), list) else [],
+                        "position_match_status": str(row.get("executable_status") or ""),
+                        "order_match_status": "NO_ORDER",
+                        "reentry_eligible": False,
+                        "unchanged_signal": False,
+                        "selection_reason": "",
+                    }
+                )
+                existing_ids.add(intent_id)
     return rows
 
 
@@ -177,10 +209,15 @@ def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]
         for row in decisions
         if isinstance(row, dict) and str(row.get("raw_intent_hash") or "").strip()
     }
+    by_symbol = {
+        (str(row.get("sleeve_id") or "").strip(), str(row.get("raw_intent_symbol") or "").strip().upper()): row
+        for row in decisions
+        if isinstance(row, dict) and str(row.get("sleeve_id") or "").strip() and str(row.get("raw_intent_symbol") or "").strip()
+    }
     approved: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for candidate in candidates:
-        decision = by_id.get(str(candidate.get("intent_id") or "").strip()) or by_hash.get(str(candidate.get("intent_hash") or "").strip())
+        decision = by_id.get(str(candidate.get("intent_id") or "").strip()) or by_hash.get(str(candidate.get("intent_hash") or "").strip()) or by_symbol.get((str(candidate.get("sleeve_id") or candidate.get("engine_id") or "").strip(), str(candidate.get("symbol") or "").strip().upper()))
         if not decision:
             rejected.append({**candidate, "rejection_reason": "PORTFOLIO_GATE_DECISION_MISSING"})
             continue
@@ -305,7 +342,7 @@ def build_intent_arbitration(
         return payload
 
     rollup = read_json_object_v1(rollup_path)
-    raw_candidates = _candidate_rows(rollup)
+    raw_candidates = _candidate_rows(rollup, truth_root=truth_root, day_utc=day_utc)
     gate = _load_portfolio_gate(truth_root=truth_root, day_utc=day_utc, path=portfolio_gate_path)
     candidates, portfolio_rejections = _apply_portfolio_gate(raw_candidates, gate)
     scoring = _load_portfolio_scoring(

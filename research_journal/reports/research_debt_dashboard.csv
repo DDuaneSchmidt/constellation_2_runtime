@@ -1,0 +1,6 @@
+metric,severity,current_count,baseline,reduced,progress_percent,source
+missing_datasets,CRITICAL,14,14,0,0.0,reports/atlas_v2_research_os/direct_replay_coverage_audit_001.md
+unvalidated_candidates,CRITICAL,7,8,1,12.5,reports/atlas_v2_research_os/direct_candidate_data_validation/latest.json
+proxy_dependent_candidates,CRITICAL,600,600,0,0.0,reports/atlas_v2_research_os/final_candidate_ranking/latest.json
+stale_observations,HIGH,47,47,0,0.0,research_journal/reports/open_paper_position_outcome_follow_through_review_001.md
+unresolved_adversary_findings,HIGH,150,150,0,0.0,reports/atlas_v2_research_os/research_adversary_corpus/corpus_summary.md

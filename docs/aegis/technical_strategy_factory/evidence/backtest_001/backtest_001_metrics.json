@@ -1,0 +1,43 @@
+{
+  "metrics": {
+    "IMP_001": {
+      "annual_volatility": 0.10906101112463101,
+      "average_holding_period_days": 84.1604938271605,
+      "cagr": 0.06786204972484211,
+      "maximum_drawdown": -0.24446201406242518,
+      "sharpe": 0.6580770756465691,
+      "sortino": 0.7103810680028618,
+      "time_in_market": 0.7135330423001656,
+      "total_return": 4.664264659536774,
+      "trade_count": 163,
+      "turnover": 163.0,
+      "ulcer_index": 0.08370018587727729
+    },
+    "baseline_a_spy_buy_and_hold": {
+      "annual_volatility": 0.19310374795343027,
+      "average_holding_period_days": null,
+      "cagr": 0.08352177898014079,
+      "maximum_drawdown": -0.5520110457215854,
+      "sharpe": 0.5129227281750409,
+      "sortino": 0.6521407841354149,
+      "time_in_market": 1.0,
+      "total_return": 7.320194998999931,
+      "trade_count": 1,
+      "turnover": 1.0,
+      "ulcer_index": 0.1617013643802874
+    },
+    "baseline_b_50_spy_50_cash_monthly": {
+      "annual_volatility": 0.09467332929001601,
+      "average_holding_period_days": null,
+      "cagr": 0.04402551537132715,
+      "maximum_drawdown": -0.3230358391569996,
+      "sharpe": 0.5034291772295665,
+      "sortino": 0.6395739416098801,
+      "time_in_market": 0.5,
+      "total_return": 2.120317447325128,
+      "trade_count": 318,
+      "turnover": 3.245842024200411,
+      "ulcer_index": 0.0832155222880525
+    }
+  }
+}

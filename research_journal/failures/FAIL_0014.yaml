@@ -1,0 +1,6 @@
+id: FAIL_0014
+what_we_expected: Low sleeve candidate production would indicate poor sleeve quality.
+what_failed: The reviewed artifacts did not support poor sleeve quality as the primary cause.
+why_failed: Four non-producing sleeves were classified as healthy no-candidate or valid no-signal conditions, one needed data, and candidate diagnostics showed certification and portfolio bottlenecks.
+what_to_try_next: Evidence-check candidate certification and conversion rejections before judging sleeve quality.
+status: OPEN

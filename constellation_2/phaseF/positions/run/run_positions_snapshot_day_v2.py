@@ -8,6 +8,10 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+_REPO_ROOT_BOOTSTRAP = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT_BOOTSTRAP) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_BOOTSTRAP))
+
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 

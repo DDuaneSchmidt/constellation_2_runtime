@@ -42,73 +42,303 @@
     "usable_for_candidate_generation",
     "source_hashes",
     "provider_statuses",
+    "market_context_demand_path",
+    "market_context_items",
+    "market_context_status_counts",
+    "market_context_blockers",
+    "market_context_overall_status",
     "global_context_status",
     "per_symbol_status",
     "breadth_status",
     "manual_execution_only",
     "broker_submit_required",
     "canonical_eod_state_mutated",
-    "canonical_json_hash"
+    "canonical_json_hash",
+    "volatility_reference_mode"
   ],
   "properties": {
-    "schema_id": { "const": "event_market_snapshot" },
-    "schema_version": { "const": "v1" },
-    "artifact_id": { "const": "event_market_snapshot_v1" },
-    "snapshot_id": { "type": "string", "minLength": 1 },
-    "day_utc": { "type": "string", "minLength": 10 },
-    "generated_at_utc": { "type": "string", "minLength": 20 },
-    "market_open_status": { "type": "string", "enum": ["OPEN", "CLOSED", "PRE_MARKET", "AFTER_HOURS", "UNKNOWN"] },
-    "trading_day_type": { "type": "string", "enum": ["TRADING_DAY", "NON_TRADING_DAY", "HOLIDAY", "WEEKEND", "UNKNOWN"] },
-    "spy": { "$ref": "#/$defs/instrument" },
-    "qqq": { "$ref": "#/$defs/instrument" },
-    "vix": { "$ref": "#/$defs/instrument" },
-    "breadth_metrics": { "type": "object" },
-    "breadth_classification": { "type": "string", "enum": ["STRONG_BREADTH", "MIXED_BREADTH", "WEAK_BREADTH", "BREADTH_COLLAPSE", "UNKNOWN"] },
-    "volatility_metrics": { "type": "object" },
-    "volatility_classification": { "type": "string", "enum": ["LOW_VOL", "NORMAL_VOL", "HIGH_VOL", "PANIC_VOL", "UNKNOWN"] },
-    "trend_metrics": { "type": "object" },
-    "macro_event_today": { "type": "boolean" },
-    "macro_event_type": { "type": "string" },
-    "macro_event_risk_level": { "type": "string", "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "EXTREME", "UNKNOWN"] },
-    "macro_events_today": { "type": "array", "items": { "type": "object" } },
+    "schema_id": {
+      "const": "event_market_snapshot"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "const": "event_market_snapshot_v1"
+    },
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "day_utc": {
+      "type": "string",
+      "minLength": 10
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "market_open_status": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "CLOSED",
+        "PRE_MARKET",
+        "AFTER_HOURS",
+        "UNKNOWN"
+      ]
+    },
+    "trading_day_type": {
+      "type": "string",
+      "enum": [
+        "TRADING_DAY",
+        "NON_TRADING_DAY",
+        "HOLIDAY",
+        "WEEKEND",
+        "UNKNOWN"
+      ]
+    },
+    "spy": {
+      "$ref": "#/$defs/instrument"
+    },
+    "qqq": {
+      "$ref": "#/$defs/instrument"
+    },
+    "vix": {
+      "$ref": "#/$defs/instrument"
+    },
+    "breadth_metrics": {
+      "type": "object"
+    },
+    "breadth_classification": {
+      "type": "string",
+      "enum": [
+        "STRONG_BREADTH",
+        "MIXED_BREADTH",
+        "WEAK_BREADTH",
+        "BREADTH_COLLAPSE",
+        "UNKNOWN"
+      ]
+    },
+    "volatility_metrics": {
+      "type": "object"
+    },
+    "volatility_classification": {
+      "type": "string",
+      "enum": [
+        "LOW_VOL",
+        "NORMAL_VOL",
+        "HIGH_VOL",
+        "PANIC_VOL",
+        "REFERENCE_BASED",
+        "UNKNOWN"
+      ]
+    },
+    "volatility_reference_mode": {
+      "type": ["string", "null"],
+      "enum": [
+        "CURRENT_SESSION",
+        "REFERENCE_BASED",
+        null
+      ]
+    },
+    "trend_metrics": {
+      "type": "object"
+    },
+    "macro_event_today": {
+      "type": "boolean"
+    },
+    "macro_event_type": {
+      "type": "string"
+    },
+    "macro_event_risk_level": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "EXTREME",
+        "UNKNOWN"
+      ]
+    },
+    "macro_events_today": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
     "regime_label": {
       "type": "string",
-      "enum": ["TRENDING_UP", "TRENDING_DOWN", "RANGE_BOUND", "HIGH_VOLATILITY", "PANIC", "RECOVERY", "DEFENSIVE_ROTATION", "UNKNOWN"]
+      "enum": [
+        "TRENDING_UP",
+        "TRENDING_DOWN",
+        "RANGE_BOUND",
+        "HIGH_VOLATILITY",
+        "PANIC",
+        "RECOVERY",
+        "DEFENSIVE_ROTATION",
+        "UNKNOWN"
+      ]
     },
-    "regime_ruleset_version": { "type": "string", "minLength": 1 },
-    "classification_rules": { "type": "object" },
-    "stale_data_status": { "type": "string", "enum": ["FRESH", "STALE", "MISSING_INPUT"] },
-    "reason_codes": { "type": "array", "items": { "type": "string" } },
-    "inputs": { "type": "object" },
-    "current_prices": { "type": "object" },
-    "symbols": { "type": "array", "items": { "type": "string" } },
-    "assets_affected": { "type": "array", "items": { "type": "string" } },
-    "data_snapshot_refs": { "type": "array", "items": { "type": "string" } },
-    "source_lineage": { "type": "array", "items": { "type": "object" } },
-    "market_data_status": { "type": "string" },
-    "missing_fields": { "type": "array", "items": { "type": "string" } },
-    "stale_fields": { "type": "array", "items": { "type": "string" } },
-    "usable_for_candidate_generation": { "type": "boolean" },
-    "source_hashes": { "type": "object" },
-    "provider_statuses": { "type": "array", "items": { "type": "object" } },
-    "global_context_status": { "type": "object" },
-    "per_symbol_status": { "type": "object" },
-    "breadth_status": { "type": "object" },
-    "manual_execution_only": { "const": true },
-    "broker_submit_required": { "const": false },
-    "canonical_eod_state_mutated": { "const": false },
-    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "regime_ruleset_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "classification_rules": {
+      "type": "object"
+    },
+    "stale_data_status": {
+      "type": "string",
+      "enum": [
+        "FRESH",
+        "STALE",
+        "MISSING_INPUT"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "current_prices": {
+      "type": "object"
+    },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assets_affected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data_snapshot_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_lineage": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "market_data_status": {
+      "type": "string"
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stale_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "usable_for_candidate_generation": {
+      "type": "boolean"
+    },
+    "source_hashes": {
+      "type": "object"
+    },
+    "provider_statuses": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "global_context_status": {
+      "type": "object"
+    },
+    "per_symbol_status": {
+      "type": "object"
+    },
+    "breadth_status": {
+      "type": "object"
+    },
+    "manual_execution_only": {
+      "const": true
+    },
+    "broker_submit_required": {
+      "const": false
+    },
+    "canonical_eod_state_mutated": {
+      "const": false
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "market_context_demand_path": {
+      "type": "string"
+    },
+    "market_context_items": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "market_context_status_counts": {
+      "type": "object"
+    },
+    "market_context_blockers": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "market_context_overall_status": {
+      "type": "string"
+    }
   },
   "$defs": {
     "instrument": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["symbol", "price", "prev_close", "return_pct"],
+      "required": [
+        "symbol",
+        "price",
+        "prev_close",
+        "return_pct"
+      ],
       "properties": {
-        "symbol": { "type": "string", "minLength": 1 },
-        "price": { "type": "string" },
-        "prev_close": { "type": "string" },
-        "return_pct": { "type": "string" }
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "price": {
+          "type": "string"
+        },
+        "prev_close": {
+          "type": "string"
+        },
+        "return_pct": {
+          "type": "string"
+        },
+        "source_label": {
+          "type": "string"
+        },
+        "session_date": {
+          "type": "string"
+        },
+        "policy_mode": {
+          "type": "string"
+        },
+        "same_day_required_now": {
+          "type": ["boolean", "null"]
+        }
       }
     }
   }

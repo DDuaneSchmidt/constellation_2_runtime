@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "rows": {
+      "items": {
+        "required": [
+          "evidence_id",
+          "trade_id",
+          "evidence_type",
+          "evidence_value",
+          "threshold_value",
+          "source_artifacts",
+          "input_hash",
+          "observed_at",
+          "rule_version",
+          "content_hash"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "thesis_evidence_ledger"
+    },
+    "schema_version": {
+      "const": "v1"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "rows",
+    "content_hash"
+  ],
+  "title": "Thesis Evidence Ledger v1",
+  "type": "object"
+}

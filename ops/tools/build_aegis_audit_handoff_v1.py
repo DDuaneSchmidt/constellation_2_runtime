@@ -22,6 +22,8 @@ from ops.aegis.runtime_truth_kernel_v1 import (  # noqa: E402
     render_recovery_plan_v1,
     write_runtime_truth_kernel_reports_v1,
 )
+from ops.aegis.paper_session_ledger_v1 import paper_session_ledger_path_v1, read_paper_session_ledger_v1  # noqa: E402
+from ops.aegis.paper_operator_projection_v1 import paper_operator_projection_path_v1  # noqa: E402
 
 
 AUDIT_PROMPT = """Use this Aegis ChatGPT Control Packet as the source of truth.
@@ -131,7 +133,7 @@ def build_handoff_text_v1(
     kernel = kernel or build_runtime_truth_kernel_v1(truth_root=truth_root, day_utc=day_utc)
     kernel_paths = kernel_paths or write_runtime_truth_kernel_reports_v1(truth_root=truth_root, payload=kernel)
     runtime_truth = str(kernel.get("runtime_truth_classification") or "UNKNOWN")
-    if runtime_truth not in {"REAL_RUNTIME", "PARTIAL_CONTEXT"}:
+    if runtime_truth not in {"REAL_RUNTIME", "PARTIAL_CONTEXT", "DRY_RUN_ONLY", "DEMO_ONLY"}:
         raise SystemExit(f"FAIL: aegis:audit cannot produce a handoff from runtime_truth_classification={runtime_truth}")
     current_release = _current_release(truth_root)
     actionable = packet.get("current_actionable_items") if isinstance(packet.get("current_actionable_items"), list) else []
@@ -160,6 +162,9 @@ def build_handoff_text_v1(
     invalidation_payload = _read_json(Path(kernel_paths["runtime_invalidations"])) if Path(kernel_paths["runtime_invalidations"]).exists() else {}
     intelligence = intelligence_summaries_v1(truth_root, day_utc)
     candidate_path, candidate_lifecycle = latest_json_v1(truth_root, "aegis_candidate_lifecycle_v1", day_utc, "candidate_lifecycle.v1.json")
+    paper_golden_path, paper_golden = latest_json_v1(truth_root, "aegis_paper_trade_golden_path_v1", day_utc, "paper_trade_golden_path.v1.json")
+    paper_session_ledger = read_paper_session_ledger_v1(truth_root=truth_root, day_utc=day_utc)
+    paper_session = (paper_session_ledger.get("sessions") or [{}])[0] if isinstance(paper_session_ledger.get("sessions"), list) else {}
     canonical_path, canonical = latest_json_v1(truth_root, "aegis_canonical_operator_state_v1", day_utc, "canonical_operator_state.v1.json")
     brief_path, brief = latest_json_v1(truth_root, "aegis_operator_brief_v1", day_utc, "operator_brief.v1.json")
     candidate_rows = candidate_lifecycle.get("candidates") if isinstance(candidate_lifecycle.get("candidates"), list) else []
@@ -280,6 +285,30 @@ def build_handoff_text_v1(
         "CANDIDATE DECISION / CORRECTION HISTORY",
         _json_block(candidate_decision_summary),
         "",
+        "PAPER SESSION LEDGER",
+        _json_block({
+            "artifact_path": str(paper_session_ledger_path_v1(truth_root=truth_root, day_utc=day_utc)),
+            "paper_session_id": paper_session.get("paper_session_id"),
+            "scheduled_run_time": paper_session.get("scheduled_run_time"),
+            "execution_started_at": paper_session.get("execution_started_at"),
+            "execution_completed_at": paper_session.get("execution_completed_at"),
+            "canonicalized_at": paper_session.get("canonicalized_at"),
+            "status": paper_session.get("status"),
+            "reconstruction_count": paper_session.get("reconstruction_count"),
+            "projection_path": str(paper_operator_projection_path_v1(truth_root=truth_root, day_utc=day_utc)),
+        }),
+        "",
+        "PAPER REHEARSAL GOLDEN PATH",
+        _json_block({
+            "artifact_path": str(paper_golden_path or ""),
+            "mode": paper_golden.get("mode") if isinstance(paper_golden, dict) else "",
+            "execution": paper_golden.get("execution") if isinstance(paper_golden, dict) else "",
+            "paper_rehearsal_lifecycle_proven": bool(paper_golden.get("paper_rehearsal_lifecycle_proven")) if isinstance(paper_golden, dict) else False,
+            "receipt_type": paper_golden.get("receipt_type") if isinstance(paper_golden, dict) else "",
+            "safety": paper_golden.get("safety") if isinstance(paper_golden, dict) else {},
+            "chain": paper_golden.get("chain") if isinstance(paper_golden, dict) else [],
+        }),
+        "",
         "MISSING / STALE / INVALID SOURCES",
         _json_block(kernel.get("missing_or_stale_sources") or []),
         "",
@@ -343,7 +372,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"runtime_state_snapshot_path: {kernel_paths['runtime_state_snapshot']}")
     print(f"runtime_state_transition_path: {kernel_paths['runtime_state_transitions']}")
     print(f"runtime_invalidations_path: {kernel_paths['runtime_invalidations']}")
+    paper_golden_path, paper_golden = latest_json_v1(truth_root, "aegis_paper_trade_golden_path_v1", day_utc, "paper_trade_golden_path.v1.json")
+    paper_session_ledger = read_paper_session_ledger_v1(truth_root=truth_root, day_utc=day_utc)
+    paper_session = (paper_session_ledger.get("sessions") or [{}])[0] if isinstance(paper_session_ledger.get("sessions"), list) else {}
+    print(f"paper_session_id: {paper_session.get('paper_session_id') or ''}")
+    print(f"paper_session_scheduled_run_time: {paper_session.get('scheduled_run_time') or ''}")
+    print(f"paper_session_canonicalized_at: {paper_session.get('canonicalized_at') or ''}")
+    print(f"paper_session_ledger_path: {paper_session_ledger_path_v1(truth_root=truth_root, day_utc=day_utc)}")
     print(f"readiness_state: {_json_block({'classification': kernel.get('highest_readiness_layer'), 'layers': kernel.get('layers'), 'kernel_authority': 'aegis_runtime_truth_kernel_v1'})}")
+    print(f"paper_rehearsal_golden_path_proven: {str(bool(paper_golden.get('paper_rehearsal_lifecycle_proven')) if isinstance(paper_golden, dict) else False).lower()}")
+    print(f"paper_rehearsal_golden_path_path: {paper_golden_path or ''}")
+    print(f"paper_rehearsal_receipt_type: {paper_golden.get('receipt_type') if isinstance(paper_golden, dict) else ''}")
     print(f"actionable_items_count: {len(actionable)}")
     print(f"blocked_items_count: {len(blocked)}")
     print("do_not_claim:")

@@ -1,0 +1,6 @@
+id: OBS_0017
+date: 2026-06-03
+observation: Portfolio gates suppressed some raw signals before they became actionable candidates.
+why_interesting: Candidate volume depends on governance gates as well as sleeve signal logic.
+source: AEGIS candidate generation diagnostics and portfolio gate review
+status: OPEN

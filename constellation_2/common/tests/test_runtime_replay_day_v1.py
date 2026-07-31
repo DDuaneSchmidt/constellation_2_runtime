@@ -529,7 +529,7 @@ def _promotion_manual_review_doc() -> dict:
     ).to_dict()
 
 
-def test_replay_slice_cli_requires_registry_file(tmp_path: Path) -> None:
+def test_legacy_promotion_gate_cli_is_retired_without_writing_artifacts(tmp_path: Path) -> None:
     candidate_path = tmp_path / 'candidate.json'
     review_path = tmp_path / 'review.json'
     manual_review_path = tmp_path / 'manual_review.json'
@@ -553,10 +553,11 @@ def test_replay_slice_cli_requires_registry_file(tmp_path: Path) -> None:
         '--output_root', str(output_root),
     ], check=False, capture_output=True, text=True)
     assert completed.returncode != 0
-    assert 'AUTHORITY_REGISTRY_MISSING' in (completed.stderr + completed.stdout)
+    assert 'LEGACY_PROMOTION_GATE_DISABLED_USE_ADVISORY_KERNEL' in (completed.stderr + completed.stdout)
+    assert not (result_dir / 'promotion_gate_result.v1.json').exists()
 
 
-def test_replay_slice_cli_accepts_matching_row(tmp_path: Path) -> None:
+def test_legacy_promotion_gate_cli_stays_retired_even_with_matching_registry(tmp_path: Path) -> None:
     candidate_path = tmp_path / 'candidate.json'
     review_path = tmp_path / 'review.json'
     manual_review_path = tmp_path / 'manual_review.json'
@@ -582,6 +583,7 @@ def test_replay_slice_cli_accepts_matching_row(tmp_path: Path) -> None:
         '--produced_utc', f'{DAY}T00:00:00Z',
         '--output_root', str(output_root),
     ], check=False, capture_output=True, text=True)
-    assert completed.returncode == 0, completed.stderr
-    assert out_path.exists()
-    assert record_path.exists()
+    assert completed.returncode != 0
+    assert 'LEGACY_PROMOTION_GATE_DISABLED_USE_ADVISORY_KERNEL' in (completed.stderr + completed.stdout)
+    assert not out_path.exists()
+    assert not record_path.exists()

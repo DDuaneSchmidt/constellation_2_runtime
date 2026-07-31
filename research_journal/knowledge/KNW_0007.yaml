@@ -1,0 +1,10 @@
+id: KNW_0007
+statement: Candidate generation needs certification and governance evidence before it becomes useful research evidence.
+evidence:
+  - OBS_0007
+  - OBS_0016
+  - OBS_0017
+limitations:
+  - Candidate diagnostics were reviewed for one target day
+why_it_matters: Raw signal or candidate counts can overstate learning progress.
+status: SUPPORTED

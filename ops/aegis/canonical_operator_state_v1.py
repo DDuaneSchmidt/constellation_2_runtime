@@ -8,8 +8,10 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from ops.aegis.candidate_generation_visibility_v1 import build_candidate_generation_visibility_v1
 from ops.aegis.intelligence_common_v1 import ai_evidence_v1, latest_json_v1, read_json_v1, write_json_v1
 from ops.aegis.research_hypothesis_classification_v1 import build_research_hypothesis_classification_v1
+from ops.aegis.run_history_v1 import latest_run_row_v1
 
 
 REPORT_FAMILY = "aegis_canonical_operator_state_v1"
@@ -21,9 +23,24 @@ SOURCE_SPECS = {
     "candidate_ranking": ("aegis_candidate_ranking_v1", "candidate_ranking.v1.json", False),
     "candidate_portfolio_selection": ("aegis_candidate_portfolio_selection_v1", "candidate_portfolio_selection.v1.json", False),
     "candidate_generation_diagnostics": ("aegis_candidate_generation_diagnostics_v1", "candidate_generation_diagnostics.v1.json", False),
+    "candidate_contracts": ("aegis_candidate_contracts_v1", "candidate_contracts.v1.json", False),
+    "entry_reference_price_certification": ("aegis_entry_reference_price_certification_v1", "entry_reference_price_certification.v1.json", False),
+    "candidate_to_paper_lifecycle": ("aegis_candidate_to_paper_lifecycle_v1", "candidate_to_paper_lifecycle.v1.json", False),
+    "candidate_review_packet": ("aegis_candidate_review_packet_v1", "candidate_review_packet.v1.json", False),
+    "paper_review_queue": ("aegis_paper_review_queue_v1", "paper_review_queue.v1.json", False),
+    "paper_trade_outcomes": ("aegis_paper_trade_outcomes_v1", "paper_trade_outcomes.v1.json", False),
+    "paper_position_ledger": ("aegis_paper_position_ledger_v1", "paper_position_ledger.v1.json", False),
+    "paper_lifecycle_reconciliation": ("aegis_paper_lifecycle_reconciliation_v1", "paper_lifecycle_reconciliation.v1.json", False),
+    "trading_lifecycle_state": ("aegis_trading_lifecycle_state_v1", "trading_lifecycle_state.v1.json", False),
+    "exit_recommendations": ("aegis_exit_recommendations_v1", "exit_recommendations.v1.json", False),
+    "exit_logic_review": ("aegis_exit_logic_review_v1", "exit_logic_review.v1.json", False),
+    "candidate_state": ("aegis_candidate_state_v1", "candidate_state.v1.json", False),
+    "run_history": ("aegis_run_history_v1", "run_history.v1.json", False),
     "data_remediation": ("aegis_data_remediation_v1", "data_remediation_latest.v1.json", False),
     "data_registry": ("aegis_data_registry_v1", "data_registry.v1.json", False),
     "sleeve_input_contracts": ("aegis_sleeve_input_contracts_v1", "sleeve_input_contracts.v1.json", False),
+    "input_contract_reconciliation": ("aegis_input_contract_reconciliation_v1", "input_contract_reconciliation.v1.json", False),
+    "market_data_coverage": ("aegis_market_data_coverage_v1", "market_data_coverage.v1.json", False),
     "sleeve_readiness": ("aegis_sleeve_readiness_v1", "sleeve_readiness.v1.json", False),
     "noon_preflight": ("aegis_noon_preflight_v1", "noon_preflight.v1.json", False),
     "sleeve_performance_analytics": ("aegis_sleeve_performance_analytics_v1", "sleeve_performance_analytics.v1.json", False),
@@ -68,7 +85,7 @@ def build_canonical_operator_state_v1(*, truth_root: Path, repo_root: Path, day_
     candidates = _candidate_sections(payloads["candidate_lifecycle"])
     ranking_by_id = _ranking_by_id(payloads["candidate_ranking"])
     top_candidates = _top_candidates(candidates, ranking_by_id)
-    positions = _positions_section(payloads["position_management"], candidates=candidates, source=sources.get("position_management", {}))
+    positions = _positions_section(payloads["position_management"], candidates=candidates, source=sources.get("position_management", {}), paper_position_ledger=payloads.get("paper_position_ledger", {}), paper_position_source=sources.get("paper_position_ledger", {}))
     conflicts = _conflicts(payloads=payloads, candidates=candidates, ranking_by_id=ranking_by_id)
     sleeves = _sleeve_sections(payloads["sleeve_challenger"], payloads["sleeve_performance_analytics"])
     performance = _performance_section(payloads["sleeve_performance_analytics"], payloads["advisory_quality"])
@@ -91,6 +108,12 @@ def build_canonical_operator_state_v1(*, truth_root: Path, repo_root: Path, day_
     event_triggers = _event_triggers(payloads["triggered_sleeve_runs"])
     warnings = _warnings(runtime=runtime, missing=missing, sleeves=sleeves, conflicts=conflicts)
     actions = _actions_required(runtime=runtime, candidates=candidates, governance=governance, sleeves=sleeves, research=research, missing=missing, sources=sources)
+    candidate_ui_projection = build_candidate_ui_projection_v1(
+        payloads=payloads,
+        sources=sources,
+        day_utc=day_utc,
+        canonical_generated_at=_deterministic_generated_at(sources, day_utc),
+    )
     opportunities = _opportunities_projection(
         candidates=candidates,
         top_candidates=top_candidates,
@@ -151,6 +174,7 @@ def build_canonical_operator_state_v1(*, truth_root: Path, repo_root: Path, day_
         "event_triggers": event_triggers,
         "warnings": warnings,
         "opportunities": opportunities,
+        "candidate_ui_projection": candidate_ui_projection,
         "edge_lab": edge_lab,
         "journal": journal,
         "no_action_now": _no_action_now(actions, top_candidates, warnings),
@@ -201,6 +225,8 @@ def render_canonical_operator_state_summary_v1(payload: dict[str, Any]) -> str:
         f"top_candidates: {len(payload.get('top_candidates') or [])}",
         f"portfolio_selected_candidates: {len(((payload.get('opportunities') or {}).get('selected_candidates') or []))}",
         f"portfolio_suppressed_candidates: {len(((payload.get('opportunities') or {}).get('suppressed_candidates') or []))}",
+        f"candidate_contract_count: {((payload.get('candidate_ui_projection') or {}).get('candidate_contract_count') or 0)}",
+        f"awaiting_paper_review: {((payload.get('candidate_ui_projection') or {}).get('awaiting_review_count') or 0)}",
         f"captured_hypotheses: {len((payload.get('research') or {}).get('captured_hypotheses') or [])}",
         f"governance_awaiting_approval: {len(governance.get('awaiting_approval') or [])}",
         f"missing_inputs: {len(payload.get('missing_inputs') or [])}",
@@ -376,7 +402,7 @@ def _candidate_projection(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _positions_section(position_management: dict[str, Any], *, candidates: dict[str, list[dict[str, Any]]], source: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
+def _positions_section(position_management: dict[str, Any], *, candidates: dict[str, list[dict[str, Any]]], source: dict[str, Any] | None = None, paper_position_ledger: dict[str, Any] | None = None, paper_position_source: dict[str, Any] | None = None) -> dict[str, Any]:
     source = source if isinstance(source, dict) else {}
     source_artifacts = [str(source.get("path") or "")] if source.get("path") else []
     source_hashes = {"position_management": source.get("hash")} if source.get("hash") else {}
@@ -431,12 +457,29 @@ def _positions_section(position_management: dict[str, Any], *, candidates: dict[
     pending_stop = [row for row in rows if row.get("stop_status") == "PENDING_STOP_REVIEW"]
     open_rows = [row for row in rows if row.get("stop_status") not in {"STOPPED_OUT", "STOP_NOT_HONORED", "EXITED"}]
     corrected = [row for row in rows if int(row.get("correction_count") or 0) > 0]
+    paper_position_ledger = paper_position_ledger if isinstance(paper_position_ledger, dict) else {}
+    paper_position_source = paper_position_source if isinstance(paper_position_source, dict) else {}
+    paper_open = _list_value(paper_position_ledger, "open_positions")
+    paper_closed = _list_value(paper_position_ledger, "closed_positions", "historical_positions")
+    legacy_captures = _list_value(paper_position_ledger, "legacy_captures")
+    paper_source_path = str(paper_position_source.get("path") or "")
     return {
         "open_positions": open_rows,
         "stopped_positions": stopped,
         "pending_risk_plan": pending_risk,
         "pending_stop_review": pending_stop,
         "corrected_position_events": corrected,
+        "paper_position_ledger_status": "AVAILABLE" if paper_position_ledger else "MISSING",
+        "paper_position_ledger_path": paper_source_path,
+        "open_paper_positions": paper_open,
+        "closed_paper_positions": paper_closed,
+        "historical_paper_positions": paper_closed,
+        "legacy_captures": legacy_captures,
+        "open_paper_position_count": _int_value(paper_position_ledger.get("open_position_count"), len(paper_open)),
+        "closed_paper_position_count": _int_value(paper_position_ledger.get("closed_position_count"), len(paper_closed)),
+        "legacy_capture_count": _int_value(paper_position_ledger.get("legacy_capture_count"), len(legacy_captures)),
+        "paper_position_ledger_mismatch_count": _int_value(paper_position_ledger.get("paper_position_ledger_mismatch_count"), len(_list_value(paper_position_ledger, "paper_position_ledger_mismatches"))),
+        "paper_position_ledger_mismatches": _list_value(paper_position_ledger, "paper_position_ledger_mismatches"),
     }
 
 
@@ -488,6 +531,595 @@ def _performance_section(performance: dict[str, Any], advisory_quality: dict[str
     }
 
 
+
+def build_candidate_ui_projection_v1(
+    *,
+    payloads: dict[str, dict[str, Any]],
+    sources: dict[str, dict[str, Any]],
+    day_utc: str,
+    canonical_generated_at: str = "",
+) -> dict[str, Any]:
+    diagnostics = payloads.get("candidate_generation_diagnostics") if isinstance(payloads.get("candidate_generation_diagnostics"), dict) else {}
+    contracts = payloads.get("candidate_contracts") if isinstance(payloads.get("candidate_contracts"), dict) else {}
+    review_packet = payloads.get("candidate_review_packet") if isinstance(payloads.get("candidate_review_packet"), dict) else {}
+    paper_queue = payloads.get("paper_review_queue") if isinstance(payloads.get("paper_review_queue"), dict) else {}
+    entry_price_certification = payloads.get("entry_reference_price_certification") if isinstance(payloads.get("entry_reference_price_certification"), dict) else {}
+    candidate_to_paper_lifecycle = payloads.get("candidate_to_paper_lifecycle") if isinstance(payloads.get("candidate_to_paper_lifecycle"), dict) else {}
+    outcomes = payloads.get("paper_trade_outcomes") if isinstance(payloads.get("paper_trade_outcomes"), dict) else {}
+    paper_position_ledger = payloads.get("paper_position_ledger") if isinstance(payloads.get("paper_position_ledger"), dict) else {}
+    paper_lifecycle_reconciliation = payloads.get("paper_lifecycle_reconciliation") if isinstance(payloads.get("paper_lifecycle_reconciliation"), dict) else {}
+    trading_lifecycle_state = payloads.get("trading_lifecycle_state") if isinstance(payloads.get("trading_lifecycle_state"), dict) else {}
+    exit_recommendations = payloads.get("exit_recommendations") if isinstance(payloads.get("exit_recommendations"), dict) else {}
+    exit_logic_review = payloads.get("exit_logic_review") if isinstance(payloads.get("exit_logic_review"), dict) else {}
+    candidate_state = payloads.get("candidate_state") if isinstance(payloads.get("candidate_state"), dict) else {}
+    run_history = payloads.get("run_history") if isinstance(payloads.get("run_history"), dict) else {}
+    input_contract_reconciliation = payloads.get("input_contract_reconciliation") if isinstance(payloads.get("input_contract_reconciliation"), dict) else {}
+    market_data_coverage = payloads.get("market_data_coverage") if isinstance(payloads.get("market_data_coverage"), dict) else {}
+    latest_run = latest_run_row_v1(run_history)
+    candidate_lifecycle_summary = candidate_to_paper_lifecycle.get("summary") if isinstance(candidate_to_paper_lifecycle.get("summary"), dict) else {}
+
+    contract_rows = _list_value(contracts, "candidate_contracts", "contracts", "rows")
+    queue_rows = _list_value(paper_queue, "rows", "queue_items", "items")
+    state_rows = _list_value(candidate_state, "active_candidates", "candidates")
+    existing_queue_ids = {str(row.get("candidate_id") or "") for row in queue_rows if isinstance(row, dict)}
+    for state_row in state_rows:
+        if isinstance(state_row, dict) and str(state_row.get("candidate_id") or "") not in existing_queue_ids and str(state_row.get("current_state") or "") in {"AWAITING_REVIEW", "APPROVED_FOR_PAPER", "PAPER_POSITION_OPEN"}:
+            queue_rows.append(state_row)
+    review_rows = _list_value(review_packet, "review_candidates", "candidates", "rows")
+    outcome_rows = (
+        _list_value(outcomes, "outcomes", "paper_trade_outcomes", "rows")
+        + _list_value(outcomes, "open_trades")
+        + _list_value(outcomes, "closed_trades")
+    )
+    status_counts = paper_queue.get("status_counts") if isinstance(paper_queue.get("status_counts"), dict) else {}
+    awaiting_review_count = _int_value(
+        status_counts.get("AWAITING_REVIEW"),
+        sum(1 for row in queue_rows if str(row.get("status") or row.get("review_status") or "").upper() == "AWAITING_REVIEW"),
+    )
+    reviewable_candidate_count = _int_value(review_packet.get("candidate_count"), len(review_rows))
+
+    source_keys = ("candidate_generation_diagnostics", "candidate_contracts", "entry_reference_price_certification", "candidate_to_paper_lifecycle", "candidate_review_packet", "paper_review_queue", "paper_trade_outcomes", "paper_position_ledger", "paper_lifecycle_reconciliation", "trading_lifecycle_state", "exit_recommendations", "exit_logic_review", "candidate_state", "run_history", "input_contract_reconciliation", "market_data_coverage")
+    source_artifacts = [_candidate_source_ref(key, payloads.get(key) if isinstance(payloads.get(key), dict) else {}, sources.get(key, {}), day_utc) for key in source_keys]
+    mismatch_reasons: list[str] = []
+    for ref in source_artifacts:
+        if ref["found"] and ref["day_utc"] and ref["day_utc"] != day_utc:
+            mismatch_reasons.append(f"WRONG_DAY:{ref['source']}:{ref['day_utc']}!=%s" % day_utc)
+    if sources.get("candidate_generation_diagnostics", {}).get("found") and not diagnostics:
+        mismatch_reasons.append("DIAGNOSTICS_PATH_FOUND_BUT_PAYLOAD_UNREADABLE")
+    if sources.get("paper_review_queue", {}).get("found") and len(queue_rows) != reviewable_candidate_count:
+        mismatch_reasons.append(f"REVIEW_PACKET_QUEUE_COUNT_MISMATCH:{reviewable_candidate_count}!={len(queue_rows)}")
+    if contract_rows and queue_rows and len(contract_rows) != len(queue_rows):
+        mismatch_reasons.append(f"CONTRACT_QUEUE_COUNT_MISMATCH:{len(contract_rows)}!={len(queue_rows)}")
+
+    generated_times = [str(ref.get("generated_at") or "") for ref in source_artifacts if ref.get("generated_at")]
+    max_source_generated_at = sorted(generated_times)[-1] if generated_times else ""
+    stale = bool(canonical_generated_at and max_source_generated_at and canonical_generated_at < max_source_generated_at)
+    if stale:
+        mismatch_reasons.append(f"CANONICAL_OLDER_THAN_CANDIDATE_SOURCES:{canonical_generated_at}<{max_source_generated_at}")
+
+    projection_status = "AVAILABLE"
+    if mismatch_reasons:
+        projection_status = "PROJECTION_MISMATCH"
+    if stale:
+        projection_status = "CANONICAL_PROJECTION_STALE"
+
+    diagnostics_found = bool(sources.get("candidate_generation_diagnostics", {}).get("found") and diagnostics)
+    run_history_found = bool(sources.get("run_history", {}).get("found") and run_history and latest_run)
+    contracts_found = bool(sources.get("candidate_contracts", {}).get("found") and contracts)
+    queue_found = bool(sources.get("paper_review_queue", {}).get("found") and paper_queue)
+    packet_found = bool(sources.get("candidate_review_packet", {}).get("found") and review_packet)
+    review_by_id = {str(row.get("candidate_id") or ""): row for row in review_rows if str(row.get("candidate_id") or "")}
+    contract_by_id = {str(row.get("candidate_id") or ""): row for row in contract_rows if str(row.get("candidate_id") or "")}
+    ledger_open_rows = _list_value(paper_position_ledger, "open_positions")
+    ledger_closed_rows = _list_value(paper_position_ledger, "closed_positions", "historical_positions")
+    ledger_legacy_rows = _list_value(paper_position_ledger, "legacy_captures")
+    open_source_rows = ledger_open_rows if ledger_open_rows or paper_position_ledger else _list_value(outcomes, "open_trades")
+    closed_source_rows = ledger_closed_rows if ledger_closed_rows or paper_position_ledger else _list_value(outcomes, "closed_trades")
+    open_by_id = {str(row.get("candidate_id") or row.get("linked_candidate_id") or ""): row for row in open_source_rows if str(row.get("candidate_id") or row.get("linked_candidate_id") or "")}
+    closed_by_id = {str(row.get("candidate_id") or row.get("linked_candidate_id") or ""): row for row in closed_source_rows if str(row.get("candidate_id") or row.get("linked_candidate_id") or "")}
+    exit_recommendation_rows = _list_value(exit_recommendations, "recommendations", "rows")
+    exit_recommendation_by_candidate = {str(row.get("candidate_id") or ""): row for row in exit_recommendation_rows if str(row.get("candidate_id") or "")}
+    workflow_rows = []
+    for queue_row in queue_rows:
+        candidate_id = str(queue_row.get("candidate_id") or "")
+        review_row = review_by_id.get(candidate_id, {})
+        contract_row = contract_by_id.get(candidate_id, {})
+        open_row = open_by_id.get(candidate_id, {})
+        closed_row = closed_by_id.get(candidate_id, {})
+        queue_status = str(queue_row.get("status") or queue_row.get("current_state") or "AWAITING_REVIEW").upper()
+        if queue_status == "REJECTED_BY_OPERATOR":
+            workflow_state = "REJECTED_BY_OPERATOR"
+        elif queue_status == "EXPIRED":
+            workflow_state = "EXPIRED"
+        elif closed_row:
+            workflow_state = "PAPER_POSITION_CLOSED"
+        elif open_row:
+            workflow_state = "PAPER_POSITION_OPEN"
+        elif queue_status == "APPROVED_FOR_PAPER":
+            workflow_state = "AWAITING_REVIEW"
+        else:
+            workflow_state = "AWAITING_REVIEW"
+        workflow_rows.append({
+            **queue_row,
+            "workflow_state": workflow_state,
+            "canonical_workflow_state": workflow_state,
+            "sleeve_id": str(review_row.get("sleeve_id") or contract_row.get("sleeve_id") or queue_row.get("sleeve_id") or ""),
+            "raw_signal_id": str(review_row.get("raw_signal_id") or contract_row.get("raw_signal_id") or queue_row.get("raw_signal_id") or ""),
+            "direction": str(review_row.get("direction") or contract_row.get("direction") or queue_row.get("direction") or ""),
+            "entry_reference_price": str(review_row.get("entry_reference_price") or contract_row.get("entry_reference_price") or queue_row.get("entry_reference_price") or ""),
+            "thesis_reason_codes": _list_value({"rows": review_row.get("thesis_reason_codes") if isinstance(review_row.get("thesis_reason_codes"), list) else queue_row.get("thesis_reason_codes") if isinstance(queue_row.get("thesis_reason_codes"), list) else []}, "rows"),
+            "thesis_reason_code_text": [str(item) for item in (review_row.get("thesis_reason_codes") if isinstance(review_row.get("thesis_reason_codes"), list) else queue_row.get("thesis_reason_codes") if isinstance(queue_row.get("thesis_reason_codes"), list) else [])],
+            "evidence_paths": [str(item) for item in (review_row.get("evidence_paths") if isinstance(review_row.get("evidence_paths"), list) else queue_row.get("evidence_paths") if isinstance(queue_row.get("evidence_paths"), list) else [])],
+            "evidence_hashes": review_row.get("evidence_hashes") if isinstance(review_row.get("evidence_hashes"), dict) else {},
+            "warnings": [str(item) for item in (review_row.get("disqualifying_warnings") if isinstance(review_row.get("disqualifying_warnings"), list) else [])],
+            "paper_only": True,
+            "human_review_required": True,
+            "live_trade_eligible": False,
+            "broker_execution_allowed": False,
+            "autonomous_execution_allowed": False,
+            "workflow_badges": ["PAPER ONLY", "HUMAN REVIEW REQUIRED", "LIVE TRADING DISABLED"],
+            "workflow_timeline": {
+                "reviewed": queue_status == "REJECTED_BY_OPERATOR" or bool(open_row or closed_row),
+                "approved": bool(open_row or closed_row),
+                "entry_recorded": bool(open_row or closed_row),
+                "exit_recorded": bool(closed_row),
+                "outcome_closed": bool(closed_row),
+                "reviewed_at_utc": str(queue_row.get("timestamp") or "") if queue_status == "REJECTED_BY_OPERATOR" else "",
+                "entry_recorded_at_utc": str((open_row or closed_row).get("timestamp_utc") or "") if (open_row or closed_row) else "",
+                "exit_recorded_at_utc": str(closed_row.get("exit_timestamp_utc") or closed_row.get("timestamp_utc") or "") if closed_row else "",
+            },
+            "open_paper_position": open_row,
+            "closed_paper_position": closed_row,
+            "exit_recommendation": exit_recommendation_by_candidate.get(candidate_id, {}),
+            "originating_day": str(queue_row.get("originating_day") or day_utc),
+            "latest_projection_day": str(queue_row.get("latest_projection_day") or day_utc),
+            "rollover_status": str(queue_row.get("rollover_status") or ("CURRENT_DAY" if str(queue_row.get("originating_day") or day_utc) == day_utc else "CARRIED_FORWARD")),
+            "age_days": queue_row.get("age_days", 0),
+            "expiration_status": str(queue_row.get("expiration_status") or ("EXPIRED" if workflow_state == "EXPIRED" else "ACTIVE")),
+        })
+    operator_awaiting_review_count = sum(1 for row in workflow_rows if str(row.get("workflow_state") or "").upper() == "AWAITING_REVIEW")
+    if workflow_rows:
+        reviewable_candidate_count = len([row for row in workflow_rows if str(row.get("workflow_state") or "") in {"AWAITING_REVIEW", "PAPER_POSITION_OPEN"}])
+    raw_signal_count = _first_int_value(latest_run.get("raw_signals"), diagnostics.get("total_raw_signals"), 0)
+    diagnostic_candidate_outputs = _first_int_value(latest_run.get("diagnostic_candidate_outputs"), diagnostics.get("diagnostic_candidate_outputs"), diagnostics.get("total_candidates_generated"), 0)
+    diagnostics_candidates_generated = _first_int_value(latest_run.get("diagnostics_candidates_generated"), diagnostics.get("total_candidates_generated"), 0)
+    candidate_contracts_created = _first_int_value(latest_run.get("valid_candidate_contracts"), latest_run.get("candidate_contracts_created"), contracts.get("candidates_created"), len(contract_rows))
+    valid_candidate_contracts = candidate_contracts_created
+    rejected_candidate_contracts = _first_int_value(latest_run.get("rejected_candidate_contracts"), diagnostics.get("rejected_candidate_contracts"), contracts.get("candidates_rejected"), len(_list_value(contracts, "rejected_raw_signals")))
+    reviewable_current_day_candidates = _first_int_value(latest_run.get("reviewable_current_day_candidates"), valid_candidate_contracts)
+    carried_forward_candidates = _first_int_value(latest_run.get("carried_forward_candidates"), sum(1 for row in workflow_rows if str(row.get("originating_day") or day_utc) != day_utc))
+    rejected_count = _first_int_value(latest_run.get("rejected_count"), diagnostics.get("total_candidates_rejected"), 0)
+    sleeves_expected = _first_int_value(latest_run.get("sleeves_expected"), diagnostics.get("total_sleeves_expected"), 0)
+    sleeves_run = _first_int_value(latest_run.get("sleeves_run"), diagnostics.get("total_sleeves_run"), 0)
+    diagnostic_rejection_rows = _diagnostic_rejection_rows(
+        diagnostics=diagnostics,
+        diagnostics_path=str(sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        total_rejected=rejected_count,
+    )
+    input_contract_reconciliation_rows = _list_value(input_contract_reconciliation, "rows")
+    market_data_coverage_rows = _list_value(market_data_coverage, "coverage_rows")
+    artifact_mismatch_status = str(latest_run.get("artifact_mismatch_status") or "")
+    artifact_mismatch_reason = str(latest_run.get("artifact_mismatch_reason") or latest_run.get("mismatch_reason") or "")
+    if not artifact_mismatch_status and diagnostic_candidate_outputs > valid_candidate_contracts and valid_candidate_contracts == 0 and rejected_candidate_contracts > 0:
+        artifact_mismatch_status = "DIAGNOSTIC_OUTPUTS_REJECTED_BY_CONTRACT_VALIDATION"
+        artifact_mismatch_reason = _top_contract_rejection_reason(contracts)
+    run_visibility_status = "RUN_HISTORY_AVAILABLE" if run_history_found else ("RUN_SUMMARY_WITHOUT_DIAGNOSTICS" if run_history and not diagnostics_found else ("DIAGNOSTICS_AVAILABLE_NO_RUN_HISTORY" if diagnostics_found else "DIAGNOSTICS_MISSING"))
+    if artifact_mismatch_status:
+        run_visibility_status = artifact_mismatch_status
+    projection_generated_at = canonical_generated_at or max_source_generated_at
+    diagnostics_completed_at = str(latest_run.get("diagnostics_completed_at") or latest_run.get("completed_at") or diagnostics.get("completed_at_utc") or diagnostics.get("run_completed_at_utc") or diagnostics.get("generated_at_utc") or diagnostics.get("generated_at") or "")
+    diagnostics_started_at = str(latest_run.get("diagnostics_started_at") or diagnostics.get("diagnostics_started_at") or diagnostics.get("diagnostics_started_at_utc") or "NOT_RECORDED")
+    actual_started_at = str(latest_run.get("started_at") or "")
+    derived_mismatch_explanation = _candidate_contract_mismatch_explanation(status=artifact_mismatch_status, reason=artifact_mismatch_reason, contracts=contracts, diagnostics=diagnostics, sources=sources)
+    if diagnostic_rejection_rows:
+        derived_mismatch_explanation["diagnostic_rejection_rows"] = diagnostic_rejection_rows
+        derived_mismatch_explanation["diagnostic_rejection_count"] = len(diagnostic_rejection_rows)
+        derived_mismatch_explanation["diagnostic_rejection_source_path"] = str(sources.get("candidate_generation_diagnostics", {}).get("path") or "")
+    elif rejected_count > 0:
+        derived_mismatch_explanation["diagnostic_rejection_count"] = 0
+        derived_mismatch_explanation["diagnostic_rejection_detail_status"] = "NO_PER_OUTPUT_REJECTION_ROWS"
+        derived_mismatch_explanation["diagnostic_rejection_source_path"] = str(sources.get("candidate_generation_diagnostics", {}).get("path") or "")
+    if input_contract_reconciliation_rows:
+        derived_mismatch_explanation["input_contract_reconciliation_rows"] = input_contract_reconciliation_rows
+        derived_mismatch_explanation["input_contract_reconciliation_count"] = len(input_contract_reconciliation_rows)
+        derived_mismatch_explanation["input_contract_reconciliation_source_path"] = str(sources.get("input_contract_reconciliation", {}).get("path") or "")
+    latest_mismatch_explanation = latest_run.get("mismatch_explanation") if isinstance(latest_run.get("mismatch_explanation"), dict) else {}
+    mismatch_explanation = {**derived_mismatch_explanation, **latest_mismatch_explanation}
+    run_summary = {
+        "run_id": str(latest_run.get("run_id") or ""),
+        "started_at": actual_started_at,
+        "run_start": actual_started_at or "NOT_RECORDED",
+        "completed_at": diagnostics_completed_at,
+        "run_end": diagnostics_completed_at,
+        "market_snapshot_time": str(latest_run.get("market_snapshot_time") or ""),
+        "candidate_snapshot_time": str(latest_run.get("candidate_snapshot_time") or ""),
+        "diagnostics_started_at": diagnostics_started_at,
+        "diagnostics_completed_at": diagnostics_completed_at,
+        "projection_generated_at": projection_generated_at,
+        "dashboard_rendered_at": "CLIENT_RENDER_TIME",
+        "command": str(latest_run.get("command") or "npm run aegis:candidate-diagnostics" if diagnostics_found else ""),
+        "target_day": day_utc,
+        "status": str(latest_run.get("status") or ("SUCCESS" if diagnostics_found else "UNKNOWN")),
+        "classification": str(latest_run.get("classification") or diagnostics.get("operator_interpretation") or "UNKNOWN"),
+        "sleeves_expected": sleeves_expected,
+        "sleeves_run": sleeves_run,
+        "raw_signals": raw_signal_count,
+        "diagnostic_candidate_outputs": diagnostic_candidate_outputs,
+        "diagnostics_candidates_generated": diagnostics_candidates_generated,
+        "valid_candidate_contracts": valid_candidate_contracts,
+        "candidate_contracts_created": candidate_contracts_created,
+        "certified_price_candidate_count": _int_value(entry_price_certification.get("certified_count"), 0),
+        "review_eligible_count": _int_value(candidate_lifecycle_summary.get("review_eligible_count"), 0),
+        "promotion_eligible_count": _int_value(candidate_lifecycle_summary.get("promotion_eligible_count"), 0),
+        "auto_promoted_to_paper_tracking_count": _int_value(candidate_lifecycle_summary.get("auto_promoted_to_paper_tracking_count"), 0),
+        "human_approved_for_paper_count": _int_value(candidate_lifecycle_summary.get("human_approved_for_paper_count"), 0),
+        "auto_promotion_blocked_count": _int_value(candidate_lifecycle_summary.get("auto_promotion_blocked_count"), 0),
+        "auto_promotion_not_eligible_count": _int_value(candidate_lifecycle_summary.get("auto_promotion_not_eligible_count"), 0),
+        "paper_positions_created_count": _int_value(candidate_lifecycle_summary.get("paper_positions_created_count"), 0),
+        "blocked_from_paper_count": _int_value(candidate_lifecycle_summary.get("blocked_from_paper_count"), 0),
+        "rejected_candidate_contracts": rejected_candidate_contracts,
+        "reviewable_current_day_candidates": reviewable_current_day_candidates,
+        "carried_forward_candidates": carried_forward_candidates,
+        "rejected_count": rejected_count,
+        "diagnostic_rejection_count": len(diagnostic_rejection_rows),
+        "diagnostic_rejection_rows": diagnostic_rejection_rows,
+        "diagnostic_rejection_source_path": str(sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        "input_contract_reconciliation_count": len(input_contract_reconciliation_rows),
+        "input_contract_reconciliation_rows": input_contract_reconciliation_rows,
+        "input_contract_reconciliation_source_path": str(sources.get("input_contract_reconciliation", {}).get("path") or ""),
+        "market_data_coverage": _market_data_coverage_summary_v1(market_data_coverage, sources.get("market_data_coverage", {})),
+        "market_data_coverage_rows": market_data_coverage_rows,
+        "diagnostics_path": str(latest_run.get("diagnostics_path") or sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        "candidate_contracts_path": str(latest_run.get("candidate_contracts_path") or sources.get("candidate_contracts", {}).get("path") or ""),
+        "paper_review_queue_path": str(latest_run.get("paper_review_queue_path") or sources.get("paper_review_queue", {}).get("path") or ""),
+        "source_hashes": latest_run.get("source_hashes") if isinstance(latest_run.get("source_hashes"), dict) else {},
+        "artifact_mismatch": bool(artifact_mismatch_status),
+        "artifact_mismatch_status": artifact_mismatch_status,
+        "artifact_mismatch_reason": artifact_mismatch_reason,
+        "mismatch_reason": artifact_mismatch_reason,
+        "mismatch_explanation": mismatch_explanation,
+        "run_visibility_status": run_visibility_status,
+    }
+    return {
+        "schema_id": "aegis_candidate_ui_projection",
+        "schema_version": "v1",
+        "artifact_id": f"aegis_candidate_ui_projection:{day_utc}",
+        "day_utc": day_utc,
+        "generated_at": projection_generated_at,
+        "projection_generated_at": projection_generated_at,
+        "dashboard_rendered_at": "CLIENT_RENDER_TIME",
+        "run_summary": run_summary,
+        "run_history_status": "AVAILABLE" if run_history_found else "MISSING",
+        "run_history_path": str(sources.get("run_history", {}).get("path") or ""),
+        "run_visibility_status": run_visibility_status,
+        "raw_signal_count": raw_signal_count,
+        "diagnostic_candidate_outputs": diagnostic_candidate_outputs,
+        "diagnostics_candidates_generated": diagnostics_candidates_generated,
+        "valid_candidate_contracts": valid_candidate_contracts,
+        "candidate_contracts_created": candidate_contracts_created,
+        "certified_price_candidate_count": _int_value(entry_price_certification.get("certified_count"), 0),
+        "review_eligible_count": _int_value(candidate_lifecycle_summary.get("review_eligible_count"), 0),
+        "promotion_eligible_count": _int_value(candidate_lifecycle_summary.get("promotion_eligible_count"), 0),
+        "auto_promoted_to_paper_tracking_count": _int_value(candidate_lifecycle_summary.get("auto_promoted_to_paper_tracking_count"), 0),
+        "human_approved_for_paper_count": _int_value(candidate_lifecycle_summary.get("human_approved_for_paper_count"), 0),
+        "auto_promotion_blocked_count": _int_value(candidate_lifecycle_summary.get("auto_promotion_blocked_count"), 0),
+        "auto_promotion_not_eligible_count": _int_value(candidate_lifecycle_summary.get("auto_promotion_not_eligible_count"), 0),
+        "paper_positions_created_count": _int_value(candidate_lifecycle_summary.get("paper_positions_created_count"), 0),
+        "blocked_from_paper_count": _int_value(candidate_lifecycle_summary.get("blocked_from_paper_count"), 0),
+        "rejected_candidate_contracts": rejected_candidate_contracts,
+        "reviewable_current_day_candidates": reviewable_current_day_candidates,
+        "carried_forward_candidates": carried_forward_candidates,
+        "rejected_count": rejected_count,
+        "diagnostic_rejection_count": len(diagnostic_rejection_rows),
+        "diagnostic_rejection_rows": diagnostic_rejection_rows,
+        "diagnostic_rejection_source_path": str(sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        "input_contract_reconciliation_count": len(input_contract_reconciliation_rows),
+        "input_contract_reconciliation_rows": input_contract_reconciliation_rows,
+        "input_contract_reconciliation_source_path": str(sources.get("input_contract_reconciliation", {}).get("path") or ""),
+        "market_data_coverage": _market_data_coverage_summary_v1(market_data_coverage, sources.get("market_data_coverage", {})),
+        "market_data_coverage_rows": market_data_coverage_rows,
+        "sleeves_expected": sleeves_expected,
+        "sleeves_run": sleeves_run,
+        "projection_status": projection_status,
+        "diagnostics_status": "AVAILABLE" if diagnostics_found else "MISSING",
+        "paper_review_queue_status": "AVAILABLE" if queue_found else "MISSING",
+        "candidate_contracts_status": "AVAILABLE" if contracts_found else "MISSING",
+        "candidate_review_packet_status": "AVAILABLE" if packet_found else "MISSING",
+        "candidate_contract_count": valid_candidate_contracts,
+        "current_day_candidate_contract_count": valid_candidate_contracts,
+        "valid_candidate_contract_count": len(contract_rows),
+        "paper_review_queue_count": len(queue_rows),
+        "candidate_to_paper_lifecycle_status": "AVAILABLE" if candidate_to_paper_lifecycle else "MISSING",
+        "candidate_to_paper_lifecycle_path": str(sources.get("candidate_to_paper_lifecycle", {}).get("path") or ""),
+        "candidate_to_paper_lifecycle_counts": candidate_lifecycle_summary,
+        "candidate_to_paper_blocker_counts": candidate_to_paper_lifecycle.get("blocker_counts") if isinstance(candidate_to_paper_lifecycle.get("blocker_counts"), dict) else {},
+        "entry_reference_price_certification_status": "AVAILABLE" if entry_price_certification else "MISSING",
+        "entry_reference_price_certification_path": str(sources.get("entry_reference_price_certification", {}).get("path") or ""),
+        "awaiting_review_count": operator_awaiting_review_count,
+        "reviewable_candidate_count": reviewable_candidate_count,
+        "paper_trade_outcome_count": len(outcome_rows),
+        "paper_position_ledger_status": "AVAILABLE" if paper_position_ledger else "MISSING",
+        "paper_position_ledger_path": str(sources.get("paper_position_ledger", {}).get("path") or ""),
+        "exit_recommendations_status": "AVAILABLE" if exit_recommendations else "MISSING",
+        "exit_recommendations_path": str(sources.get("exit_recommendations", {}).get("path") or ""),
+        "exit_logic_review_status": "AVAILABLE" if exit_logic_review else "MISSING",
+        "exit_logic_review_path": str(sources.get("exit_logic_review", {}).get("path") or ""),
+        "exit_recommendations": exit_recommendation_rows,
+        "exit_recommendation_count": _int_value(exit_recommendations.get("recommendation_count"), len(exit_recommendation_rows)),
+        "exit_recommendation_counts": exit_recommendations.get("pnl_report_hooks", {}).get("recommendation_counts") if isinstance(exit_recommendations.get("pnl_report_hooks"), dict) else {},
+        "paper_position_open_count": _int_value(paper_position_ledger.get("open_position_count"), len(ledger_open_rows)),
+        "paper_position_closed_count": _int_value(paper_position_ledger.get("closed_position_count"), len(ledger_closed_rows)),
+        "legacy_capture_count": _int_value(paper_position_ledger.get("legacy_capture_count"), len(ledger_legacy_rows)),
+        "paper_position_ledger_mismatch_count": _int_value(paper_position_ledger.get("paper_position_ledger_mismatch_count"), len(_list_value(paper_position_ledger, "paper_position_ledger_mismatches"))),
+        "paper_position_ledger_mismatches": _list_value(paper_position_ledger, "paper_position_ledger_mismatches"),
+        "paper_lifecycle_reconciliation_status": "AVAILABLE" if paper_lifecycle_reconciliation else "MISSING",
+        "paper_lifecycle_reconciliation_path": str(sources.get("paper_lifecycle_reconciliation", {}).get("path") or ""),
+        "paper_lifecycle_counts": paper_lifecycle_reconciliation.get("counts") if isinstance(paper_lifecycle_reconciliation.get("counts"), dict) else {},
+        "paper_lifecycle_operator_summary_messages": _string_list_value(paper_lifecycle_reconciliation, "operator_summary_messages"),
+        "paper_lifecycle_failed_actions": _list_value(paper_lifecycle_reconciliation, "failed_actions"),
+        "paper_lifecycle_expected_open_but_missing": _list_value(paper_lifecycle_reconciliation, "expected_open_but_missing"),
+        "paper_lifecycle_receipt_without_ledger_event": _list_value(paper_lifecycle_reconciliation, "receipt_without_ledger_event"),
+        "trading_lifecycle_state_status": "AVAILABLE" if trading_lifecycle_state else "MISSING",
+        "trading_lifecycle_state_path": str(sources.get("trading_lifecycle_state", {}).get("path") or ""),
+        "trading_lifecycle_counts": trading_lifecycle_state.get("counts") if isinstance(trading_lifecycle_state.get("counts"), dict) else {},
+        "trading_lifecycle_items": _list_value(trading_lifecycle_state, "lifecycle_items"),
+        "trading_lifecycle_open_governed_positions": _list_value(trading_lifecycle_state, "open_governed_positions"),
+        "trading_lifecycle_legacy_partial_open_positions": _list_value(trading_lifecycle_state, "legacy_partial_open_positions"),
+        "trading_lifecycle_failed_paper_trade_attempts": _list_value(trading_lifecycle_state, "failed_paper_trade_attempts"),
+        "trading_lifecycle_awaiting_paper_trade": _list_value(trading_lifecycle_state, "awaiting_paper_trade"),
+        "trading_lifecycle_closed_positions": _list_value(trading_lifecycle_state, "closed_positions"),
+        "trading_lifecycle_unclassified_items": _list_value(trading_lifecycle_state, "unclassified_lifecycle_items"),
+        "open_paper_positions": ledger_open_rows,
+        "closed_paper_positions": ledger_closed_rows,
+        "historical_paper_positions": ledger_closed_rows,
+        "legacy_captures": ledger_legacy_rows,
+        "persistent_candidate_state_count": len(state_rows),
+        "candidate_state_status": "AVAILABLE" if candidate_state else "MISSING",
+        "candidate_state_path": str(sources.get("candidate_state", {}).get("path") or ""),
+        "paper_review_queue_rows": workflow_rows,
+        "paper_workflow_rows": workflow_rows,
+        "candidate_contract_rows": contract_rows,
+        "candidate_review_rows": review_rows,
+        "candidate_diagnostics_path": str(sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        "candidate_contracts_path": str(sources.get("candidate_contracts", {}).get("path") or ""),
+        "candidate_review_packet_path": str(sources.get("candidate_review_packet", {}).get("path") or ""),
+        "paper_review_queue_path": str(sources.get("paper_review_queue", {}).get("path") or ""),
+        "paper_trade_outcomes_path": str(sources.get("paper_trade_outcomes", {}).get("path") or ""),
+        "source_artifact_hashes": {key: str(sources.get(key, {}).get("hash") or "") for key in source_keys if sources.get(key, {}).get("hash")},
+        "source_artifacts": source_artifacts,
+        "source_max_generated_at": max_source_generated_at,
+        "canonical_generated_at": canonical_generated_at,
+        "mismatch_reasons": mismatch_reasons,
+        "repair_commands": [
+            f"TARGET_DAY={day_utc} npm run aegis:candidate-diagnostics",
+            f"TARGET_DAY={day_utc} npm run aegis:candidate-contracts",
+            f"TARGET_DAY={day_utc} npm run aegis:paper:review-queue",
+            f"TARGET_DAY={day_utc} npm run aegis:paper-position-ledger",
+            f"TARGET_DAY={day_utc} npm run aegis:exit-recommendations",
+            f"TARGET_DAY={day_utc} npm run aegis:input-contract-reconciliation",
+            f"TARGET_DAY={day_utc} npm run aegis:repair-input-contracts",
+        ],
+        "source_authority": "canonical_operator_state_v1 + governed candidate contracts + paper_review_queue_v1 + persistent candidate_state_v1",
+        "broker_execution_allowed": False,
+        "broker_submit_transmit_allowed": False,
+        "autonomous_execution_allowed": False,
+        "trade_advice_allowed": False,
+    }
+
+
+
+def _market_data_coverage_summary_v1(payload: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "status": "MISSING",
+            "source_path": str(source.get("path") or ""),
+            "repair_action": "npm run aegis:market-data-coverage",
+        }
+    return {
+        "status": str(payload.get("status") or "UNKNOWN"),
+        "required_symbol_count": _int_value(payload.get("required_symbol_count"), 0),
+        "certified_symbol_count": _int_value(payload.get("certified_symbol_count"), 0),
+        "missing_symbol_count": _int_value(payload.get("missing_symbol_count"), 0),
+        "stale_symbol_count": _int_value(payload.get("stale_symbol_count"), 0),
+        "unavailable_symbol_count": _int_value(payload.get("unavailable_symbol_count"), 0),
+        "coverage_pct": payload.get("coverage_pct", 0),
+        "missing_symbols": _string_list_value(payload, "missing_symbols"),
+        "stale_symbols": _string_list_value(payload, "stale_symbols"),
+        "issue_groups": _list_value(payload, "issue_groups"),
+        "stale_symbols_by_cause_provider": _list_value(payload, "stale_symbols_by_cause_provider"),
+        "blocking_consumers": _string_list_value(payload, "blocking_consumers"),
+        "consumer_sleeves": _string_list_value(payload, "consumer_sleeves"),
+        "repair_action": str(payload.get("repair_action") or ""),
+        "source_path": str(source.get("path") or ""),
+    }
+
+def _diagnostic_rejection_rows(*, diagnostics: dict[str, Any], diagnostics_path: str, total_rejected: int = 0) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    raw_rejections = diagnostics.get("raw_signal_rejections") if isinstance(diagnostics.get("raw_signal_rejections"), list) else []
+    for idx, row in enumerate(raw_rejections, start=1):
+        if not isinstance(row, dict):
+            continue
+        rows.append(_diagnostic_rejection_row(
+            row=row,
+            idx=idx,
+            diagnostics_path=diagnostics_path,
+            source_collection="raw_signal_rejections",
+            default_status="REJECTED",
+        ))
+
+    rejected_details = diagnostics.get("rejected_raw_signal_details") if isinstance(diagnostics.get("rejected_raw_signal_details"), list) else []
+    for idx, row in enumerate(rejected_details, start=len(rows) + 1):
+        if not isinstance(row, dict):
+            continue
+        rows.append(_diagnostic_rejection_row(
+            row=row,
+            idx=idx,
+            diagnostics_path=diagnostics_path,
+            source_collection="rejected_raw_signal_details",
+            default_status="REJECTED",
+        ))
+
+    failed_producers = diagnostics.get("failed_producers") if isinstance(diagnostics.get("failed_producers"), list) else []
+    for idx, row in enumerate(failed_producers, start=len(rows) + 1):
+        if not isinstance(row, dict):
+            continue
+        rows.append(_diagnostic_rejection_row(
+            row=row,
+            idx=idx,
+            diagnostics_path=diagnostics_path,
+            source_collection="failed_producers",
+            default_status=str(row.get("run_status") or "BLOCKED"),
+        ))
+
+    if rows:
+        return rows
+    if total_rejected > 0:
+        return [{
+            "rejection_id": "diagnostic-rejection-detail-missing",
+            "source_collection": "diagnostics_summary",
+            "status": "NO_PER_OUTPUT_REJECTION_ROWS",
+            "run_status": "NO_PER_OUTPUT_REJECTION_ROWS",
+            "sleeve_id": "UNKNOWN",
+            "symbol": "",
+            "canonical_blocker": "NO_PER_OUTPUT_REJECTION_ROWS",
+            "reason": "Diagnostics reported rejected candidates, but no per-output rejection rows were present.",
+            "reason_codes": ["NO_PER_OUTPUT_REJECTION_ROWS"],
+            "next_repair_action": "Regenerate candidate diagnostics and canonical operator state for the displayed day.",
+            "source_artifact_path": diagnostics_path,
+        }]
+    return []
+
+
+def _diagnostic_rejection_row(*, row: dict[str, Any], idx: int, diagnostics_path: str, source_collection: str, default_status: str) -> dict[str, Any]:
+    reason_codes = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else row.get("rejection_reasons") if isinstance(row.get("rejection_reasons"), list) else []
+    reason_codes = [str(item) for item in reason_codes if str(item)]
+    reason = str(
+        row.get("rejection_reason")
+        or row.get("canonical_blocker")
+        or row.get("reason_no_candidate")
+        or row.get("reason")
+        or (", ".join(reason_codes) if reason_codes else "UNKNOWN")
+    )
+    status = str(row.get("run_status") or row.get("status") or default_status or "UNKNOWN")
+    return {
+        "rejection_id": str(row.get("rejection_id") or row.get("raw_signal_id") or row.get("candidate_id") or f"diagnostic-rejection-{idx}"),
+        "source_collection": source_collection,
+        "status": status,
+        "run_status": status,
+        "sleeve_id": str(row.get("sleeve_id") or row.get("producer_id") or "UNKNOWN"),
+        "symbol": str(row.get("symbol") or row.get("underlying_symbol") or ""),
+        "candidate_id": str(row.get("candidate_id") or ""),
+        "raw_signal_id": str(row.get("raw_signal_id") or ""),
+        "canonical_blocker": str(row.get("canonical_blocker") or reason),
+        "rejection_stage": str(row.get("rejection_stage") or source_collection),
+        "rejection_reason": reason,
+        "reason": reason,
+        "reason_codes": reason_codes,
+        "human_readable_explanation": str(row.get("human_readable_explanation") or row.get("message") or reason),
+        "next_repair_action": str(row.get("next_repair_action") or row.get("required_next_action") or "npm run aegis:repair-candidate-readiness"),
+        "producer_command": str(row.get("producer_command") or row.get("command") or ""),
+        "source_artifact_path": diagnostics_path,
+    }
+
+
+def _top_contract_rejection_reason(contracts: dict[str, Any]) -> str:
+    reasons = contracts.get("rejection_reasons") if isinstance(contracts.get("rejection_reasons"), list) else []
+    for row in reasons:
+        if isinstance(row, dict) and row.get("reason"):
+            return str(row.get("reason"))
+    return "CONTRACT_VALIDATION_REJECTED"
+
+
+def _candidate_contract_mismatch_explanation(*, status: str, reason: str, contracts: dict[str, Any], diagnostics: dict[str, Any], sources: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    if not status:
+        return {}
+    rejected = contracts.get("rejected_raw_signals") if isinstance(contracts.get("rejected_raw_signals"), list) else []
+    reasons = contracts.get("rejection_reasons") if isinstance(contracts.get("rejection_reasons"), list) else []
+    sample = next((row for row in rejected if isinstance(row, dict)), {})
+    return {
+        "status": status,
+        "reason": reason or _top_contract_rejection_reason(contracts),
+        "operator_message": "Diagnostics found candidate-like outputs, but 0 passed candidate contract validation.",
+        "diagnostic_candidate_outputs": _first_int_value(diagnostics.get("diagnostic_candidate_outputs"), diagnostics.get("total_candidates_generated"), 0),
+        "valid_candidate_contracts": _first_int_value(contracts.get("candidates_created"), len(_list_value(contracts, "candidate_contracts"))),
+        "rejected_candidate_contracts": _first_int_value(contracts.get("candidates_rejected"), len(rejected)),
+        "rejection_reasons": reasons,
+        "sample_rejected_symbols": [str(row.get("symbol") or "") for row in rejected[:10] if isinstance(row, dict)],
+        "sample_stale_diagnostics": _sample_stale_diagnostics(sample),
+        "price_timestamp": str(sample.get("price_timestamp") or sample.get("entry_reference_price_timestamp_utc") or ""),
+        "candidate_snapshot_timestamp": str(sample.get("candidate_snapshot_timestamp") or sample.get("candidate_snapshot_timestamp_utc") or ""),
+        "freshness_window_seconds": sample.get("freshness_window_seconds"),
+        "stale_by_seconds": sample.get("stale_by_seconds"),
+        "freshness_policy_mode": str(sample.get("freshness_policy_mode") or ""),
+        "stale_reason": str(sample.get("stale_reason") or ""),
+        "evidence_path": str(sources.get("candidate_contracts", {}).get("path") or sources.get("candidate_generation_diagnostics", {}).get("path") or ""),
+        "next_repair_action": "Refresh current-session entry reference price evidence, then run signal evidence graph, candidate contracts, candidate diagnostics, paper review queue, and canonical operator state.",
+    }
+
+
+def _sample_stale_diagnostics(row: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return {}
+    freshness = row.get("entry_reference_price_freshness") if isinstance(row.get("entry_reference_price_freshness"), dict) else {}
+    return {
+        "symbol": str(row.get("symbol") or ""),
+        "raw_signal_id": str(row.get("raw_signal_id") or ""),
+        "price_timestamp": str(row.get("price_timestamp") or row.get("entry_reference_price_timestamp_utc") or freshness.get("price_timestamp") or ""),
+        "candidate_snapshot_timestamp": str(row.get("candidate_snapshot_timestamp") or row.get("candidate_snapshot_timestamp_utc") or freshness.get("candidate_snapshot_timestamp") or ""),
+        "freshness_window_seconds": row.get("freshness_window_seconds", freshness.get("freshness_window_seconds")),
+        "stale_by_seconds": row.get("stale_by_seconds", freshness.get("stale_by_seconds")),
+        "freshness_policy_mode": str(row.get("freshness_policy_mode") or freshness.get("freshness_policy_mode") or ""),
+        "stale_reason": str(row.get("stale_reason") or freshness.get("stale_reason") or ""),
+    }
+
+
+def _candidate_source_ref(key: str, payload: dict[str, Any], source: dict[str, Any], day_utc: str) -> dict[str, Any]:
+    return {
+        "source": key,
+        "path": str(source.get("path") or ""),
+        "hash": str(source.get("hash") or ""),
+        "found": bool(source.get("found")),
+        "schema_id": str(payload.get("schema_id") or ""),
+        "artifact_id": str(payload.get("artifact_id") or ""),
+        "day_utc": str(payload.get("day_utc") or day_utc if source.get("found") else ""),
+        "generated_at": str(source.get("generated_at") or _generated_at(payload)),
+        "freshness_status": str(source.get("freshness_status") or "UNKNOWN"),
+    }
+
+
+def _list_value(payload: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [row for row in value if isinstance(row, dict)]
+    return []
+
+
+def _string_list_value(payload: dict[str, Any], *keys: str) -> list[str]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item)]
+    return []
+
+
+
+def _first_int_value(*values: Any) -> int:
+    for value in values:
+        if value is None or value == "":
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+def _int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default or 0)
+
 def _opportunities_projection(
     *,
     candidates: dict[str, list[dict[str, Any]]],
@@ -518,6 +1150,7 @@ def _opportunities_projection(
     exposure_cluster_summary = portfolio_selection.get("exposure_cluster_summary") if isinstance(portfolio_selection.get("exposure_cluster_summary"), list) else []
     portfolio_policy = portfolio_selection.get("portfolio_selection_policy") if isinstance(portfolio_selection.get("portfolio_selection_policy"), dict) else {}
     open_projection = selected_candidates or list(open_rows)
+    candidate_generation_visibility = build_candidate_generation_visibility_v1(diagnostics)
     return {
         "open": open_projection,
         "selected_candidates": selected_candidates,
@@ -554,10 +1187,34 @@ def _opportunities_projection(
         "noon_preflight": noon_preflight,
         "noon_preflight_alert": _noon_preflight_alert(noon_preflight),
         "no_opportunity_explanation": _no_opportunity_explanation(diagnostics=diagnostics, open_rows=list(open_rows)),
+        "candidate_generation_visibility": candidate_generation_visibility,
+        "execution_coverage": candidate_generation_visibility.get("execution_coverage", {}),
+        "sleeve_execution_summary": candidate_generation_visibility.get("sleeve_execution_summary", []),
+        "candidate_contracts": diagnostics.get("candidate_contracts") if isinstance(diagnostics.get("candidate_contracts"), dict) else {},
+        "real_candidate_contracts": candidate_generation_visibility.get("real_candidate_contracts", []),
+        "real_signal_death_report": diagnostics.get("real_signal_death_report") if isinstance(diagnostics.get("real_signal_death_report"), dict) else {},
+        "real_raw_signals": candidate_generation_visibility.get("real_raw_signals", []),
+        "rejection_stage_counts": candidate_generation_visibility.get("rejection_stage_counts", {}),
+        "top_missing_candidate_fields": candidate_generation_visibility.get("top_missing_candidate_fields", []),
+        "paper_golden_path_comparison_summary": candidate_generation_visibility.get("paper_golden_path_comparison_summary", {}),
+        "exact_next_repair_actions": candidate_generation_visibility.get("exact_next_repair_actions", []),
         "sleeve_run_summary": diagnostics.get("sleeves") if isinstance(diagnostics.get("sleeves"), list) else [],
         "sleeve_readiness_summary": sleeve_readiness.get("sleeves") if isinstance(sleeve_readiness.get("sleeves"), list) else diagnostics.get("per_sleeve_readiness", []),
         "global_context_summary": _global_context_summary(data_registry=data_registry, diagnostics=diagnostics),
-        "rejected_candidate_summary": _rejected_candidate_summary(diagnostics),
+        "breadth_drop_validation": diagnostics.get("breadth_drop_validation") if isinstance(diagnostics.get("breadth_drop_validation"), dict) else {},
+        "breadth_drop_validation_path": str(diagnostics.get("breadth_drop_validation_path") or ""),
+        "vix_source_verification": diagnostics.get("vix_source_verification") if isinstance(diagnostics.get("vix_source_verification"), dict) else {},
+        "vix_source_verification_path": str(diagnostics.get("vix_source_verification_path") or ""),
+        "context_readiness_repair": diagnostics.get("context_readiness_repair") if isinstance(diagnostics.get("context_readiness_repair"), dict) else {},
+        "context_readiness_repair_path": str(diagnostics.get("context_readiness_repair_path") or ""),
+        "market_context_demand": diagnostics.get("market_context_demand") if isinstance(diagnostics.get("market_context_demand"), dict) else {},
+        "market_context_demand_path": str(diagnostics.get("market_context_demand_path") or ""),
+        "market_context_provider_health": diagnostics.get("market_context_provider_health") if isinstance(diagnostics.get("market_context_provider_health"), dict) else {},
+        "market_context_provider_health_path": str(diagnostics.get("market_context_provider_health_path") or ""),
+        "market_context_status_counts": diagnostics.get("market_context_status_counts") if isinstance(diagnostics.get("market_context_status_counts"), dict) else {},
+        "market_context_blockers": diagnostics.get("market_context_blockers") if isinstance(diagnostics.get("market_context_blockers"), list) else [],
+        "rejected_candidate_summary": candidate_generation_visibility.get("rejected_candidate_visibility", []) or _rejected_candidate_summary(diagnostics),
+        "no_candidate_explanations": candidate_generation_visibility.get("no_candidate_explanations", []),
         "trigger_summary": diagnostics.get("trigger_evaluation") if isinstance(diagnostics.get("trigger_evaluation"), dict) else {},
         "source_authority": "Candidate Lifecycle + Candidate Ranking + Candidate Portfolio Selection + Triggered Sleeve Runs",
         "broker_execution_allowed": False,

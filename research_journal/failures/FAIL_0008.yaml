@@ -1,0 +1,6 @@
+id: FAIL_0008
+what_we_expected: Standalone technical-indicator claims would survive fixture review.
+what_failed: Factory evidence was blocked, false-positive-prone, or insufficient.
+why_failed: Broad support and baseline recoverability did not prove relationship-specific signal quality.
+what_to_try_next: Require relationship-specific support before promoting technical claims.
+status: OPEN

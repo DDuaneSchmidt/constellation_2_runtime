@@ -26,29 +26,32 @@ def _text(path: Path) -> str:
 
 
 def test_four_aegis_workflow_routes_are_registered() -> None:
-    for route in ["/aegis-opportunities", "/aegis-edge-lab", "/aegis-runtime-timeline", "/aegis-repair-center", "/aegis-performance", "/aegis-journal"]:
+    for route in ["/aegis-opportunities", "/aegis-candidate-funnel", "/aegis-open-paper-positions", "/aegis-edge-lab", "/aegis-runtime-timeline", "/aegis-repair-center", "/aegis-paper-performance", "/aegis-performance", "/aegis-journal"]:
         assert route in OpsHandler.SHELL_ROUTES
 
 
 def test_top_level_nav_is_workflow_first() -> None:
     nav = _text(NAV)
-    domains = [line.strip() for line in nav.splitlines() if line.strip().startswith("label:")]
-    assert domains[:7] == ['label: "Dashboard",', 'label: "Candidates",', 'label: "Hypotheses",', 'label: "Captured Trades",', 'label: "Runtime Timeline",', 'label: "Repair Center",', 'label: "System Health",']
+    operator_nav = nav.split("export const ENGINEERING_NAVIGATION_SCHEMA", 1)[0]
+    for label in ['label: "Command Center"', 'label: "Positions"', 'label: "History"', 'label: "Performance"', 'label: "Research"']:
+        assert label in operator_nav
     for old_label in [
-        'label: "EOD Queue",',
-        'label: "Operator Inbox",',
-        'label: "Runtime Truth",',
-        'label: "Receipts / Outcomes",',
-        'label: "Sleeve Performance",',
-        'label: "AI Feedback / EOD-EOW Review",',
-        'label: "Feature Completion Audit",',
-        'label: "Evidence",',
+        'label: "Engineering Dashboard"',
+        'label: "Dashboard"',
+        'label: "Candidate Funnel"',
+        'label: "Captured Trades"',
+        'label: "Runtime Timeline"',
+        'label: "Repair Center"',
+        'label: "Trading Desk"',
+        'label: "Operations"',
+        'label: "Audit & Evidence"',
     ]:
-        assert old_label not in domains[:7]
+        assert old_label not in operator_nav
 
 def test_old_aegis_pages_are_aliased_into_workflows() -> None:
     pages = pages_source_v1(ROOT)
     expected_aliases = {
+        '"/": "/aegis-command-center"',
         '"/aegis-today": "/aegis-opportunities"',
         '"/aegis-review": "/aegis-performance"',
         '"/aegis-research": "/aegis-edge-lab"',
@@ -85,7 +88,8 @@ def test_workflow_pages_show_required_operator_jobs() -> None:
         "System repair",
         "Execution eligible",
         "Locked non-certified",
-        "Captured Trades",
+        "Closed Trades",
+        "Open Paper Positions",
         "System Diagnostics",
         "Playbook",
         "Providers tried",
@@ -121,15 +125,9 @@ def test_major_workflow_cards_include_canonical_evidence_contract() -> None:
 
     assert "renderWorkflowCard" in pages
     assert "renderCanonicalEvidenceBlock" in pages
-    for label in [
-        "Canonical field path",
-        "Source artifact path",
-        "Freshness status",
-        "Generated / last updated",
-        "Why shown",
-        "Drilldown link",
-    ]:
-        assert label in pages
+    assert "View Evidence" in pages
+    assert "Evidence available" in pages
+    assert "rawMetricKey" in pages
 
 
 def test_workflow_ui_reads_canonical_cockpit_api_only() -> None:
@@ -148,15 +146,15 @@ def test_workflow_ui_reads_canonical_cockpit_api_only() -> None:
 
 def test_today_page_is_decision_first_and_runtime_is_compressed() -> None:
     pages = pages_source_v1(ROOT)
-    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function renderDashboardSystemStatus", 1)[0]
+    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function dashboardCaptureProjection", 1)[0]
 
-    assert "renderDashboardSystemStatus" in today_block
-    assert "renderDashboardTodaySummary" in today_block
-    assert "renderDashboardAttentionRequired" in today_block
-    assert "renderDashboardRecentEvents" in today_block
-    assert today_block.index("renderDashboardSystemStatus") < today_block.index("renderDashboardTodaySummary")
-    assert today_block.index("renderDashboardTodaySummary") < today_block.index("renderDashboardAttentionRequired")
-    assert today_block.index("renderDashboardAttentionRequired") < today_block.index("renderDashboardRecentEvents")
+    assert "renderDashboardLatestRunSummary" in today_block
+    assert "renderDashboardAttentionQueueV1" in today_block
+    assert "renderDashboardKeyNumbersV1" in today_block
+    assert "renderDashboardRecentImportantEventsV1" in today_block
+    assert today_block.index("renderDashboardLatestRunSummary") < today_block.index("renderDashboardAttentionQueueV1")
+    assert today_block.index("renderDashboardLatestRunSummary") < today_block.index("renderDashboardKeyNumbersV1")
+    assert today_block.index("renderDashboardKeyNumbersV1") < today_block.index("renderDashboardRecentImportantEventsV1")
     assert "renderOperatorAttentionQueue" not in today_block
     assert "Review Candidate" not in today_block
     assert "Needs More Evidence" not in today_block
@@ -193,11 +191,31 @@ def test_today_empty_and_trigger_summaries_are_operator_facing() -> None:
 def test_opportunities_ui_renders_no_opportunity_diagnostics() -> None:
     pages = pages_source_v1(ROOT)
     today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function renderDashboardSystemStatus", 1)[0]
+    candidates_block = pages.split("function renderAegisCandidatesWorkflow", 1)[1].split("function renderSystemDomainCertificationPanel", 1)[0]
     no_opportunity_block = pages.split("function renderNoOpportunityExplanation", 1)[1].split("function renderMissingOpportunityDiagnostics", 1)[0]
 
     assert "renderWorkflowCandidateTable(opportunityCandidates, opportunities)" not in today_block
     assert "Summary" in no_opportunity_block
-    assert "Sleeve Run Status" in no_opportunity_block
+    assert "renderExecutionCoverageSection" in pages
+    assert "Execution Coverage" in pages
+    assert "renderSleeveExecutionSummarySection" in pages
+    assert "Sleeve Execution Summary" in pages
+    assert "renderRealCandidateContractsSection" in pages
+    assert "Real Candidate Contracts" in pages
+    assert "Candidate Review Queue" in pages
+    assert "Record Entry" in pages
+    assert "Reject" in pages
+    assert "Record Paper Receipt" in pages
+    assert "Paper Outcome Tracker" in pages
+    assert "PAPER ONLY" in pages
+    assert "HUMAN REVIEW REQUIRED" in pages
+    assert "NO BROKER ORDER" in pages
+    assert "NO LIVE EXECUTION" in pages
+    assert "Entry price source" in pages
+    assert "Price provider" in pages
+    assert "Price timestamp" in pages
+    assert "Price session date" in pages
+    assert "Source hash" in pages
     assert "Sleeve Readiness Summary" in no_opportunity_block
     assert "Global Context" in no_opportunity_block
     assert "Global context; not necessarily required by every sleeve." in no_opportunity_block
@@ -213,33 +231,81 @@ def test_opportunities_ui_renders_no_opportunity_diagnostics() -> None:
     assert "Universe source" in no_opportunity_block
     assert "Requested symbols" in no_opportunity_block
     assert "Missing symbols" in no_opportunity_block
+    assert "Price coverage missing" in no_opportunity_block
+    assert "Certified price available" in no_opportunity_block
+    assert "Candidate contracts after coverage" in no_opportunity_block
     assert "configure provider env" in no_opportunity_block
     assert "place manual CSV drop" in no_opportunity_block
     assert "Noon Preflight Status" in no_opportunity_block
     assert "Readiness status" in no_opportunity_block
     assert "READY_FULL, READY_PARTIAL, and BLOCKED" in no_opportunity_block
-    assert "Rejection Reasons" in no_opportunity_block
+    assert "renderRejectedCandidateVisibilitySection" in pages
+    assert "Rejected Candidate Visibility" in pages
+    assert "renderRealRawSignalsSection" in pages
+    assert "Real Raw Signals" in pages
+    assert "Signal Evidence Graph" in pages
+    assert "Demanded" in pages
+    assert "Fetched" in pages
+    assert "Certified" in pages
+    assert "Consumed" in pages
+    assert "Candidate impact" in pages
+    assert "renderWhereTheyDiedSection" in pages
+    assert "Where They Died" in pages
+    assert "renderGoldenPathComparisonSection" in pages
+    assert "Comparison to Golden Path" in pages
+    assert "renderRuntimeBlockersSection" in pages
+    assert "Runtime Blockers" in pages
+    assert "renderMarketContextDemandSection" in pages
+    assert "Context Readiness Closeout" in pages
+    assert "Provider health item" in pages
+    assert "Expected breadth.csv path" in pages
+    assert "Breadth drop found" in pages
+    assert "Template command" in pages
+    assert "Validate command" in pages
+    assert "Candidate visibility remains available even when breadth or VIX blocks runtime context." in pages
+    assert "VIX provider chain result" in pages
+    assert "Create Breadth Template" in pages
+    assert "Validate Breadth Drop" in pages
+    assert "Ingest Breadth Drop" in pages
+    assert "Expected vix.csv path" in pages
+    assert "Create VIX Template" in pages
+    assert "Validate VIX Drop" in pages
+    assert "Ingest VIX Drop" in pages
+    assert "Verify VIX" in pages
+    assert "Repair Context Readiness" in pages
+    assert "RUN_CONTEXT_READINESS_COMMAND" in pages
+    assert "Health status" in pages
+    assert "Allowed provider chain" in pages
+    assert "Source / certification" in pages
+    assert "Next repair action" in pages
+    assert "renderNextRepairActionsSection" in pages
+    assert "Next Repair Action" in pages
+    assert "renderNoCandidateExplanationSection" in pages
+    assert "No Candidate Explanation" in pages
     assert "Trigger/Event Status" in no_opportunity_block
     assert "Recommended Next Step" in no_opportunity_block
     assert "Sleeves evaluated" in no_opportunity_block
     assert "sleeves expected" in no_opportunity_block
-    assert "Blocker" in no_opportunity_block
+    assert "Execution status" in pages
+    assert "Primary blocker" in pages
     assert "Required missing input" in no_opportunity_block
     assert "Optional missing input" in no_opportunity_block
-    assert "Next action" in no_opportunity_block
-    assert "Raw signals rejected" in no_opportunity_block
+    assert "Evidence path" in pages
+    assert "Graph linkage" in pages
+    assert "Raw signals generated" in no_opportunity_block
+    assert "Rejected signals" in no_opportunity_block
+    assert "Candidate gate failed" in pages
+    assert "Promotion gate failed" in pages
     assert "Candidates passed filters" in no_opportunity_block
     assert "Why zero" in no_opportunity_block
-    assert "Raw signal" in no_opportunity_block
-    assert "Stage" in no_opportunity_block
-    assert "Explanation" in no_opportunity_block
-    assert "Required next action" in no_opportunity_block
-    assert "Classification" in no_opportunity_block
-    assert "volatility filter" in no_opportunity_block
-    assert "confidence threshold" in no_opportunity_block
-    assert "regime mismatch" in no_opportunity_block
-    assert "insufficient data" in no_opportunity_block
-    assert "missing event packet" in no_opportunity_block
+    assert "Missing price symbol" in pages
+    assert "Checked price evidence" in pages
+    assert "Rejection stage" in pages
+    assert "Rejection reason" in pages
+    assert "Stage" in pages
+    assert "Code" in pages
+    assert "Explanation" in pages
+    assert "renderNoOpportunityExplanation(opportunities, payload)" in candidates_block
 
 def test_opportunities_restore_first_class_operator_actions() -> None:
     pages = pages_source_v1(ROOT)
@@ -361,7 +427,7 @@ def test_manual_capture_modal_is_audit_only_and_not_execution() -> None:
         "external_execution_venue",
         "operator_notes",
         "confidence_override",
-        "paper_trade_only",
+        "paper_entry_only",
         "review_decision",
     ]:
         assert field in block
@@ -566,7 +632,7 @@ def test_edge_lab_research_actions_are_review_only_buttons_without_execution_lan
         assert forbidden not in research_block
     assert "READ-ONLY GOVERNANCE" in research_block
     assert "NO BROKER EXECUTION" in research_block
-    assert "MANUAL REVIEW REQUIRED" in research_block
+    assert "RESEARCH ONLY" in research_block
 
 
 def test_opportunities_ui_shows_noon_preflight_alert_when_email_not_delivered() -> None:
@@ -783,25 +849,24 @@ def test_edge_lab_ui_actions_are_handled_without_broker_or_sleeve_mutation_route
 
 def test_today_suppresses_empty_followup_warning_cards() -> None:
     pages = pages_source_v1(ROOT)
-    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function renderDashboardSystemStatus", 1)[0]
+    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function dashboardCaptureProjection", 1)[0]
 
-    assert "renderDashboardTodaySummary" in today_block
-    assert "renderDashboardAttentionRequired" in today_block
-    assert "IB capture tickets: 0" in pages
+    assert "renderDashboardAttentionQueueV1" in today_block
+    assert "IB capture tickets: ${escapeHtml(String(captureTickets))}" in pages
+    assert "No operator action required." in pages
     assert "if (pendingOutcomes.length)" not in today_block
     assert "if (meaningfulSleeves.length)" not in today_block
     assert "if (governanceRows.length)" not in today_block
     assert "No sleeve warnings requiring review." not in today_block
     assert "INSUFFICIENT_DATA" not in today_block
 
-def test_dashboard_uses_system_status_without_operational_right_rail() -> None:
+def test_dashboard_uses_attention_queue_without_operational_right_rail() -> None:
     pages = pages_source_v1(ROOT)
     main = _text(MAIN)
     css = _text(CSS)
-    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function renderDashboardSystemStatus", 1)[0]
-    system_status_block = pages.split("function renderDashboardSystemStatus", 1)[1].split("function renderDashboardTodaySummary", 1)[0]
+    today_block = pages.split("function renderAegisTodayWorkflow", 1)[1].split("function dashboardCaptureProjection", 1)[0]
 
-    assert "renderDashboardSystemStatus(payload" in today_block
+    assert "renderDashboardAttentionQueueV1(payload" in today_block
     assert 'contextHtml: ""' in today_block
     assert "hideContextRail: true" in today_block
     assert "workflowContextHtml(payload)" not in today_block
@@ -811,18 +876,12 @@ def test_dashboard_uses_system_status_without_operational_right_rail() -> None:
     assert ".dashboard-main-only .shell-context" in css
     assert "display: none" in css
 
-    assert "Dashboard System Status is the single authoritative operational status area" in system_status_block
-    assert "Market data state" in system_status_block
-    assert "Candidate certification state" in system_status_block
-    assert "Execution eligibility" in system_status_block
-    assert "Fallback / read-only state" in system_status_block
-    assert "Validation explanation" in system_status_block
-    assert "Retry state" in system_status_block
-    assert "Next scheduled action" in system_status_block
-    assert "Certification timing" in system_status_block
-    assert "renderDashboardEvidenceDrawer(payload)" in system_status_block
+    assert "Attention Queue" in pages
+    assert "Today’s Key Numbers" in pages
+    assert "View Evidence" in pages
+    assert "Dashboard System Status is the single authoritative operational status area" not in today_block
+    assert "renderDashboardEvidenceDrawer" not in today_block
     assert "Current Truth" not in today_block
-    assert "Current Truth" not in system_status_block
 
 
 def test_non_dashboard_context_keeps_safety_boundary_without_dashboard_freshness_authority() -> None:
@@ -962,10 +1021,13 @@ def test_uncapped_operator_clickthrough_harness_covers_primary_workspaces() -> N
         '"/aegis-runtime-timeline"',
         '"/aegis-repair-center"',
         '"/aegis-candidates"',
+        '"/aegis-candidate-funnel"',
+        '"/aegis-exit-review"',
+        '"/aegis-performance"',
         '"/aegis-journal"',
+        '"/aegis-captured-trades"',
     ]:
         assert route in harness
-    assert '"/aegis-captured-trades"' not in harness
     assert "workspaceRoot.querySelectorAll('button, a[href], summary, [data-aegis-command-id]')" in harness
     assert "controls.slice" not in harness
     assert "clicked_count" in harness

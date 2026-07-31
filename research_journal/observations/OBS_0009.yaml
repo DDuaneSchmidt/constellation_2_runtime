@@ -1,0 +1,6 @@
+id: OBS_0009
+date: 2026-06-03
+observation: Verified graph readiness and runtime readiness diverged on the same review day.
+why_interesting: Auditability can be ready while runtime authority remains blocked.
+source: AEGIS verified graph and runtime truth kernel review
+status: OPEN

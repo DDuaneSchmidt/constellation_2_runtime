@@ -1,0 +1,228 @@
+{
+  "$defs": {
+    "context_item": {
+      "additionalProperties": false,
+      "properties": {
+        "active_context_profile_id": {
+          "type": "string"
+        },
+        "allowed_fallback_reference_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "blocker_severity": {
+          "type": "string"
+        },
+        "certification_status": {
+          "enum": [
+            "CERTIFIED",
+            "CERTIFIED_REFERENCE",
+            "BLOCKED"
+          ],
+          "type": "string"
+        },
+        "certified": {
+          "type": "boolean"
+        },
+        "computed": {
+          "type": "boolean"
+        },
+        "consumer_artifact": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "consuming_capability": {
+          "type": "string"
+        },
+        "context_item_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "context_requirement": {
+          "type": "object"
+        },
+        "context_requirement_profile_hash": {
+          "type": "string"
+        },
+        "context_requirement_profile_path": {
+          "type": "string"
+        },
+        "demanded": {
+          "type": "boolean"
+        },
+        "failure_reason": {
+          "type": "string"
+        },
+        "fetched": {
+          "type": "boolean"
+        },
+        "formula_description": {
+          "type": "string"
+        },
+        "formula_version": {
+          "type": "string"
+        },
+        "freshness_requirement": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "fulfillment_status": {
+          "enum": [
+            "CONTEXT_NOT_DEMANDED",
+            "CONTEXT_NOT_FETCHED",
+            "CONTEXT_NOT_COMPUTABLE",
+            "CONTEXT_STALE",
+            "CONTEXT_UNCERTIFIED",
+            "CONTEXT_CERTIFIED"
+          ],
+          "type": "string"
+        },
+        "next_repair_command": {
+          "type": "string"
+        },
+        "policy_mode": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "same_day_required_now": {
+          "type": "boolean"
+        },
+        "session_date": {
+          "type": "string"
+        },
+        "source_artifact_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_hashes": {
+          "type": "object"
+        },
+        "source_label": {
+          "type": "string"
+        },
+        "source_requirement": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "timestamp_utc": {
+          "type": "string"
+        },
+        "value": {}
+      },
+      "required": [
+        "context_item_id",
+        "purpose",
+        "freshness_requirement",
+        "source_requirement",
+        "consumer_artifact",
+        "demanded",
+        "fulfillment_status",
+        "certification_status",
+        "fetched",
+        "computed",
+        "certified",
+        "provider",
+        "session_date",
+        "timestamp_utc",
+        "formula_version",
+        "formula_description",
+        "source_artifact_paths",
+        "source_hashes",
+        "source_label",
+        "policy_mode",
+        "same_day_required_now",
+        "failure_reason",
+        "next_repair_command"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://constellation.local/schemas/C2/REPORTS/market_context_demand.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_id": {
+      "const": "aegis_market_context_demand_v1"
+    },
+    "canonical_json_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "consumer_artifact": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "day_utc": {
+      "minLength": 10,
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "minLength": 20,
+      "type": "string"
+    },
+    "market_context_items": {
+      "items": {
+        "$ref": "#/$defs/context_item"
+      },
+      "type": "array"
+    },
+    "next_repair_commands": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "provider_health": {
+      "type": "object"
+    },
+    "provider_health_path": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "aegis_market_context_demand"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "source_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_hashes": {
+      "type": "object"
+    },
+    "status_counts": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at_utc",
+    "consumer_artifact",
+    "market_context_items",
+    "provider_health_path",
+    "provider_health",
+    "status_counts",
+    "source_artifacts",
+    "source_hashes",
+    "next_repair_commands",
+    "canonical_json_hash"
+  ],
+  "title": "market_context_demand.v1",
+  "type": "object"
+}

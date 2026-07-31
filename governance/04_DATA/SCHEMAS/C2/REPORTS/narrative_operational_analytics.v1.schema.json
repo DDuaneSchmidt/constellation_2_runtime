@@ -1,0 +1,122 @@
+{
+  "$id": "https://constellation.local/schemas/C2/REPORTS/narrative_operational_analytics.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "artifact_id": {
+      "const": "narrative_operational_analytics_v1"
+    },
+    "autonomous_execution_allowed": {
+      "const": false
+    },
+    "broker_execution_allowed": {
+      "const": false
+    },
+    "broker_submit_transmit_allowed": {
+      "const": false
+    },
+    "charts": {
+      "type": "object"
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "evidence_policy": {
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "type": "string"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "narrative_statements": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "category": {
+            "enum": [
+              "PERFORMANCE",
+              "CANDIDATE_FUNNEL",
+              "CERTIFICATION",
+              "SLEEVE_ATTRIBUTION",
+              "EXIT_REVIEW"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ]
+          },
+          "evidence_status": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "INSUFFICIENT_DATA"
+            ]
+          },
+          "statement": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "supporting_artifact_hash": {
+            "type": "string"
+          },
+          "supporting_artifact_path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "supporting_metric": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "category",
+          "supporting_metric",
+          "supporting_artifact_path",
+          "confidence",
+          "evidence_status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "operational_day": {
+      "type": "string"
+    },
+    "order_routing_allowed": {
+      "const": false
+    },
+    "schema_id": {
+      "const": "narrative_operational_analytics"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "source_artifacts": {
+      "type": "object"
+    },
+    "trade_advice_allowed": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "operational_day",
+    "metrics",
+    "narrative_statements",
+    "charts",
+    "content_hash"
+  ],
+  "title": "narrative_operational_analytics.v1",
+  "type": "object"
+}

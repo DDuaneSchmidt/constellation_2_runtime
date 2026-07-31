@@ -1,0 +1,74 @@
+{
+  "module_id": "research_journal_v0",
+  "display_name": "Aegis Research Journal V0",
+  "type": "human_readable_research_journal",
+  "owner": "ops.aegis",
+  "capabilities": [
+    {
+      "capability_id": "research_journal_v0_validation",
+      "display_name": "Research Journal V0 Validation",
+      "required_evidence": [
+        "runtime_truth_kernel"
+      ],
+      "allowed_actions": [
+        "READ_ONLY",
+        "AUDIT"
+      ],
+      "forbidden_actions": [
+        "TRADE",
+        "EXECUTE",
+        "BROKER_SUBMIT",
+        "BROKER_TRANSMIT",
+        "ENABLE_TRADE_ADVICE",
+        "ENABLE_BROKER_EXECUTION",
+        "AUTONOMOUS_EXECUTION",
+        "MUTATION_ENGINE",
+        "WORKFLOW_ORCHESTRATION"
+      ]
+    }
+  ],
+  "inputs": [
+    "research_journal/observations/*.yaml",
+    "research_journal/knowledge/*.yaml",
+    "research_journal/failures/*.yaml",
+    "research_journal/*.schema.yaml"
+  ],
+  "outputs": [
+    "research_journal/reports/weekly_learning_report.md",
+    "research_journal/reports/prospective_evidence_dashboard_001.md"
+  ],
+  "commands": [
+    {
+      "name": "aegis:research-journal-validate",
+      "command": "npm run aegis:research-journal-validate",
+      "policy_effect": "human_readable_journal_validation_only_no_trading_gate_change_no_architecture_expansion"
+    }
+  ],
+  "tests": [
+    {
+      "path": "constellation_2/common/tests/test_aegis_research_journal_v0.py"
+    }
+  ],
+  "evidence_artifacts": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "artifact_type": "runtime_truth",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/runtime_truth_kernel.v1.json",
+      "producer": "aegis:truth-kernel",
+      "day_scoped": true
+    }
+  ],
+  "ui_surfaces": [],
+  "policies": [
+    "human_readable_git_friendly_yaml_only",
+    "validator_checks_yaml_parse_required_fields_unique_ids_only",
+    "no_database_no_api_no_ui_no_orchestration_no_automation_pipeline"
+  ],
+  "freshness_requirements": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "max_age_days": 0,
+      "day_scoped": true
+    }
+  ]
+}

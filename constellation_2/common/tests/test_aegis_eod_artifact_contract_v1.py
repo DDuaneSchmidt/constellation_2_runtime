@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.aegis_eod_artifact_contract_v1 import _write_immutable_json
 from ops.tools.run_aegis_lite_eod_pipeline_v1 import (
+    _certified_eod_universe_v1,
     build_aegis_lite_eod_pipeline_v1,
     prepare_operational_input_payload_v1,
 )
@@ -148,7 +149,10 @@ def test_stale_market_snapshot_blocks_promoted_candidates_with_visible_symbols(t
 
 def test_broad_universe_raw_candidates_do_not_make_report_market_snapshot_partial(tmp_path: Path) -> None:
     _write_market_snapshot(tmp_path, DAY, ["SPY"])
-    rows = [_raw_candidate(1), {**_raw_candidate(2), "candidate_id": "raw-uncertified", "symbol_or_pair": "UNCERTIFIED"}]
+    rows = [
+        {**_raw_candidate(1), "status": "NO_SIGNAL", "raw_intent_id": "", "reason_codes": ["NO_RAW_SIGNAL"]},
+        {**_raw_candidate(2), "candidate_id": "raw-uncertified", "symbol_or_pair": "UNCERTIFIED"},
+    ]
     _write_upstream_candidate_manifest(tmp_path, DAY, rows)
     payload = prepare_operational_input_payload_v1(candidate_input_path="", promoted_sleeve_library_path="", manual_only=True)
 
@@ -170,8 +174,12 @@ def test_broad_universe_raw_candidates_do_not_make_report_market_snapshot_partia
     assert snapshot["snapshot_status"] == "COHERENT"
     audit = json.loads(Path(report["candidate_consumption_audit_artifact_path"]).read_text(encoding="utf-8"))
     assert audit["consumption_counts"]["EXCLUDED_UNCOVERED_SYMBOL"] == 1
+    assert audit["consumption_counts"]["EXCLUDED_LOW_SCORE"] == 1
     uncovered = [row for row in audit["candidate_rows"] if row["consumption_category"] == "EXCLUDED_UNCOVERED_SYMBOL"]
+    low_score = [row for row in audit["candidate_rows"] if row["consumption_category"] == "EXCLUDED_LOW_SCORE"]
     assert uncovered[0]["symbol"] == "UNCERTIFIED"
+    assert low_score[0]["symbol"] == "SPY"
+    assert low_score[0]["covered_by_certified_eod"] is True
 
 
 def test_promoted_library_consumes_covered_candidate_in_audit(tmp_path: Path) -> None:
@@ -276,6 +284,40 @@ def _promoted_sleeve() -> dict[str, object]:
         "approved_for_lite_implementation": True,
         "archived": False,
     }
+
+
+def test_certified_eod_universe_resolves_current_manifest_artifact(tmp_path: Path) -> None:
+    artifact = tmp_path / "reports" / "final_eod_market_data_v1" / DAY / "artifacts" / "abc" / "final_eod_market_data.v1.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_id": "final_eod_market_data_v1",
+                "day_utc": DAY,
+                "final_eod_symbols": ["SPY", "CRWD"],
+                "symbols": {"SPY": {}, "CRWD": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "reports" / "final_eod_market_data_v1" / DAY / "final_eod_market_data.v1.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_id": "final_eod_market_data_current_manifest.v1",
+                "day_utc": DAY,
+                "current_artifact_path": str(artifact),
+                "final_eod_symbols_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    symbols, path = _certified_eod_universe_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert symbols == ["CRWD", "SPY"]
+    assert path == str(artifact)
 
 
 def test_lite_eod_cli_default_run_id_is_time_versioned_to_surface_duplicate_runs() -> None:

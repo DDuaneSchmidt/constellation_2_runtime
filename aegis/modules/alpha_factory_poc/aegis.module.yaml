@@ -1,0 +1,625 @@
+{
+  "module_id": "alpha_factory_poc",
+  "display_name": "Aegis Alpha Factory POC",
+  "type": "research_evidence_projection",
+  "owner": "ops.aegis",
+  "capabilities": [
+    {
+      "capability_id": "alpha_factory_question_discovery_loop_v1",
+      "display_name": "Alpha Factory Question Discovery Loop V1",
+      "required_evidence": [
+        "aegis_alpha_factory_poc_v1",
+        "aegis_alpha_factory_poc_review_v1",
+        "aegis_alpha_factory_naive_correlation_baseline_v1",
+        "aegis_alpha_factory_out_of_fixture_benchmark_v1",
+        "aegis_alpha_factory_question_discovery_v2",
+        "aegis_alpha_factory_question_discovery_v2_rebenchmark_v1",
+        "aegis_alpha_factory_question_productivity_diagnostic_v1",
+        "aegis_alpha_factory_non_naive_evidence_test_v1",
+        "aegis_alpha_factory_v2_non_naive_rebenchmark_v1",
+        "aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1",
+        "aegis_alpha_factory_v2_generalization_failure_attribution_v1",
+        "aegis_alpha_factory_deterministic_fixture_suite_v1",
+        "aegis_alpha_factory_evidence_test_failure_attribution_v1",
+        "aegis_alpha_factory_evidence_test_v2",
+        "aegis_alpha_factory_deterministic_fixture_suite_retest_v2",
+        "aegis_alpha_factory_injection_visibility_diagnostic_v1",
+        "aegis_alpha_factory_feature_surface_repair_v1",
+        "aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1",
+        "aegis_alpha_factory_synthetic_discovery_certification_v1",
+        "aegis_alpha_factory_real_historical_data_pilot_v1",
+        "aegis_alpha_factory_historical_data_coverage_certification_v1",
+        "aegis_alpha_factory_macro_data_intake_certification_v1",
+        "aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1",
+        "aegis_alpha_factory_cross_asset_etf_failure_attribution_v1",
+        "aegis_alpha_factory_technical_conditional_pattern_pilot_v1",
+        "aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1"
+      ],
+      "allowed_actions": [
+        "READ_ONLY",
+        "QUERY",
+        "AUDIT"
+      ],
+      "forbidden_actions": [
+        "TRADE",
+        "EXECUTE",
+        "BROKER_SUBMIT",
+        "BROKER_TRANSMIT",
+        "ENABLE_TRADE_ADVICE",
+        "ENABLE_BROKER_EXECUTION",
+        "ALLOCATE_REAL_CAPITAL",
+        "MUTATE_ALLOCATION",
+        "AUTONOMOUS_EXECUTION",
+        "MUTATION_ENGINE"
+      ]
+    }
+  ],
+  "inputs": [
+    "daily historical observations for GLD, SLV, TLT, SPY, QQQ, UUP, VIX, real yields, nominal yields, inflation expectations"
+  ],
+  "outputs": [
+    "alpha_factory_poc.v1.json",
+    "alpha_factory_events.v1.jsonl",
+    "alpha_factory_poc.summary.txt",
+    "aegis_alpha_factory_poc_review_v1.json",
+    "aegis_alpha_factory_naive_correlation_baseline_v1.json",
+    "aegis_alpha_factory_out_of_fixture_benchmark_v1.json",
+    "aegis_alpha_factory_question_discovery_v2.json",
+    "aegis_alpha_factory_question_discovery_v2_rebenchmark_v1.json",
+    "aegis_alpha_factory_question_productivity_diagnostic_v1.json",
+    "aegis_alpha_factory_non_naive_evidence_test_v1.json",
+    "aegis_alpha_factory_v2_non_naive_rebenchmark_v1.json",
+    "aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1.json",
+    "aegis_alpha_factory_v2_generalization_failure_attribution_v1.json",
+    "aegis_alpha_factory_deterministic_fixture_suite_v1.json",
+    "aegis_alpha_factory_evidence_test_failure_attribution_v1.json",
+    "aegis_alpha_factory_evidence_test_v2.json",
+    "aegis_alpha_factory_deterministic_fixture_suite_retest_v2.json",
+    "aegis_alpha_factory_injection_visibility_diagnostic_v1.json",
+    "aegis_alpha_factory_feature_surface_repair_v1.json",
+    "aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1.json",
+    "aegis_alpha_factory_synthetic_discovery_certification_v1.json",
+    "aegis_alpha_factory_real_historical_data_pilot_v1.json",
+    "aegis_alpha_factory_historical_data_coverage_certification_v1.json",
+    "aegis_alpha_factory_macro_data_intake_certification_v1.json",
+    "aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1.json",
+    "aegis_alpha_factory_cross_asset_etf_failure_attribution_v1.json",
+    "aegis_alpha_factory_technical_conditional_pattern_pilot_v1.json",
+    "aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1.json"
+  ],
+  "commands": [
+    {
+      "name": "aegis:alpha-factory-poc",
+      "command": "npm run aegis:alpha-factory-poc",
+      "policy_effect": "research_evidence_projection_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-poc-review",
+      "command": "npm run aegis:alpha-factory-poc-review",
+      "policy_effect": "hostile_review_artifact_only_no_discovery_expansion_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-naive-baseline",
+      "command": "npm run aegis:alpha-factory-naive-baseline",
+      "policy_effect": "naive_baseline_artifact_only_no_discovery_engine_change_no_candidate_repair_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-out-of-fixture-benchmark",
+      "command": "npm run aegis:alpha-factory-out-of-fixture-benchmark",
+      "policy_effect": "out_of_fixture_benchmark_artifact_only_no_discovery_engine_change_no_baseline_logic_change_no_candidate_naming_repair_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-question-discovery-v2",
+      "command": "npm run aegis:alpha-factory-question-discovery-v2",
+      "policy_effect": "question_discovery_repair_artifact_only_no_baseline_change_no_review_verdict_change_no_evidence_standard_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-question-discovery-v2-rebenchmark",
+      "command": "npm run aegis:alpha-factory-question-discovery-v2-rebenchmark",
+      "policy_effect": "question_discovery_v2_rebenchmark_artifact_only_no_v2_change_no_baseline_change_no_evidence_standard_change_no_review_verdict_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-question-productivity-diagnostic",
+      "command": "npm run aegis:alpha-factory-question-productivity-diagnostic",
+      "policy_effect": "question_productivity_diagnostic_artifact_only_no_v2_change_no_rebenchmark_change_no_baseline_change_no_candidate_naming_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-non-naive-evidence-test",
+      "command": "npm run aegis:alpha-factory-non-naive-evidence-test",
+      "policy_effect": "non_naive_evidence_test_artifact_only_no_v2_change_no_baseline_change_no_rebenchmark_change_no_productivity_diagnostic_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-v2-non-naive-rebenchmark",
+      "command": "npm run aegis:alpha-factory-v2-non-naive-rebenchmark",
+      "policy_effect": "v2_non_naive_rebenchmark_artifact_only_no_v2_change_no_non_naive_evidence_change_no_baseline_change_no_prior_benchmark_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-v2-out-of-fixture-non-naive-rebenchmark",
+      "command": "npm run aegis:alpha-factory-v2-out-of-fixture-non-naive-rebenchmark",
+      "policy_effect": "v2_out_of_fixture_non_naive_rebenchmark_artifact_only_no_v2_change_no_non_naive_evidence_change_no_v2_non_naive_rebenchmark_change_no_baseline_change_no_threshold_or_qualification_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-v2-generalization-failure-attribution",
+      "command": "npm run aegis:alpha-factory-v2-generalization-failure-attribution",
+      "policy_effect": "v2_generalization_failure_attribution_artifact_only_no_v2_change_no_non_naive_evidence_change_no_rebenchmark_change_no_baseline_change_no_v3_build_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-deterministic-fixture-suite",
+      "command": "npm run aegis:alpha-factory-deterministic-fixture-suite",
+      "policy_effect": "deterministic_fixture_suite_artifact_only_no_v2_change_no_non_naive_evidence_change_no_baseline_change_no_candidate_qualification_change_no_attribution_change_no_v3_build_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-evidence-test-failure-attribution",
+      "command": "npm run aegis:alpha-factory-evidence-test-failure-attribution",
+      "policy_effect": "evidence_test_failure_attribution_artifact_only_no_v2_change_no_fixture_suite_change_no_baseline_change_no_candidate_qualification_change_no_evidence_repair_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-evidence-test-v2",
+      "command": "npm run aegis:alpha-factory-evidence-test-v2",
+      "policy_effect": "evidence_test_v2_artifact_only_no_v2_question_change_no_fixture_suite_change_no_failure_attribution_change_no_baseline_change_no_candidate_qualification_change_no_discovery_advantage_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-deterministic-fixture-suite-retest-v2",
+      "command": "npm run aegis:alpha-factory-deterministic-fixture-suite-retest-v2",
+      "policy_effect": "fixture_suite_retest_v2_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_baseline_change_no_fixture_definition_change_no_candidate_qualification_change_no_broad_success_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-injection-visibility-diagnostic",
+      "command": "npm run aegis:alpha-factory-injection-visibility-diagnostic",
+      "policy_effect": "injection_visibility_diagnostic_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_fixture_suite_change_no_candidate_qualification_change_no_baseline_change_no_evidence_repair_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-feature-surface-repair",
+      "command": "npm run aegis:alpha-factory-feature-surface-repair",
+      "policy_effect": "feature_surface_repair_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_candidate_qualification_change_no_fixture_definition_change_no_baseline_change_no_rac_creation_no_discovery_advantage_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-fixture-suite-retest-with-repaired-features",
+      "command": "npm run aegis:alpha-factory-fixture-suite-retest-with-repaired-features",
+      "policy_effect": "fixture_suite_retest_with_repaired_features_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_feature_surface_repair_change_no_candidate_qualification_change_no_baseline_change_no_fixture_definition_change_no_broad_success_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-synthetic-discovery-certification",
+      "command": "npm run aegis:alpha-factory-synthetic-discovery-certification",
+      "policy_effect": "synthetic_discovery_certification_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_feature_surface_repair_change_no_fixture_suite_retest_change_no_candidate_qualification_change_no_real_market_alpha_claim_no_live_trading_claim_no_capital_allocation_claim_no_broad_success_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-real-historical-data-pilot",
+      "command": "npm run aegis:alpha-factory-real-historical-data-pilot",
+      "policy_effect": "real_historical_data_pilot_artifact_only_no_question_discovery_change_no_evidence_test_v2_change_no_feature_surface_repair_change_no_synthetic_certification_change_no_candidate_qualification_change_no_naive_baseline_change_no_real_market_claim_unless_valid_rac_discovery_advantage_pipeline_outperformance_and_all_hostile_checks_pass_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-historical-data-coverage-certification",
+      "command": "npm run aegis:alpha-factory-historical-data-coverage-certification",
+      "policy_effect": "historical_data_coverage_certification_artifact_only_no_real_historical_pilot_change_no_question_discovery_change_no_evidence_test_v2_change_no_naive_baseline_change_no_candidate_qualification_change_no_new_data_added_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-macro-data-intake-certification",
+      "command": "npm run aegis:alpha-factory-macro-data-intake-certification",
+      "policy_effect": "macro_data_intake_certification_artifact_only_local_source_backed_data_only_no_question_discovery_change_no_evidence_test_v2_change_no_feature_surface_repair_change_no_real_historical_pilot_change_no_coverage_certification_change_no_candidate_qualification_change_no_fabricated_macro_data_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-cross-asset-etf-discovery-pilot",
+      "command": "npm run aegis:alpha-factory-cross-asset-etf-discovery-pilot",
+      "policy_effect": "cross_asset_etf_discovery_pilot_artifact_only_certified_available_etf_vix_real_history_no_macro_claims_no_question_discovery_change_no_evidence_test_v2_change_no_feature_surface_repair_change_no_macro_intake_change_no_candidate_qualification_change_no_naive_baseline_change_no_real_market_cross_asset_claim_unless_valid_rac_discovery_advantage_pipeline_outperformance_macro_leakage_absent_and_all_hostile_checks_pass_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-cross-asset-etf-failure-attribution",
+      "command": "npm run aegis:alpha-factory-cross-asset-etf-failure-attribution",
+      "policy_effect": "cross_asset_etf_failure_attribution_artifact_only_no_cross_asset_pilot_change_no_question_discovery_change_no_evidence_test_change_no_feature_surface_change_no_naive_baseline_change_no_candidate_qualification_change_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-technical-conditional-pattern-pilot",
+      "command": "npm run aegis:alpha-factory-technical-conditional-pattern-pilot",
+      "policy_effect": "technical_conditional_pattern_pilot_artifact_only_no_cross_asset_pilot_change_no_question_discovery_change_no_evidence_test_change_no_feature_surface_change_no_naive_baseline_change_no_candidate_qualification_change_no_rac_creation_no_real_market_discovery_claim_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:alpha-factory-technical-conditional-pattern-failure-attribution",
+      "command": "npm run aegis:alpha-factory-technical-conditional-pattern-failure-attribution",
+      "policy_effect": "technical_conditional_pattern_failure_attribution_artifact_only_no_technical_pilot_change_no_existing_technical_feature_change_no_naive_technical_baseline_change_no_candidate_qualification_change_no_trading_gate_change"
+    }
+  ],
+  "tests": [
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_poc_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_poc_review_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_naive_correlation_baseline_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_out_of_fixture_benchmark_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_question_discovery_v2.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_question_discovery_v2_rebenchmark_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_question_productivity_diagnostic_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_non_naive_evidence_test_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_v2_non_naive_rebenchmark_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_v2_generalization_failure_attribution_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_deterministic_fixture_suite_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_evidence_test_failure_attribution_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_evidence_test_v2.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_deterministic_fixture_suite_retest_v2.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_injection_visibility_diagnostic_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_feature_surface_repair_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_synthetic_discovery_certification_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_real_historical_data_pilot_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_historical_data_coverage_certification_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_macro_data_intake_certification_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_cross_asset_etf_failure_attribution_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_technical_conditional_pattern_pilot_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1.py"
+    }
+  ],
+  "evidence_artifacts": [
+    {
+      "evidence_id": "aegis_alpha_factory_poc_v1",
+      "artifact_type": "research_evidence_projection",
+      "path": "reports/aegis_alpha_factory_poc_v1/{day}/alpha_factory_poc.v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_poc_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_poc_review_v1",
+      "artifact_type": "hostile_review",
+      "path": "reports/aegis_alpha_factory_poc_review_v1/{day}/aegis_alpha_factory_poc_review_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_poc_review_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_naive_correlation_baseline_v1",
+      "artifact_type": "naive_correlation_baseline",
+      "path": "reports/aegis_alpha_factory_naive_correlation_baseline_v1/{day}/aegis_alpha_factory_naive_correlation_baseline_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_naive_baseline_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_out_of_fixture_benchmark_v1",
+      "artifact_type": "out_of_fixture_benchmark",
+      "path": "reports/aegis_alpha_factory_out_of_fixture_benchmark_v1/{day}/aegis_alpha_factory_out_of_fixture_benchmark_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_out_of_fixture_benchmark_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_discovery_v2",
+      "artifact_type": "question_discovery_repair",
+      "path": "reports/aegis_alpha_factory_question_discovery_v2/{day}/aegis_alpha_factory_question_discovery_v2.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_question_discovery_v2",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_discovery_v2_rebenchmark_v1",
+      "artifact_type": "question_discovery_v2_rebenchmark",
+      "path": "reports/aegis_alpha_factory_question_discovery_v2_rebenchmark_v1/{day}/aegis_alpha_factory_question_discovery_v2_rebenchmark_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_question_discovery_v2_rebenchmark_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_productivity_diagnostic_v1",
+      "artifact_type": "question_productivity_diagnostic",
+      "path": "reports/aegis_alpha_factory_question_productivity_diagnostic_v1/{day}/aegis_alpha_factory_question_productivity_diagnostic_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_question_productivity_diagnostic_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_non_naive_evidence_test_v1",
+      "artifact_type": "non_naive_evidence_test",
+      "path": "reports/aegis_alpha_factory_non_naive_evidence_test_v1/{day}/aegis_alpha_factory_non_naive_evidence_test_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_non_naive_evidence_test_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_non_naive_rebenchmark_v1",
+      "artifact_type": "v2_non_naive_rebenchmark",
+      "path": "reports/aegis_alpha_factory_v2_non_naive_rebenchmark_v1/{day}/aegis_alpha_factory_v2_non_naive_rebenchmark_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_v2_non_naive_rebenchmark_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1",
+      "artifact_type": "v2_out_of_fixture_non_naive_rebenchmark",
+      "path": "reports/aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1/{day}/aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_generalization_failure_attribution_v1",
+      "artifact_type": "v2_generalization_failure_attribution",
+      "path": "reports/aegis_alpha_factory_v2_generalization_failure_attribution_v1/{day}/aegis_alpha_factory_v2_generalization_failure_attribution_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_v2_generalization_failure_attribution_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_deterministic_fixture_suite_v1",
+      "artifact_type": "deterministic_fixture_suite",
+      "path": "reports/aegis_alpha_factory_deterministic_fixture_suite_v1/{day}/aegis_alpha_factory_deterministic_fixture_suite_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_deterministic_fixture_suite_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_evidence_test_failure_attribution_v1",
+      "artifact_type": "evidence_test_failure_attribution",
+      "path": "reports/aegis_alpha_factory_evidence_test_failure_attribution_v1/{day}/aegis_alpha_factory_evidence_test_failure_attribution_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_evidence_test_failure_attribution_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_evidence_test_v2",
+      "artifact_type": "evidence_test_specificity_repair",
+      "path": "reports/aegis_alpha_factory_evidence_test_v2/{day}/aegis_alpha_factory_evidence_test_v2.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_evidence_test_v2",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_deterministic_fixture_suite_retest_v2",
+      "artifact_type": "deterministic_fixture_suite_retest",
+      "path": "reports/aegis_alpha_factory_deterministic_fixture_suite_retest_v2/{day}/aegis_alpha_factory_deterministic_fixture_suite_retest_v2.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_deterministic_fixture_suite_retest_v2",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_injection_visibility_diagnostic_v1",
+      "artifact_type": "injection_visibility_diagnostic",
+      "path": "reports/aegis_alpha_factory_injection_visibility_diagnostic_v1/{day}/aegis_alpha_factory_injection_visibility_diagnostic_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_injection_visibility_diagnostic_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_feature_surface_repair_v1",
+      "artifact_type": "feature_surface_repair",
+      "path": "reports/aegis_alpha_factory_feature_surface_repair_v1/{day}/aegis_alpha_factory_feature_surface_repair_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_feature_surface_repair_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1",
+      "artifact_type": "fixture_suite_retest_with_repaired_features",
+      "path": "reports/aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1/{day}/aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_fixture_suite_retest_with_repaired_features_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_synthetic_discovery_certification_v1",
+      "artifact_type": "synthetic_discovery_certification",
+      "path": "reports/aegis_alpha_factory_synthetic_discovery_certification_v1/{day}/aegis_alpha_factory_synthetic_discovery_certification_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_synthetic_discovery_certification_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_real_historical_data_pilot_v1",
+      "artifact_type": "real_historical_data_pilot",
+      "path": "reports/aegis_alpha_factory_real_historical_data_pilot_v1/{day}/aegis_alpha_factory_real_historical_data_pilot_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_real_historical_data_pilot_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_historical_data_coverage_certification_v1",
+      "artifact_type": "historical_data_coverage_certification",
+      "path": "reports/aegis_alpha_factory_historical_data_coverage_certification_v1/{day}/aegis_alpha_factory_historical_data_coverage_certification_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_historical_data_coverage_certification_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_macro_data_intake_certification_v1",
+      "artifact_type": "macro_data_intake_certification",
+      "path": "reports/aegis_alpha_factory_macro_data_intake_certification_v1/{day}/aegis_alpha_factory_macro_data_intake_certification_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_macro_data_intake_certification_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1",
+      "artifact_type": "cross_asset_etf_discovery_pilot",
+      "path": "reports/aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1/{day}/aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_cross_asset_etf_failure_attribution_v1",
+      "artifact_type": "cross_asset_etf_failure_attribution",
+      "path": "reports/aegis_alpha_factory_cross_asset_etf_failure_attribution_v1/{day}/aegis_alpha_factory_cross_asset_etf_failure_attribution_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_cross_asset_etf_failure_attribution_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_technical_conditional_pattern_pilot_v1",
+      "artifact_type": "technical_conditional_pattern_pilot",
+      "path": "reports/aegis_alpha_factory_technical_conditional_pattern_pilot_v1/{day}/aegis_alpha_factory_technical_conditional_pattern_pilot_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_technical_conditional_pattern_pilot_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1",
+      "artifact_type": "technical_conditional_pattern_failure_attribution",
+      "path": "reports/aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1/{day}/aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1.json",
+      "producer": "ops.tools.build_aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1",
+      "day_scoped": true
+    }
+  ],
+  "ui_surfaces": [],
+  "policies": [
+    "Proof of concept only; not production readiness.",
+    "No consumer invents truth; consumers query generated evidence artifacts.",
+    "Research Asset Candidate is not a trade candidate.",
+    "Hostile review may invalidate discovery or evidence sufficiency claims without changing the POC generator.",
+    "Naive correlation baseline evaluates discovery advantage without modifying discovery, capabilities, or candidate projection.",
+    "Out-of-fixture benchmark compares existing POC and naive baseline on an alternate deterministic fixture without modifying discovery, baseline, or candidate naming logic.",
+    "Question Discovery v2 generates generic anomaly- and instability-derived questions only; it does not claim discovery advantage or repair candidate naming.",
+    "Question Discovery v2 rebenchmark may only claim Alpha Factory success when V2_OUTPERFORMS_BASELINE and DISCOVERY_ADVANTAGE_PRESENT are both proven.",
+    "Question Productivity Diagnostic v1 identifies the primary failure mode before any Question Discovery v3 implementation is allowed.",
+    "Non-Naive Evidence Test v1 probes whether v2 questions can produce non-forward-return support; it does not claim discovery advantage.",
+    "Alpha Factory v2 Non-Naive Rebenchmark v1 may only support a discovery-advantage claim when non-naive candidate support is unique versus the naive baseline and a Research Asset Candidate qualifies under explicit breadth, zero-sample, naming, limitation, and lineage rules.",
+    "Alpha Factory v2 Out-of-Fixture Non-Naive Rebenchmark v1 may only mark generalization when discovery advantage, valid Research Asset Candidate qualification, nonzero unique non-naive evidence, and non-full naive-baseline explanation are all proven out of fixture.",
+    "Alpha Factory v2 Generalization Failure Attribution v1 explains why in-fixture non-naive advantage failed out of fixture and forbids building v3 until the primary failure mode is identified.",
+    "Alpha Factory Deterministic Fixture Suite v1 tests whether QQQ:REAL_YIELD relationship instability is repeatable, injected-structure-sensitive, or false-positive-prone; v3 remains forbidden until this artifact is evaluated.",
+    "Alpha Factory Evidence Test Failure Attribution v1 diagnoses false-positive and missed injected-structure behavior from fixture-suite evidence; evidence tests must not be repaired until this attribution is evaluated.",
+    "Trading, broker integration, capital allocation, mutation, and autonomous execution are forbidden.",
+    "Evidence Test v2 may improve evidence specificity only; it must not claim discovery advantage or change candidate qualification rules.",
+    "Deterministic fixture suite retest v2 may evaluate Evidence Test v2 fixture sensitivity only; broad Alpha Factory success requires both discovery generalization and false-positive control to pass.",
+    "Injection visibility diagnostic v1 may identify repair class only; Evidence Test v2 must not be repaired until the diagnostic cause is reviewed.",
+    "Feature surface repair v1 may expose relationship features for retesting only; it must not create RACs or claim discovery advantage.",
+    "Fixture suite retest with repaired features may evaluate deterministic fixture behavior only; broad Alpha Factory success requires injected SPY:VIX detection, clean negative controls, and a valid RAC supported by non-naive baseline-separated evidence.",
+    "Synthetic discovery certification v1 may certify only deterministic synthetic fixture discovery; real-market alpha, live trading readiness, capital allocation readiness, and broad Alpha Factory success claims remain prohibited.",
+    "Real historical data pilot v1 may allow a real-market discovery claim only when at least one valid RAC is found, discovery advantage is present, the pipeline outperforms the naive baseline, and every hostile check passes; otherwise the claim remains prohibited.",
+    "Historical data coverage certification v1 may certify cross-asset ETF coverage separately from macro Research Asset discovery coverage; missing REAL_YIELD, NOMINAL_YIELD, INFLATION_EXPECTATIONS, or DXY blocks corresponding macro claims and real-market discovery claims remain prohibited when the baseline matches or exceeds the pipeline.",
+    "Macro data intake certification v1 may certify only local source-backed macro series and an explicitly limited UUP-as-DXY proxy; fabricated macro data, silent DXY proxy treatment, real-yield claims without REAL_YIELD, and trading gate changes are forbidden.",
+    "Cross-asset ETF discovery pilot v1 may use only certified available SPY, QQQ, GLD, SLV, TLT, UUP, and VIX historical series; macro claims requiring REAL_YIELD, NOMINAL_YIELD, INFLATION_EXPECTATIONS, or DXY are excluded, and a real-market cross-asset discovery claim is allowed only when a valid RAC is found, discovery advantage is present, the pipeline outperforms the naive baseline, macro leakage is absent, and every hostile check passes.",
+    "Cross-asset ETF failure attribution v1 may explain why the ETF/VIX pilot produced a RAC but failed to beat the naive baseline; it must not modify the pilot, question discovery, evidence tests, feature surface, naive baseline, candidate qualification rules, or trading gates.",
+    "Technical conditional pattern pilot v1 may test non-pairwise ETF/VIX technical conditions after cross-asset ETF failure attribution; it must not modify discovery, evidence tests, feature repair, naive baseline, candidate qualification, or trading gates, and it must keep real-market technical discovery claims prohibited until out-of-sample replay passes hostile gates.",
+    "Technical conditional pattern failure attribution v1 may explain why the technical conditional pipeline failed to outperform naive technical baselines; it must not modify the technical pilot, existing technical features, naive technical baselines, candidate qualification rules, or trading gates."
+  ],
+  "freshness_requirements": [
+    {
+      "evidence_id": "aegis_alpha_factory_poc_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_poc_review_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_naive_correlation_baseline_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_out_of_fixture_benchmark_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_discovery_v2",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_discovery_v2_rebenchmark_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_question_productivity_diagnostic_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_non_naive_evidence_test_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_non_naive_rebenchmark_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_out_of_fixture_non_naive_rebenchmark_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_v2_generalization_failure_attribution_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_deterministic_fixture_suite_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_evidence_test_failure_attribution_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_synthetic_discovery_certification_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_real_historical_data_pilot_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_historical_data_coverage_certification_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_macro_data_intake_certification_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_cross_asset_etf_discovery_pilot_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_cross_asset_etf_failure_attribution_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_technical_conditional_pattern_pilot_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_alpha_factory_technical_conditional_pattern_failure_attribution_v1",
+      "max_age_days": 0,
+      "day_scoped": true
+    }
+  ]
+}

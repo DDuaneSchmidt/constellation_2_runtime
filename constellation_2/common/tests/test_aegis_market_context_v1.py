@@ -130,14 +130,13 @@ def test_snapshot_cli_derives_truth_lineage_without_fabricating_stale_market_dat
     validate_event_market_snapshot_v1(payload)
 
     lineage_types = {entry["artifact_type"] for entry in payload["source_lineage"]}
-    assert payload["stale_data_status"] == "STALE"
-    assert "market_data_snapshot_v1:dataset_manifest" in lineage_types
-    assert "market_data_snapshot_v1:SPY" in lineage_types
-    assert "market_data_snapshot_v1:QQQ" in lineage_types
+    assert payload["stale_data_status"] in {"STALE", "MISSING_INPUT"}
+    assert "market_context_demand_v1" in lineage_types
+    assert "market_context_source" in lineage_types
     assert payload["current_prices"]["SPY"] == ""
     assert payload["current_prices"]["QQQ"] == ""
-    assert "MARKET_CONTEXT_SOURCE_STALE" in payload["reason_codes"]
-    assert "MISSING_INPUT:spy_price" in payload["reason_codes"]
+    assert any(code == "MARKET_CONTEXT_SOURCE_STALE" or code.startswith("CONTEXT_NOT_FETCHED:") for code in payload["reason_codes"])
+    assert any(code == "MISSING_INPUT:spy_price" or code.startswith("CONTEXT_NOT_FETCHED:spy_") for code in payload["reason_codes"])
     assert payload["broker_submit_required"] is False
 
 

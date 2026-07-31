@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_hypothesis_generator.v1.schema.json",
+  "title": "Atlas V2 Claim-to-Hypothesis Generator V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ResearchHypothesis"},
+    {"$ref": "#/$defs/HypothesisFalsificationPlan"},
+    {"$ref": "#/$defs/HypothesisGenerationRun"}
+  ],
+  "$defs": {
+    "PrimaryFailureMode": {"enum": ["OVERFITTING", "CROWDING", "SLIPPAGE", "REGIME_DEPENDENCE", "VAGUE_RULES", "LOOKAHEAD_BIAS", "SURVIVORSHIP_BIAS", "COMMISSION_DRAG", "CHERRY_PICKING", "DATA_MINING", "LOW_SAMPLE_SIZE", "UNKNOWN"]},
+    "ResearchHypothesisStatus": {"enum": ["GENERATED", "INSUFFICIENT_DETAIL", "DUPLICATE_HYPOTHESIS", "UNSUPPORTED_MECHANISM", "REJECTED_LOW_SPECIFICITY"]},
+    "HypothesisFalsificationPlanStatus": {"enum": ["CREATED", "INSUFFICIENT_DETAIL", "REQUIRES_BASELINE", "REQUIRES_DATA"]},
+    "HypothesisGenerationRunStatus": {"enum": ["COMPLETED", "COMPLETED_WITH_INSUFFICIENT_DETAIL", "NO_TESTABLE_HYPOTHESES"]},
+    "Transition": {"type": "object", "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"], "properties": {"transitioned_at": {"type": "string", "format": "date-time"}, "from_status": {"type": "string"}, "to_status": {"type": "string"}, "reason": {"type": "string", "minLength": 1}, "triggering_object": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "Base": {"type": "object", "required": ["object_type", "created_at", "transition_history"], "properties": {"object_type": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}}},
+    "StringList": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "ResearchHypothesis": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {"type": "object", "required": ["hypothesis_id", "created_at", "source_claim_id", "mechanism_id", "mechanism_family", "hypothesis_text", "testable_condition", "expected_direction", "baseline_comparison", "required_data", "falsification_criteria", "contrarian_inputs", "confidence", "authority_boundary_acknowledged", "status"], "properties": {"object_type": {"const": "ResearchHypothesis"}, "hypothesis_id": {"type": "string", "minLength": 1}, "source_claim_id": {"type": "string", "minLength": 1}, "mechanism_id": {"type": "string", "minLength": 1}, "mechanism_family": {"type": "string", "minLength": 1}, "hypothesis_text": {"type": "string", "minLength": 1}, "testable_condition": {"type": "string", "minLength": 1}, "expected_direction": {"type": "string", "minLength": 1}, "baseline_comparison": {"type": "string", "minLength": 1}, "required_data": {"$ref": "#/$defs/StringList"}, "falsification_criteria": {"$ref": "#/$defs/StringList"}, "contrarian_inputs": {"$ref": "#/$defs/StringList"}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "authority_boundary_acknowledged": {"const": true}, "status": {"$ref": "#/$defs/ResearchHypothesisStatus"}}}
+      ]
+    },
+    "HypothesisFalsificationPlan": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {"type": "object", "required": ["plan_id", "created_at", "hypothesis_id", "failure_modes", "required_tests", "minimum_sample_requirement", "baseline_requirement", "falsification_threshold", "status"], "properties": {"object_type": {"const": "HypothesisFalsificationPlan"}, "plan_id": {"type": "string", "minLength": 1}, "hypothesis_id": {"type": "string", "minLength": 1}, "failure_modes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/PrimaryFailureMode"}}, "required_tests": {"$ref": "#/$defs/StringList"}, "minimum_sample_requirement": {"type": "integer", "minimum": 0}, "baseline_requirement": {"type": "string", "minLength": 1}, "falsification_threshold": {"type": "string", "minLength": 1}, "status": {"$ref": "#/$defs/HypothesisFalsificationPlanStatus"}}}
+      ]
+    },
+    "HypothesisGenerationRun": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {"type": "object", "required": ["run_id", "created_at", "claims_processed", "hypotheses_created", "insufficient_detail_count", "duplicate_hypothesis_count", "status"], "properties": {"object_type": {"const": "HypothesisGenerationRun"}, "run_id": {"type": "string", "minLength": 1}, "source_batch_id": {"type": "string", "minLength": 1}, "source_mechanism_registry_id": {"type": "string", "minLength": 1}, "claims_processed": {"type": "integer", "minimum": 0}, "hypotheses_created": {"type": "integer", "minimum": 0}, "insufficient_detail_count": {"type": "integer", "minimum": 0}, "duplicate_hypothesis_count": {"type": "integer", "minimum": 0}, "status": {"$ref": "#/$defs/HypothesisGenerationRunStatus"}}}
+      ]
+    }
+  }
+}

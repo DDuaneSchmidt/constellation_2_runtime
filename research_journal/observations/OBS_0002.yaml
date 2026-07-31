@@ -1,0 +1,6 @@
+id: OBS_0002
+date: 2026-06-03
+observation: Paper-position observations accumulated faster than statistically meaningful closed outcomes.
+why_interesting: Outcome maturity may be lagging observation volume.
+source: AEGIS paper-position observation and outcome maturity review
+status: OPEN

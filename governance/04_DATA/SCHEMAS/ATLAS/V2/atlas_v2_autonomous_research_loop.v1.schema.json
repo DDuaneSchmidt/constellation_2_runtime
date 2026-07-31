@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_autonomous_research_loop.v1.schema.json",
+  "title": "Atlas V2 Autonomous Research Loop V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/AutonomousResearchLoopRun"},
+    {"$ref": "#/$defs/AutonomousResearchLoopSummary"}
+  ],
+  "$defs": {
+    "Mode": {"enum": ["mock", "historical"]},
+    "Transition": {
+      "type": "object",
+      "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"],
+      "properties": {
+        "transitioned_at": {"type": "string", "minLength": 1},
+        "from_status": {"type": "string"},
+        "to_status": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "triggering_object": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": ["object_type", "created_at", "transition_history"],
+      "properties": {
+        "object_type": {"type": "string"},
+        "created_at": {"type": "string", "minLength": 1},
+        "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}
+      }
+    },
+    "Count": {"type": "integer", "minimum": 0},
+    "AutonomousResearchLoopRun": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["loop_run_id", "runner_version", "mode", "max_loop_count", "claims_seen", "hypotheses_created", "specs_created", "results_created", "experience_events_created", "learning_estimates_created", "label_integrity_report_id", "authority_boundary_acknowledged", "stopped_on_authority_violation", "status"],
+          "properties": {
+            "object_type": {"const": "AutonomousResearchLoopRun"},
+            "loop_run_id": {"type": "string", "minLength": 1},
+            "runner_version": {"const": "atlas_v2_autonomous_research_loop_runner_v1"},
+            "mode": {"$ref": "#/$defs/Mode"},
+            "max_loop_count": {"type": "integer", "minimum": 0, "maximum": 10},
+            "claims_seen": {"$ref": "#/$defs/Count"},
+            "hypotheses_created": {"$ref": "#/$defs/Count"},
+            "specs_created": {"$ref": "#/$defs/Count"},
+            "results_created": {"$ref": "#/$defs/Count"},
+            "experience_events_created": {"$ref": "#/$defs/Count"},
+            "learning_estimates_created": {"$ref": "#/$defs/Count"},
+            "label_integrity_report_id": {"type": "string", "minLength": 1},
+            "authority_boundary_acknowledged": {"const": true},
+            "stopped_on_authority_violation": {"type": "boolean"},
+            "status": {"enum": ["COMPLETED_SAFE_RESEARCH_LOOP", "STOPPED_AUTHORITY_VIOLATION", "NO_CLAIMS"]}
+          }
+        }
+      ]
+    },
+    "AutonomousResearchLoopSummary": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["summary_id", "loop_run_id", "mode", "claims_seen", "mechanisms_seen", "hypotheses_created", "specs_created", "results_created", "experience_events_created", "learning_estimates_created", "learning_evaluations_created", "attention_signals_created", "label_integrity_report_id", "label_independence_status", "authority_boundary_acknowledged", "forbidden_authority_terms_absent", "status"],
+          "properties": {
+            "object_type": {"const": "AutonomousResearchLoopSummary"},
+            "summary_id": {"type": "string", "minLength": 1},
+            "loop_run_id": {"type": "string", "minLength": 1},
+            "mode": {"$ref": "#/$defs/Mode"},
+            "claims_seen": {"$ref": "#/$defs/Count"},
+            "mechanisms_seen": {"$ref": "#/$defs/Count"},
+            "hypotheses_created": {"$ref": "#/$defs/Count"},
+            "specs_created": {"$ref": "#/$defs/Count"},
+            "results_created": {"$ref": "#/$defs/Count"},
+            "experience_events_created": {"$ref": "#/$defs/Count"},
+            "learning_estimates_created": {"$ref": "#/$defs/Count"},
+            "learning_evaluations_created": {"$ref": "#/$defs/Count"},
+            "attention_signals_created": {"$ref": "#/$defs/Count"},
+            "label_integrity_report_id": {"type": "string", "minLength": 1},
+            "label_independence_status": {"enum": ["INDEPENDENT", "PARTIALLY_SHARED", "HIGHLY_SHARED", "CIRCULAR", "NOT_RUN"]},
+            "authority_boundary_acknowledged": {"const": true},
+            "forbidden_authority_terms_absent": {"type": "boolean"},
+            "status": {"enum": ["SAFE_RESEARCH_LOOP_COMPLETED", "STOPPED_AUTHORITY_VIOLATION", "NO_CLAIMS"]}
+          }
+        }
+      ]
+    }
+  }
+}

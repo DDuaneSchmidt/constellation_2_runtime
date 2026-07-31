@@ -111,13 +111,34 @@ def _stable_sha(payload: Dict[str, Any]) -> str:
     return hashlib.sha256((json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")).hexdigest()
 
 
+def _runtime_hash_candidate_paths(truth_root: Path, day_utc: str) -> List[Path]:
+    resolved = truth_root.resolve()
+    candidates = [resolved / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"]
+    parts = resolved.parts
+    if "truth_sleeves" in parts:
+        idx = parts.index("truth_sleeves")
+        canonical_truth = Path(*parts[:idx]) / "truth"
+        candidates.append(canonical_truth / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json")
+    out: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
 def _read_runtime_hash(truth_root: Path, day_utc: str) -> str:
-    runtime_path = truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json"
-    try:
-        obj = json.loads(runtime_path.read_text(encoding="utf-8"))
-    except Exception:
-        return ""
-    return str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "")
+    for runtime_path in _runtime_hash_candidate_paths(truth_root, day_utc):
+        try:
+            obj = json.loads(runtime_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        value = str(obj.get("deterministic_output_hash") or obj.get("runtime_evaluation_hash") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _cash_source_type(path: Path) -> str:
@@ -793,6 +814,11 @@ def main(argv: List[str] | None = None) -> int:
             broker_cash_cents=broker_cash_cents,
         )
 
+        runtime_evaluation_hash = _read_runtime_hash(truth_root, day_utc)
+        if not runtime_evaluation_hash:
+            checked = [str(p) for p in _runtime_hash_candidate_paths(truth_root, day_utc)]
+            raise ValueError(f"RUNTIME_EVALUATION_HASH_UNAVAILABLE:{checked}")
+
         out: Dict[str, Any] = {
             "schema_id": "C2_POSITIONS_SNAPSHOT_V5",
             "schema_version": 5,
@@ -813,7 +839,7 @@ def main(argv: List[str] | None = None) -> int:
             "accounts": accounts,
             "items": items,
             "reconciliation": reconciliation,
-            "runtime_evaluation_hash": _read_runtime_hash(truth_root, day_utc),
+            "runtime_evaluation_hash": runtime_evaluation_hash,
             "source_type": "BROKER_EXPORT" if broker_rows else "SIMULATION_LEDGER",
             "cash_ledger_source_type": _cash_source_type(paths["cash_snapshot"]) if paths["cash_snapshot"].exists() else "UNKNOWN",
             "source_hash": _stable_sha({"input_manifest": input_manifest, "items": items, "accounts": accounts}),

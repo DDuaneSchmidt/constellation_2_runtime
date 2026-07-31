@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": "aegis_experience_loop.v1",
+  "oneOf": [
+    {"$ref": "#/$defs/AttentionDecision"},
+    {"$ref": "#/$defs/Prediction"},
+    {"$ref": "#/$defs/Outcome"},
+    {"$ref": "#/$defs/Regret"},
+    {"$ref": "#/$defs/CalibrationRecord"},
+    {"$ref": "#/$defs/BehaviorChange"},
+    {"$ref": "#/$defs/ExperienceEvent"}
+  ],
+  "$defs": {
+    "Base": {
+      "type": "object",
+      "required": ["schema_version", "record_type", "target_day"],
+      "properties": {
+        "schema_version": {"const": "aegis_experience_loop.v1"},
+        "target_day": {"type": "string", "minLength": 1}
+      }
+    },
+    "AttentionDecision": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "decision_id", "subject_id", "decided_at_utc", "attention_scope", "selected_action", "rationale", "evidence_refs"],
+          "properties": {
+            "record_type": {"const": "AttentionDecision"},
+            "decision_id": {"type": "string", "minLength": 1},
+            "subject_id": {"type": "string", "minLength": 1},
+            "decided_at_utc": {"type": "string", "minLength": 1},
+            "attention_scope": {"type": "string", "minLength": 1},
+            "selected_action": {"type": "string", "minLength": 1},
+            "rationale": {"type": "string", "minLength": 1},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "Prediction": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "prediction_id", "decision_id", "predicted_at_utc", "prediction_statement", "expected_outcome", "confidence", "horizon_days"],
+          "properties": {
+            "record_type": {"const": "Prediction"},
+            "prediction_id": {"type": "string", "minLength": 1},
+            "decision_id": {"type": "string", "minLength": 1},
+            "predicted_at_utc": {"type": "string", "minLength": 1},
+            "prediction_statement": {"type": "string", "minLength": 1},
+            "expected_outcome": {"type": "string", "minLength": 1},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "horizon_days": {"type": "integer", "minimum": 0}
+          }
+        }
+      ]
+    },
+    "Outcome": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "outcome_id", "prediction_id", "observed_at_utc", "outcome_statement", "outcome_status", "evidence_refs"],
+          "properties": {
+            "record_type": {"const": "Outcome"},
+            "outcome_id": {"type": "string", "minLength": 1},
+            "prediction_id": {"type": "string", "minLength": 1},
+            "observed_at_utc": {"type": "string", "minLength": 1},
+            "outcome_statement": {"type": "string", "minLength": 1},
+            "outcome_status": {"enum": ["UNKNOWN", "MATCHED", "MISSED", "PARTIAL"]},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "Regret": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "regret_id", "outcome_id", "assessed_at_utc", "regret_status", "regret_statement"],
+          "properties": {
+            "record_type": {"const": "Regret"},
+            "regret_id": {"type": "string", "minLength": 1},
+            "outcome_id": {"type": "string", "minLength": 1},
+            "assessed_at_utc": {"type": "string", "minLength": 1},
+            "regret_status": {"enum": ["NONE", "LOW", "MEDIUM", "HIGH"]},
+            "regret_statement": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "CalibrationRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "calibration_record_id", "regret_id", "calibrated_at_utc", "prior_confidence", "calibrated_confidence", "calibration_note"],
+          "properties": {
+            "record_type": {"const": "CalibrationRecord"},
+            "calibration_record_id": {"type": "string", "minLength": 1},
+            "regret_id": {"type": "string", "minLength": 1},
+            "calibrated_at_utc": {"type": "string", "minLength": 1},
+            "prior_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "calibrated_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "calibration_note": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "BehaviorChange": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "behavior_change_id", "calibration_record_id", "changed_at_utc", "change_statement", "activation_rule"],
+          "properties": {
+            "record_type": {"const": "BehaviorChange"},
+            "behavior_change_id": {"type": "string", "minLength": 1},
+            "calibration_record_id": {"type": "string", "minLength": 1},
+            "changed_at_utc": {"type": "string", "minLength": 1},
+            "change_statement": {"type": "string", "minLength": 1},
+            "activation_rule": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "ExperienceEvent": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["record_type", "experience_event_id", "behavior_change_id", "recorded_at_utc", "event_statement", "loop_status"],
+          "properties": {
+            "record_type": {"const": "ExperienceEvent"},
+            "experience_event_id": {"type": "string", "minLength": 1},
+            "behavior_change_id": {"type": "string", "minLength": 1},
+            "recorded_at_utc": {"type": "string", "minLength": 1},
+            "event_statement": {"type": "string", "minLength": 1},
+            "loop_status": {"const": "COMPLETE"}
+          }
+        }
+      ]
+    }
+  }
+}

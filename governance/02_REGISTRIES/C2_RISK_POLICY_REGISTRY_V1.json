@@ -209,6 +209,56 @@
       "stop_loss_bps_default": 500,
       "target_notional_pct_default": "0.20"
     },
+    "C2_OIL_SHOCK_REVERSAL_V1": {
+      "allow_entry_only_paper_test": false,
+      "broker_execution_allowed": false,
+      "capital_allocation_allowed": false,
+      "contract_ref": "governance/05_CONTRACTS/C2/equity_sleeve_stop_policy_v1.contract.md",
+      "estimated_notional_risk_pct_method": "max_loss_estimate_over_suggested_notional",
+      "expected_holding_days": 5,
+      "expected_holding_days_default": 5,
+      "hard_stop": {
+        "enabled": true,
+        "long_formula": "entry_reference_price * (1 - stop_loss_bps / 10000)",
+        "rounding": "currency_cents_half_up",
+        "short_formula": "entry_reference_price * (1 + stop_loss_bps / 10000)"
+      },
+      "invalidation_policy": {
+        "policy_id": "C2_OIL_SHOCK_REVERSAL_V1_INVALIDATION_V1",
+        "rules": [
+          {
+            "description": "Invalidate or review when the oil shock reversal thesis is no longer supported by the source signal.",
+            "rule_id": "oil_shock_reversal_thesis_invalidated"
+          },
+          {
+            "description": "Review or invalidate when the expected holding period is exceeded without renewed sleeve confirmation.",
+            "expected_holding_days": 5,
+            "rule_id": "time_based_invalidation"
+          },
+          {
+            "description": "Review or invalidate when energy ETF price action violates the governed stop policy.",
+            "rule_id": "hard_stop_breach"
+          }
+        ]
+      },
+      "live_trading_allowed": false,
+      "max_risk_pct": "0.01",
+      "notes": [
+        "Research-only policy. Candidate contracts and paper lifecycle remain authoritative."
+      ],
+      "order_routing_allowed": false,
+      "paper_only_today": true,
+      "paper_submit_allowed": false,
+      "per_trade_notional_pct_max": "0.05",
+      "policy_id": "C2_OIL_SHOCK_REVERSAL_V1_RISK_POLICY_V1",
+      "real_capital_allowed": false,
+      "research_only": true,
+      "risk_class": "OIL_SHOCK_REVERSAL",
+      "risk_estimate_method": "entry_minus_stop_times_quantity",
+      "stop_loss_bps_default": 1000,
+      "target_notional_pct_default": "0.05",
+      "trade_advice_allowed": false
+    },
     "C2_TREND_EQ_PRIMARY_V1": {
       "allow_entry_only_paper_test": false,
       "broker_execution_allowed": false,

@@ -75,6 +75,28 @@ def require_registry(reg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [s for s in sleeves if isinstance(s, dict)]
 
 
+def sleeve_is_automated_paper_execution(sleeve: Dict[str, Any]) -> bool:
+    if str(sleeve.get("mode") or "").strip().upper() != "PAPER":
+        return False
+    execution_mode = str(sleeve.get("execution_mode") or "AUTO").strip().upper()
+    if execution_mode != "AUTO":
+        return False
+    if sleeve.get("automated_execution_enabled") is False:
+        return False
+    return True
+
+
+def manual_sleeve_rollup_entry(sleeve: Dict[str, Any]) -> Dict[str, Any]:
+    sleeve_id = str(sleeve.get("sleeve_id") or "").strip() or "UNKNOWN"
+    return {
+        "sleeve_id": sleeve_id,
+        "enabled": True,
+        "status": "SKIP_MANUAL_ADVISORY",
+        "mode": str(sleeve.get("mode") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "reason_code": "SLEEVE_MANUAL_ADVISORY_NOT_AUTOMATED_PAPER",
+    }
+
+
 def canonical_partition(sleeve_id: str, mode: str) -> str:
     return f"truth_sleeves/{sleeve_id}/{mode}"
 
@@ -330,15 +352,19 @@ def main() -> int:
         if enabled is False:
             per_sleeve.append({"sleeve_id": sleeve_id, "enabled": False, "status": "SKIP_DISABLED"})
             continue
-        if str(s.get("mode") or "").strip().upper() != "PAPER":
-            per_sleeve.append(
-                {
-                    "sleeve_id": sleeve_id,
-                    "enabled": True,
-                    "status": "SKIP_OUTSIDE_SESSION_SCOPE",
-                    "reason_code": "SLEEVE_NOT_IN_PAPER_SESSION_SCOPE",
-                }
-            )
+        if not sleeve_is_automated_paper_execution(s):
+            execution_mode = str(s.get("execution_mode") or "AUTO").strip().upper()
+            if execution_mode == "MANUAL" or s.get("automated_execution_enabled") is False:
+                per_sleeve.append(manual_sleeve_rollup_entry(s))
+            else:
+                per_sleeve.append(
+                    {
+                        "sleeve_id": sleeve_id,
+                        "enabled": True,
+                        "status": "SKIP_OUTSIDE_SESSION_SCOPE",
+                        "reason_code": "SLEEVE_NOT_IN_PAPER_SESSION_SCOPE",
+                    }
+                )
             continue
         sleeve_id, mode, ib_account, truth_root = resolve_sleeve_truth_root(s)
 

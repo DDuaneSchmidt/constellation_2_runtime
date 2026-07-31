@@ -1,0 +1,10 @@
+id: KNW_0005
+statement: Paper workflow progress is not equivalent to live readiness.
+evidence:
+  - OBS_0011
+  - Candidate-to-paper lifecycle review
+  - Safety gates disabled live trading and trade advice
+limitations:
+  - Paper workflow evidence is day-specific
+why_it_matters: Researchers should separate paper tracking from deployable evidence.
+status: SUPPORTED

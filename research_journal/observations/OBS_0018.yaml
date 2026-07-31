@@ -1,0 +1,6 @@
+id: OBS_0018
+date: 2026-06-03
+observation: Architecture authority review kept legacy compatibility layers because runtime truth still required them.
+why_interesting: Deprecation readiness depended on runtime evidence, not architectural preference.
+source: AEGIS architecture authority model review
+status: OPEN

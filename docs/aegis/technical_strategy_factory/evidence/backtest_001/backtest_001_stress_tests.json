@@ -1,0 +1,69 @@
+{
+  "stress_tests": {
+    "180dma_perturbation_review": {
+      "annual_volatility": 0.10949067097175309,
+      "average_holding_period_days": 68.65656565656566,
+      "cagr": 0.05900848442324658,
+      "maximum_drawdown": -0.2972758928998275,
+      "sharpe": 0.5797131336487493,
+      "sortino": 0.6256966497928964,
+      "time_in_market": 0.711576095137739,
+      "total_return": 3.5461646026943763,
+      "trade_count": 199,
+      "turnover": 199.0,
+      "ulcer_index": 0.09239097230120313
+    },
+    "20_bps_round_trip_cost": {
+      "annual_volatility": 0.1091133965291098,
+      "average_holding_period_days": 84.1604938271605,
+      "cagr": 0.06456954675731863,
+      "maximum_drawdown": -0.24889382649074543,
+      "sharpe": 0.6294478809392455,
+      "sortino": 0.679466969101908,
+      "time_in_market": 0.7135330423001656,
+      "total_return": 4.220618645484986,
+      "trade_count": 163,
+      "turnover": 163.0,
+      "ulcer_index": 0.08751890117204912
+    },
+    "220dma_perturbation_review": {
+      "annual_volatility": 0.11034191401237729,
+      "average_holding_period_days": 86.48101265822785,
+      "cagr": 0.06761472785058653,
+      "maximum_drawdown": -0.25064962725509266,
+      "sharpe": 0.6496506274763888,
+      "sortino": 0.6945667225201794,
+      "time_in_market": 0.7156405238597019,
+      "total_return": 4.62971725184391,
+      "trade_count": 159,
+      "turnover": 159.0,
+      "ulcer_index": 0.08367672881523534
+    },
+    "50_bps_round_trip_cost": {
+      "annual_volatility": 0.10935303920441312,
+      "average_holding_period_days": 84.1604938271605,
+      "cagr": 0.054743032685464765,
+      "maximum_drawdown": -0.2623160658656486,
+      "sharpe": 0.5433148592642382,
+      "sortino": 0.5868288812401009,
+      "time_in_market": 0.7135330423001656,
+      "total_return": 3.086493380609883,
+      "trade_count": 163,
+      "turnover": 163.0,
+      "ulcer_index": 0.09977832550234737
+    },
+    "one_day_execution_delay": {
+      "annual_volatility": 0.110435129562523,
+      "average_holding_period_days": 97.7,
+      "cagr": 0.07052817490685825,
+      "maximum_drawdown": -0.2431798630974199,
+      "sharpe": 0.673937350699731,
+      "sortino": 0.7188697210853725,
+      "time_in_market": 0.7136835766972753,
+      "total_return": 5.049875585310238,
+      "trade_count": 141,
+      "turnover": 141.0,
+      "ulcer_index": 0.08427209111628191
+    }
+  }
+}

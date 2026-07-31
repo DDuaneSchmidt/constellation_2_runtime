@@ -134,6 +134,130 @@ STANDARD_TRADING_SLEEVE_IDS = {
 ADVISOR_RUNTIME_ROOT = advisor_runtime_root()
 
 
+def _load_bond_registry_metadata() -> Dict[str, Any]:
+    obj, _err = _safe_read_json(SLEEVE_REGISTRY)
+    row: Dict[str, Any] = {}
+    if isinstance(obj, dict) and isinstance(obj.get("sleeves"), list):
+        for candidate in obj.get("sleeves") or []:
+            if not isinstance(candidate, dict):
+                continue
+            if str(candidate.get("sleeve_id") or "").strip().upper() == "BOND":
+                row = candidate
+                break
+    return {
+        "sleeve_id": "BOND",
+        "display_name": str(row.get("display_name") or "Bond Sleeve"),
+        "enabled": bool(row.get("enabled")) if row else False,
+        "mode": str(row.get("mode") or "PAPER").strip().upper(),
+        "execution_mode": str(row.get("execution_mode") or "MANUAL").strip().upper(),
+        "status": str(row.get("status") or "MANUAL_PRODUCTION").strip().upper(),
+        "asset_class": str(row.get("asset_class") or "FIXED_INCOME").strip().upper(),
+        "sleeve_type": str(row.get("sleeve_type") or "BOND").strip().upper(),
+        "ui_visible": bool(row.get("ui_visible", True)) if row else False,
+        "allocator_visible": bool(row.get("allocator_visible", True)) if row else False,
+        "manual_execution_only": str(row.get("execution_mode") or "MANUAL").strip().upper() == "MANUAL",
+        "advisory_only": bool(row.get("advisory_only", True)),
+        "broker_execution_allowed": bool(row.get("broker_execution_allowed")) if row else False,
+        "automated_execution_allowed": bool(row.get("automated_execution_enabled")) if row else False,
+        "ib_account": str(row.get("ib_account") or "").strip() or None,
+        "symbols": [str(x).strip() for x in (row.get("symbols") or []) if isinstance(x, str) and str(x).strip()],
+        "registry_source": "C2_SLEEVE_REGISTRY_V1" if row else "DEFAULT_BOND_MANUAL_METADATA",
+    }
+
+
+def _bond_legacy_decision_candidates() -> List[Path]:
+    roots = [
+        (GLOBAL_RUNTIME_TRUTH_ROOT.parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve(),
+    ]
+    candidates: List[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        family_root = (root / "bond_decision_artifact_v1").resolve()
+        if not family_root.exists() or not family_root.is_dir():
+            continue
+        for day_dir in family_root.iterdir():
+            if not day_dir.is_dir() or not _is_day_str(day_dir.name):
+                continue
+            artifact = (day_dir / "bond_decision_artifact.v1.json").resolve()
+            if artifact.exists() and artifact.is_file():
+                candidates.append(artifact)
+    return sorted(candidates, key=lambda path: (path.parent.name, str(path)))
+
+
+def _latest_bond_legacy_decision(selected_day: str) -> Tuple[Optional[Path], Dict[str, Any]]:
+    candidates = _bond_legacy_decision_candidates()
+    if not candidates:
+        return None, {}
+    same_day = [p for p in candidates if p.parent.name == selected_day]
+    selected = (same_day or candidates)[-1]
+    obj, _err = _safe_read_json(selected)
+    return selected, obj if isinstance(obj, dict) else {}
+
+
+def _build_bond_latest_evaluation(
+    *,
+    selected_day: str,
+    used_day: str,
+    merged_artifacts: Dict[str, Any],
+) -> Dict[str, Any]:
+    overlay = merged_artifacts.get("bond_sleeve_recommendation_v2", {})
+    purchase = merged_artifacts.get("bond_purchase_recommendation_v1", {})
+    explanation = merged_artifacts.get("bond_sleeve_explanation_v1", {})
+    candidates = [overlay, purchase, explanation]
+    for obj in candidates:
+        if not isinstance(obj, dict) or not obj:
+            continue
+        produced = obj.get("produced_utc") or obj.get("generated_utc") or obj.get("created_at")
+        state = obj.get("recommendation_state") or obj.get("action_state") or obj.get("manual_status")
+        return {
+            "present": True,
+            "source": str(obj.get("schema_id") or "bond_report"),
+            "day_utc": used_day,
+            "selected_day": selected_day,
+            "produced_utc": produced if isinstance(produced, str) else None,
+            "recommendation_state": str(state or "MANUAL_REVIEW").upper(),
+            "manual_execution_only": True,
+            "advisory_only": True,
+            "broker_execution_allowed": False,
+            "operator_next_step": obj.get("operator_next_step") if isinstance(obj.get("operator_next_step"), str) else None,
+        }
+
+    legacy_path, legacy = _latest_bond_legacy_decision(selected_day)
+    if isinstance(legacy, dict) and legacy:
+        summary = legacy.get("decision_summary") if isinstance(legacy.get("decision_summary"), dict) else {}
+        state = summary.get("rebalance_state") or legacy.get("authority_status") or "MANUAL_REVIEW"
+        return {
+            "present": True,
+            "source": str(legacy.get("schema_id") or "bond_decision_artifact"),
+            "day_utc": legacy_path.parent.name if legacy_path else None,
+            "selected_day": selected_day,
+            "produced_utc": legacy.get("created_at") if isinstance(legacy.get("created_at"), str) else None,
+            "recommendation_state": str(state or "MANUAL_REVIEW").upper(),
+            "manual_execution_only": True,
+            "advisory_only": True,
+            "broker_execution_allowed": False,
+            "operator_next_step": "Review the bond recommendation manually; automated execution is not enabled.",
+            "artifact_path": str(legacy_path) if legacy_path else None,
+        }
+
+    return {
+        "present": False,
+        "source": None,
+        "day_utc": None,
+        "selected_day": selected_day,
+        "produced_utc": None,
+        "recommendation_state": "NO_CURRENT_ARTIFACT",
+        "manual_execution_only": True,
+        "advisory_only": True,
+        "broker_execution_allowed": False,
+        "operator_next_step": "No current bond evaluation was found; keep BOND visible as manual/advisory only.",
+    }
+
+
 # -------------------------
 # Tile model
 # -------------------------
@@ -237,8 +361,11 @@ def _collect_operator_holdings_view() -> Tuple[Dict[str, Any], List[str], List[s
         "macro_policy_path": str(BOND_MACRO_POLICY_INPUT_PATH),
         "macro_policy_sha256": _sha256_file(BOND_MACRO_POLICY_INPUT_PATH),
         "positions_count": 0,
+        "watchlist_count": 0,
         "market_value_total": None,
+        "watchlist_market_value_total": None,
         "positions": [],
+        "watchlist_positions": [],
         "present": False,
     }
 
@@ -253,36 +380,80 @@ def _collect_operator_holdings_view() -> Tuple[Dict[str, Any], List[str], List[s
         missing_paths.append(str(BOND_POLICY_INPUT_PATH))
         warnings.append(f"BOND_POLICY_INPUT_UNREADABLE:{pol_err}")
 
+    def _holding_row(raw: Dict[str, Any], *, idx: int, warning_prefix: str) -> Optional[Tuple[Dict[str, Any], Decimal]]:
+        mv = _parse_decimal_text(raw.get("market_value"))
+        if mv is None:
+            warnings.append(f"{warning_prefix}_MARKET_VALUE_NEEDS_REVIEW:{idx}")
+            mv = Decimal("0")
+        row = {
+            "instrument_id": raw.get("instrument_id") or raw.get("symbol"),
+            "symbol": raw.get("symbol") or raw.get("instrument_id"),
+            "description": raw.get("description"),
+            "account_label": raw.get("account_label"),
+            "quantity": raw.get("quantity"),
+            "price": raw.get("price"),
+            "market_value": str(mv),
+            "cost_basis": raw.get("cost_basis"),
+            "asset_class": raw.get("asset_class"),
+            "bond_type": raw.get("bond_type"),
+            "duration_bucket": raw.get("duration_bucket"),
+            "tax_treatment": raw.get("tax_treatment"),
+            "execution_mode": raw.get("execution_mode") or "MANUAL",
+            "sleeve": raw.get("sleeve") or "BOND",
+            "core_bond_exposure": bool(raw.get("core_bond_exposure")) if "core_bond_exposure" in raw else None,
+            "metadata_status": raw.get("metadata_status") or "NEEDS_REVIEW",
+            "review_status": raw.get("review_status") or "NEEDS_REVIEW",
+            "note": raw.get("note"),
+            "maturity_date": raw.get("maturity_date"),
+            "issuer_type": raw.get("issuer_type"),
+            "credit_type": raw.get("credit_type"),
+            "yield_to_maturity": raw.get("yield_to_maturity"),
+            "duration": raw.get("duration"),
+        }
+        if not row.get("asset_class") or not row.get("bond_type") or not row.get("duration_bucket") or not row.get("tax_treatment"):
+            row["metadata_status"] = "NEEDS_REVIEW"
+            row["review_status"] = "NEEDS_REVIEW"
+            warnings.append(f"{warning_prefix}_METADATA_NEEDS_REVIEW:{row.get('symbol') or idx}")
+        return row, mv
+
     items = positions_obj.get("positions") if isinstance(positions_obj.get("positions"), list) else []
+    watch_items = positions_obj.get("watchlist_positions") if isinstance(positions_obj.get("watchlist_positions"), list) else []
     rows: List[Dict[str, Any]] = []
+    watch_rows: List[Dict[str, Any]] = []
     total_mv = Decimal("0")
+    watch_total_mv = Decimal("0")
     for idx, raw in enumerate(items):
         if not isinstance(raw, dict):
             warnings.append(f"BOND_POSITION_ROW_INVALID:{idx}")
             continue
-        mv = _parse_decimal_text(raw.get("market_value"))
-        if mv is None:
-            warnings.append(f"BOND_POSITION_MARKET_VALUE_INVALID:{idx}")
+        parsed = _holding_row(raw, idx=idx, warning_prefix="BOND_POSITION")
+        if parsed is None:
             continue
+        row, mv = parsed
         total_mv += mv
-        rows.append(
-            {
-                "instrument_id": raw.get("instrument_id"),
-                "maturity_date": raw.get("maturity_date"),
-                "issuer_type": raw.get("issuer_type"),
-                "credit_type": raw.get("credit_type"),
-                "market_value": str(mv),
-                "yield_to_maturity": raw.get("yield_to_maturity"),
-                "duration": raw.get("duration"),
-            }
-        )
+        rows.append(row)
+    for idx, raw in enumerate(watch_items):
+        if not isinstance(raw, dict):
+            warnings.append(f"BOND_WATCHLIST_POSITION_ROW_INVALID:{idx}")
+            continue
+        parsed = _holding_row(raw, idx=idx, warning_prefix="BOND_WATCHLIST_POSITION")
+        if parsed is None:
+            continue
+        row, mv = parsed
+        watch_total_mv += mv
+        watch_rows.append(row)
     rows.sort(key=lambda x: str(x.get("instrument_id") or ""))
+    watch_rows.sort(key=lambda x: str(x.get("instrument_id") or ""))
 
     out["positions_count"] = len(rows)
+    out["watchlist_count"] = len(watch_rows)
     out["positions"] = rows
+    out["watchlist_positions"] = watch_rows
     out["present"] = len(rows) > 0
     if rows:
         out["market_value_total"] = str(total_mv)
+    if watch_rows:
+        out["watchlist_market_value_total"] = str(watch_total_mv)
 
     return out, sorted(set(warnings)), sorted(set(missing_paths))
 
@@ -394,6 +565,7 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
     source_paths: List[str] = []
     source_mtimes: Dict[str, float] = {}
 
+    registry_metadata = _load_bond_registry_metadata()
     operator_holdings, warn_holdings, miss_holdings = _collect_operator_holdings_view()
     warnings.extend(warn_holdings)
     missing_paths.extend(miss_holdings)
@@ -636,6 +808,12 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         "input_quality": input_quality,
     }
 
+    latest_evaluation = _build_bond_latest_evaluation(
+        selected_day=selected_day,
+        used_day=used_day,
+        merged_artifacts=merged_artifacts,
+    )
+
     family_statuses = [str(v.get("status") or "MISSING") for v in families_out.values() if isinstance(v, dict)]
     authority_head_present = all(
         isinstance(v, dict) and Path(str(v.get("authority_head_path") or "")).exists()
@@ -660,6 +838,8 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         warnings.append("AUTHORITY_HEAD_MISSING")
 
     out: Dict[str, Any] = {
+        "sleeve_id": "BOND",
+        "display_name": registry_metadata.get("display_name") or "Bond Sleeve",
         "selected_day": selected_day,
         "last_available_day": last_available_day,
         "used_day": used_day,
@@ -667,6 +847,19 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         "using_fallback_day": used_day != selected_day,
         "current_day_unavailable_reason": current_day_unavailable_reason,
         "status": overall_state,
+        "registry_status": registry_metadata.get("status"),
+        "mode": registry_metadata.get("mode"),
+        "execution_mode": registry_metadata.get("execution_mode") or "MANUAL",
+        "execution_label": "Manual execution",
+        "advisory_label": "Advisory only",
+        "asset_class": registry_metadata.get("asset_class") or "FIXED_INCOME",
+        "sleeve_type": registry_metadata.get("sleeve_type") or "BOND",
+        "ui_visible": bool(registry_metadata.get("ui_visible")),
+        "allocator_visible": bool(registry_metadata.get("allocator_visible")),
+        "manual_execution_only": True,
+        "advisory_only": True,
+        "broker_execution_allowed": False,
+        "automated_execution_allowed": False,
         "state_labels": sorted(
             set(
                 [
@@ -674,6 +867,8 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
                     holdings_state_label,
                     authority_state_label,
                     authority_missing_label,
+                    "MANUAL_EXECUTION_ONLY",
+                    "ADVISORY_ONLY",
                     "OPERATOR_HOLDINGS_LOADED" if holdings_state_label == "OPERATOR_HOLDINGS_LOADED" else "OPERATOR_HOLDINGS_MISSING",
                 ]
             )
@@ -681,11 +876,13 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         "recommendation_state_label": recommendation_state_label,
         "holdings_state_label": holdings_state_label,
         "authority_state_label": authority_state_label,
+        "latest_evaluation": latest_evaluation,
         "operator_holdings": operator_holdings,
         "run_metadata": run_metadata,
         "families": families_out,
         "summary": summary,
-        "available": bool(merged_artifacts),
+        "available": bool(registry_metadata.get("ui_visible")),
+        "evaluation_available": bool(merged_artifacts) or bool(latest_evaluation.get("present")),
     }
     return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
 
@@ -2123,6 +2320,31 @@ def _build_sleeve_strip_rows(
             row for row in fallback_rows
             if str(row.get("sleeve_id") or "").strip().upper() in STANDARD_TRADING_SLEEVE_IDS
         ]
+        bond_meta = _load_bond_registry_metadata()
+        if bond_meta.get("enabled") is True and bond_meta.get("ui_visible") is True:
+            filtered_fallback.append(
+                {
+                    "sleeve_id": "BOND",
+                    "name": bond_meta.get("display_name") or "Bond Sleeve",
+                    "mode": bond_meta.get("mode") or "PAPER",
+                    "ib_account_id": bond_meta.get("ib_account"),
+                    "entries_allowed": False,
+                    "flatten_only": None,
+                    "engine_ids": [],
+                    "active_today": False,
+                    "enabled": True,
+                    "registry_source": bond_meta.get("registry_source") or "C2_SLEEVE_REGISTRY_V1",
+                    "execution_mode": "MANUAL",
+                    "execution_label": "Manual execution",
+                    "advisory_label": "Advisory only",
+                    "asset_class": bond_meta.get("asset_class") or "FIXED_INCOME",
+                    "manual_execution_only": True,
+                    "advisory_only": True,
+                    "broker_execution_allowed": False,
+                    "automated_execution_allowed": False,
+                }
+            )
+        filtered_fallback.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
         return filtered_fallback, warnings
 
     active_engines = set(_active_engine_ids_for_day(truth_root, day))
@@ -2173,13 +2395,43 @@ def _build_sleeve_strip_rows(
         )
     out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
 
-    # Include only canonical standard trading sleeves that are not already engine-mapped.
-    # Bond is not a trading sleeve and must never enter the generic sleeve payload path.
+    # Include standard automated trading sleeves plus the manual/advisory BOND sleeve.
+    # BOND is visible to allocators and UI but remains outside broker-executable paths.
     reg_rows = list(registry_rows_by_id.values())
     if not reg_rows:
         return out, warnings
 
     existing_ids = {str(r.get("sleeve_id") or "").strip() for r in out}
+    bond_meta = _load_bond_registry_metadata()
+    if (
+        bond_meta.get("enabled") is True
+        and bond_meta.get("ui_visible") is True
+        and str(bond_meta.get("sleeve_id") or "").strip() not in existing_ids
+    ):
+        out.append(
+            {
+                "sleeve_id": "BOND",
+                "name": bond_meta.get("display_name") or "Bond Sleeve",
+                "mode": bond_meta.get("mode") or "PAPER",
+                "ib_account_id": bond_meta.get("ib_account"),
+                "entries_allowed": False,
+                "flatten_only": None,
+                "engine_ids": [],
+                "active_today": False,
+                "enabled": True,
+                "registry_source": bond_meta.get("registry_source") or "C2_SLEEVE_REGISTRY_V1",
+                "execution_mode": "MANUAL",
+                "execution_label": "Manual execution",
+                "advisory_label": "Advisory only",
+                "asset_class": bond_meta.get("asset_class") or "FIXED_INCOME",
+                "manual_execution_only": True,
+                "advisory_only": True,
+                "broker_execution_allowed": False,
+                "automated_execution_allowed": False,
+            }
+        )
+        existing_ids.add("BOND")
+
     for rs in reg_rows:
         if not isinstance(rs, dict):
             continue

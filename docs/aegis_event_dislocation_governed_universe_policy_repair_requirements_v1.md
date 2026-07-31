@@ -1,0 +1,3 @@
+# Aegis Event Dislocation Governed Universe Policy Repair Requirements v1
+
+Package T07B restricts C2_EVENT_DISLOCATION_V1 candidate conversion to governed instruments and governed candidate structures. The governed universe authority is ENGINE_MODEL_REGISTRY_V1.allowed_symbols; the Event Dislocation structure policy is GLD-only and derives LONG/LONG_EQUITY/GOVERNED candidate metadata. Signals outside that universe are suppressed before candidate contract validation with UNGOVERNED_SYMBOL_SUPPRESSED. Candidate contract strictness, strategy thresholds, scoring, risk policy, allocation, and broker/live/autonomous behavior remain unchanged.

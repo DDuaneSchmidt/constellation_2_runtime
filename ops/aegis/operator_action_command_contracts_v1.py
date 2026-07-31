@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from ops.aegis.domain_certification_v1 import build_domain_certification_report_v1, write_domain_certification_report_v1
-from ops.aegis.domain_source_builders_v1 import build_domain_source_artifact_v1, setup_requirements_v1
+from ops.aegis.domain_source_builders_v1 import build_domain_source_artifact_v1, setup_requirements_v1, write_domain_source_template_v1
 
 SCHEMA_ID = "aegis_operator_command_registry"
 SCHEMA_VERSION = "v1"
@@ -36,10 +37,43 @@ COMMAND_IDS = {
     "OPEN_IN_PAGE_MODAL",
     "VALIDATE_SOURCE",
     "UPLOAD_SOURCE",
+    "VIEW_SOURCE_SETUP",
+    "DOWNLOAD_SOURCE_TEMPLATE",
     "DOWNLOAD_EOD_SOURCE_TEMPLATE",
     "CERTIFY_SOURCE",
     "RECHECK_DOMAIN",
     "VIEW_REPAIR_JOB",
+    "QUEUE_CERTIFICATION",
+    "CERTIFY_SELECTED_SYMBOLS",
+    "VIEW_CERTIFICATION_RESULT",
+    "VIEW_TRADE_DETAIL",
+    "ADD_MANUAL_RECEIPT",
+    "RECORD_TRADE_EXIT",
+    "REVIEW_TRADE_OUTCOME",
+    "RECONCILE_TRADE_STATE",
+    "GENERATE_BACKFILLED_EXIT_PLAN",
+    "REVIEW_EXIT_INTENT",
+    "VIEW_EXIT_HISTORY",
+    "VIEW_EXIT_DECISION",
+    "UPDATE_STOP_PLAN",
+    "UPDATE_TARGET_PLAN",
+    "RECORD_PARTIAL_EXIT",
+    "RECORD_FULL_EXIT",
+    "RECORD_TRADE_OUTCOME",
+    "VIEW_POSITION_DETAIL",
+    "RUN_CONTEXT_READINESS_COMMAND",
+    "REFRESH_CANDIDATE_CONTRACTS",
+    "REFRESH_CANDIDATE_PROJECTION",
+    "REVIEW_PAPER_CANDIDATE",
+    "APPROVE_PAPER_CANDIDATE",
+    "REJECT_PAPER_CANDIDATE",
+    "CONFIRM_CANDIDATE_CAPTURED",
+    "MARK_CANDIDATE_NOT_CAPTURED",
+    "DEFER_CANDIDATE",
+    "CORRECT_CANDIDATE_CAPTURE",
+    "RECORD_PAPER_ENTRY",
+    "PAPER_TRADE_CANDIDATE",
+    "RECORD_PAPER_EXIT",
 }
 
 REQUIRED_COMMAND_FIELDS = (
@@ -78,6 +112,141 @@ def utc_now_v1() -> str:
 
 def stable_hash_v1(payload: Any) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+
+
+def _read_json_v1(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _coalesce_v1(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _trade_event_time_v1(trade: Mapping[str, Any]) -> str:
+    for event in trade.get("lifecycle_events") or []:
+        if not isinstance(event, Mapping):
+            continue
+        value = _coalesce_v1(event.get("fill_time"), event.get("event_time"), event.get("captured_at_utc"), event.get("created_at_utc"))
+        if value:
+            return value
+    return _coalesce_v1(trade.get("fill_time"), trade.get("event_time"), trade.get("created_at_utc"))
+
+
+def _find_trade_for_receipt_v1(*, truth_root: Path | str, day_utc: str, target_id: str) -> dict[str, Any]:
+    from ops.aegis.trade_lifecycle.trade_evaluation_projection_v1 import build_paper_trade_evaluation_projection_v1
+
+    projection = build_paper_trade_evaluation_projection_v1(truth_root=truth_root, day_utc=day_utc)
+    needle = str(target_id or "").strip()
+    for trade in projection.get("all_trades") or []:
+        if not isinstance(trade, dict):
+            continue
+        keys = {
+            str(trade.get("trade_id") or ""),
+            str(trade.get("capture_ticket_id") or ""),
+            str(trade.get("candidate_id") or ""),
+        }
+        if needle and needle in keys:
+            return trade
+    return {}
+
+
+def _write_manual_receipt_from_trade_v1(*, truth_root: Path | str, day_utc: str, target_id: str, payload: Mapping[str, Any], actor: str) -> dict[str, Any]:
+    from ops.tools.capture_manual_trade_receipt_v1 import validate_manual_trade_receipt_v1, write_manual_execution_receipt_aggregate_v1
+    from ops.aegis.trade_lifecycle.trade_evaluation_projection_v1 import (
+        build_paper_trade_evaluation_projection_v1,
+        build_trade_lifecycle_ledger_v1,
+        write_paper_trade_evaluation_projection_v1,
+        write_trade_lifecycle_ledger_v1,
+    )
+    from ops.aegis.trade_lifecycle.exit_review_projection_v1 import build_exit_review_projection_v1, write_exit_review_projection_v1
+
+    root = Path(truth_root).expanduser().resolve()
+    body = dict(payload or {})
+    trade = _find_trade_for_receipt_v1(truth_root=root, day_utc=day_utc, target_id=target_id)
+    trade_id = _coalesce_v1(body.get("trade_id"), target_id, trade.get("trade_id"), trade.get("capture_ticket_id"))
+    symbol = _coalesce_v1(body.get("symbol"), trade.get("symbol")).upper()
+    side = _coalesce_v1(body.get("side"), trade.get("side"))
+    quantity = _coalesce_v1(body.get("quantity"), trade.get("quantity"))
+    price = _coalesce_v1(body.get("price"), body.get("fill_price"), trade.get("entry_price"))
+    execution_time = _coalesce_v1(body.get("execution_time"), body.get("fill_time"), _trade_event_time_v1(trade), day_utc)
+    trade_date = _coalesce_v1(body.get("trade_date"), execution_time[:10], day_utc)
+    raw_receipt = {
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "trade_date": trade_date,
+        "execution_time": execution_time,
+        "entered_by": _coalesce_v1(body.get("entered_by"), actor, "operator"),
+        "broker": _coalesce_v1(body.get("broker"), body.get("source"), "IB_MANUAL_OR_PAPER"),
+        "account_alias": _coalesce_v1(body.get("account_alias"), body.get("account"), "paper/manual"),
+        "currency": _coalesce_v1(body.get("currency"), "USD"),
+        "order_type": _coalesce_v1(body.get("order_type"), "UNKNOWN"),
+        "fees": _coalesce_v1(body.get("fees"), "0"),
+        "notes": _coalesce_v1(body.get("notes"), "Reconciled from Aegis captured ticket history."),
+        "strategy_or_sleeve": _coalesce_v1(body.get("strategy_or_sleeve"), trade.get("sleeve_id")),
+        "related_candidate_id": _coalesce_v1(body.get("related_candidate_id"), trade.get("candidate_id")),
+        "external_order_id_redacted": _coalesce_v1(body.get("external_order_id_redacted")),
+        "operator_attestation": body.get("operator_attestation", True),
+        "broker_submission_by_aegis": False,
+        "autonomous_execution": False,
+    }
+    receipt, errors = validate_manual_trade_receipt_v1(raw_receipt)
+    if errors:
+        return {"ok": False, "errors": errors, "trade": trade}
+    receipt.update(
+        {
+            "trade_id": trade_id,
+            "position_id": _coalesce_v1(body.get("position_id"), str(trade_id).replace(":", "_")),
+            "capture_ticket_id": _coalesce_v1(body.get("capture_ticket_id"), trade.get("capture_ticket_id"), trade_id),
+            "manual_capture_record_id": _coalesce_v1(body.get("manual_capture_record_id"), trade.get("capture_record_id")),
+            "linked_recommendation": _coalesce_v1(body.get("linked_recommendation"), trade.get("recommendation_id")),
+            "linked_promoted_candidate": _coalesce_v1(body.get("linked_promoted_candidate"), trade.get("candidate_id")),
+            "verification_status": "VERIFIED",
+            "receipt_type": "MANUAL_FILL_RECORDED",
+            "timestamp": execution_time,
+            "manual_operator_confirmation_required": True,
+            "broker_submit_transmit_allowed": False,
+            "broker_execution_allowed": False,
+            "order_routing_allowed": False,
+            "autonomous_execution_allowed": False,
+            "trade_advice_allowed": False,
+        }
+    )
+    receipt["evidence_hash"] = stable_hash_v1({**receipt, "evidence_hash": ""})
+    receipt_id = str(receipt["receipt_id"])
+    receipt_path = root / "manual_trade_receipts" / trade_date / f"{receipt_id}.manual_trade_receipt.v1.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    aggregate_path = write_manual_execution_receipt_aggregate_v1(truth_root=root, day_utc=trade_date)
+    ledger = build_trade_lifecycle_ledger_v1(truth_root=root, day_utc=day_utc)
+    ledger_paths = write_trade_lifecycle_ledger_v1(truth_root=root, day_utc=day_utc, payload=ledger)
+    trade_projection = build_paper_trade_evaluation_projection_v1(truth_root=root, day_utc=day_utc)
+    trade_paths = write_paper_trade_evaluation_projection_v1(truth_root=root, day_utc=day_utc, payload=trade_projection)
+    exit_projection = build_exit_review_projection_v1(truth_root=root, day_utc=day_utc)
+    exit_paths = write_exit_review_projection_v1(truth_root=root, day_utc=day_utc, payload=exit_projection)
+    refreshed_trade = next((row for row in trade_projection.get("all_trades") or [] if isinstance(row, dict) and str(row.get("trade_id") or "") == trade_id), {})
+    refreshed_exit = next((row for row in exit_projection.get("rows") or [] if isinstance(row, dict) and str(row.get("trade_id") or "") == trade_id), {})
+    return {
+        "ok": True,
+        "receipt": receipt,
+        "receipt_id": receipt_id,
+        "receipt_path": str(receipt_path),
+        "manual_execution_receipt_path": str(aggregate_path),
+        "ledger_paths": ledger_paths,
+        "trade_projection_paths": trade_paths,
+        "exit_review_paths": exit_paths,
+        "refreshed_trade": refreshed_trade,
+        "refreshed_exit_review": refreshed_exit,
+    }
 
 
 def command_audit_dir_v1(*, truth_root: Path | str, day_utc: str) -> Path:
@@ -178,6 +347,26 @@ def command_registry_v1() -> dict[str, Any]:
             success_state_transition="Return exact source setup requirements; Aegis does not fabricate source files.",
         ),
         _command(
+            "VIEW_SOURCE_SETUP",
+            "View setup requirements",
+            "domain_source",
+            "A source-missing repair item needs operator/admin setup.",
+            "In-page setup panel is present.",
+            IN_PAGE_DETAIL,
+            success_state_transition="Open guided setup requirements without leaving Repair Center.",
+        ),
+        _command(
+            "DOWNLOAD_SOURCE_TEMPLATE",
+            "Download template",
+            "domain_source",
+            "External JSON source setup requires a template.",
+            "Operational day and domain_id are present.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["domain_id"], "properties": {"domain_id": {"type": "string"}, "day_utc": {"type": "string"}}},
+            success_state_transition="Write a JSON template for the required governed source; no source data is fabricated.",
+        ),
+        _command(
             "DOWNLOAD_EOD_SOURCE_TEMPLATE",
             "Download CSV template",
             "domain_source",
@@ -210,7 +399,246 @@ def command_registry_v1() -> dict[str, Any]:
             input_schema={"type": "object", "required": ["domain_id"], "properties": {"domain_id": {"type": "string"}}},
             success_state_transition="Rebuild and persist the domain certification report for the operational day.",
         ),
+        _command(
+            "QUEUE_CERTIFICATION",
+            "Queue Certification",
+            "dynamic_certification_queue",
+            "Candidate Funnel has uncovered symbols with candidate/intent pressure.",
+            "Operational day is present; queue selection is read-only and audit-backed.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "properties": {"day_utc": {"type": "string"}}},
+            success_state_transition="Build dynamic_certification_queue_v1 from candidate pressure without changing broker, routing, thresholds, or scheduler policy.",
+            audit_artifact_type="dynamic_certification_queue_v1",
+        ),
+        _command(
+            "CERTIFY_SELECTED_SYMBOLS",
+            "Certify Selected Symbols",
+            "dynamic_certification_queue",
+            "A dynamic certification queue has requested symbols.",
+            "Selected symbols are present in dynamic_certification_queue_v1.requested_symbols.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "properties": {"day_utc": {"type": "string"}, "symbols": {"type": "array", "items": {"type": "string"}}}},
+            success_state_transition="Fetch and validate only queued symbols, append successful rows to immutable final EOD artifact, and leave failed symbols excluded.",
+            audit_artifact_type="dynamic_certification_queue_v1",
+        ),
+        _command(
+            "VIEW_CERTIFICATION_RESULT",
+            "View Certification Result",
+            "dynamic_certification_queue",
+            "A dynamic certification queue or result exists.",
+            "Operational day is present.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "properties": {"day_utc": {"type": "string"}}},
+            success_state_transition="Return latest dynamic certification result panel without mutating certification state.",
+            audit_artifact_type="dynamic_certification_queue_v1",
+        ),
         _command("VIEW_REPAIR_JOB", "View Job", "repair_item", "A repair command or remediation job exists.", "Repair item is present in the current projection.", IN_PAGE_DETAIL, success_state_transition="Open in-page repair job details."),
+        _command("VIEW_TRADE_DETAIL", "View Trade Detail", "paper_trade", "A trade lifecycle projection row exists.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open in-page trade lifecycle, evidence, and attribution details."),
+        _command(
+            "ADD_MANUAL_RECEIPT",
+            "Add Manual Receipt",
+            "paper_trade",
+            "A captured trade is missing manual IB receipt evidence.",
+            "Receipt fields are present and operator attestation is true; recording remains manual-only.",
+            IN_PAGE_DETAIL,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["trade_id", "symbol", "side", "quantity", "price", "execution_time"], "properties": {"trade_id": {"type": "string"}, "symbol": {"type": "string"}, "side": {"type": "string"}, "quantity": {"type": "string"}, "price": {"type": "string"}, "execution_time": {"type": "string"}, "operator_attestation": {"type": "boolean"}}},
+            success_state_transition="Open the in-page receipt form; form submission writes manual_execution_receipt_v1 and refreshes trade/exit projections. No broker route or autonomous execution is enabled.",
+            audit_artifact_type="manual_execution_receipt_v1",
+        ),
+        _command("RECORD_TRADE_EXIT", "Record Trade Exit", "paper_trade", "An open captured trade has no exit evidence.", "Detail panel is present; exit recording remains manual evidence capture.", IN_PAGE_DETAIL, success_state_transition="Open exit evidence guidance panel; no broker route or autonomous execution is enabled."),
+        _command("REVIEW_TRADE_OUTCOME", "Review Trade Outcome", "paper_trade", "A closed trade has outcome evidence.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open in-page realized outcome details."),
+        _command("RECONCILE_TRADE_STATE", "Reconcile Trade State", "paper_trade", "A trade has incomplete or conflicting evaluation evidence.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open reconciliation guidance panel with missing evidence and source artifacts."),
+        _command("GENERATE_BACKFILLED_EXIT_PLAN", "Generate Backfilled Exit Plan", "exit_review_position", "A legacy open trade is missing trade_intent_ledger_v1 evidence.", "Trade id or position id is present; output remains partial and manual-review only.", API_COMMAND, endpoint="/api/aegis/commands/execute", input_schema={"type": "object", "properties": {"trade_id": {"type": "string"}, "position_id": {"type": "string"}}}, success_state_transition="Append BACKFILLED_INTENT to trade_intent_ledger_v1 and refresh exit projections. No thesis details are invented."),
+        _command("REVIEW_EXIT_INTENT", "Review Exit Intent", "exit_review_position", "An adaptive exit review row needs manual review.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open current/original exit intent and evidence in-page."),
+        _command("VIEW_EXIT_HISTORY", "View Exit History", "exit_review_position", "Trade intent ledger history exists or can be inspected.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open append-only exit intent history in-page."),
+        _command("VIEW_EXIT_DECISION", "View Exit Decision", "exit_review_position", "An exit review row has an exit decision.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open the exit decision details in-page."),
+        _command("UPDATE_STOP_PLAN", "Update Stop Plan", "exit_review_position", "Exit review recommends UPDATE_STOP or reports a missing stop plan.", "Detail panel is present; updating remains manual/operator-confirmed.", IN_PAGE_DETAIL, success_state_transition="Open stop-plan guidance. No broker order, route, or transmit occurs."),
+        _command("UPDATE_TARGET_PLAN", "Update Target Plan", "exit_review_position", "Operator wants to record a manual target-plan change.", "Detail panel is present; updating remains manual/operator-confirmed.", IN_PAGE_DETAIL, success_state_transition="Open target-plan guidance. No broker order, route, or transmit occurs."),
+        _command("RECORD_PARTIAL_EXIT", "Record Partial Exit", "exit_review_position", "Exit review recommends TAKE_PARTIAL.", "Detail panel is present; recording remains manual/operator-confirmed.", IN_PAGE_DETAIL, success_state_transition="Open partial-exit evidence guidance. No broker order, route, or transmit occurs."),
+        _command("RECORD_FULL_EXIT", "Record Full Exit", "exit_review_position", "Exit review recommends EXIT_FULL.", "Detail panel is present; recording remains manual/operator-confirmed.", IN_PAGE_DETAIL, success_state_transition="Open full-exit evidence guidance. No broker order, route, or transmit occurs."),
+        _command("RECORD_TRADE_OUTCOME", "Record Trade Outcome", "exit_review_position", "A closed outcome needs operator review or final outcome evidence.", "Detail panel is present; recording remains manual/operator-confirmed.", IN_PAGE_DETAIL, success_state_transition="Open trade-outcome evidence guidance."),
+        _command("VIEW_POSITION_DETAIL", "View Position Detail", "exit_review_position", "An open position exists in Exit Review.", "Detail panel is present.", IN_PAGE_DETAIL, success_state_transition="Open position detail, evidence, and safety context in-page."),
+        _command(
+            "RUN_CONTEXT_READINESS_COMMAND",
+            "Repair Context Readiness",
+            "runtime_context",
+            "Context readiness evidence is missing, stale, or blocked.",
+            "Operational day is present and the hardened repair_context_readiness action is allowlisted.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action_id": {"type": "string", "const": "repair_context_readiness"},
+                    "command": {"type": "string"},
+                    "day_utc": {"type": "string"},
+                },
+                "additionalProperties": True,
+            },
+            success_state_transition="Run the allowlisted context-readiness repair argv; refresh runtime truth, verified graph, hydrate packet, and audit handoff. No trading, advice, capture, promotion, or broker policy is changed.",
+            failure_behavior="Show the hardened action result and keep Aegis policy gates fail-closed.",
+            audit_artifact_type="aegis_portal_action_record.v1",
+            safety_classification={**SAFETY, "portal_action_id": "repair_context_readiness"},
+        ),
+        _command(
+            "REVIEW_PAPER_CANDIDATE",
+            "Review",
+            "paper_review_candidate",
+            "A paper-review candidate needs human review.",
+            "Candidate id is present; opens governed evidence in-page only.",
+            IN_PAGE_DETAIL,
+            success_state_transition="Open candidate review modal with lineage, evidence, and paper-only warnings.",
+            safety_classification={**SAFETY, "portal_action_id": "review_paper_candidate"},
+        ),
+        _command(
+            "PAPER_TRADE_CANDIDATE",
+            "Paper Trade",
+            "paper_review_candidate",
+            "Candidate workflow state is AWAITING_REVIEW.",
+            "Candidate id, entry price, and quantity or notional are provided; receipt type remains SIMULATED_PAPER.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_entry_price"], "properties": {"candidate_id": {"type": "string"}, "paper_entry_price": {"type": "string"}, "quantity": {"type": "string"}, "notional": {"type": "string"}, "timestamp": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Approve the candidate, create a SIMULATED_PAPER receipt, update paper review queue/outcomes/candidate projection, and set workflow state PAPER_POSITION_OPEN. No broker order is created.",
+            audit_artifact_type="paper_trade_receipts.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "paper_trade_candidate"},
+        ),
+        _command(
+            "APPROVE_PAPER_CANDIDATE",
+            "Approve for Paper",
+            "paper_review_candidate",
+            "Candidate workflow state is AWAITING_REVIEW.",
+            "Candidate id is in paper_review_queue and live_trade_eligible is false.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["candidate_id"], "properties": {"candidate_id": {"type": "string"}, "reason": {"type": "string"}, "day_utc": {"type": "string"}}},
+            success_state_transition="Append operator decision artifact and set workflow state APPROVED_FOR_PAPER. No broker order is created.",
+            audit_artifact_type="paper_review_decisions.v1.jsonl",
+            safety_classification={**SAFETY, "portal_action_id": "approve_paper_candidate"},
+        ),
+        _command(
+            "REJECT_PAPER_CANDIDATE",
+            "Reject",
+            "paper_review_candidate",
+            "Candidate workflow state is AWAITING_REVIEW.",
+            "Candidate id is in paper_review_queue and live_trade_eligible is false.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["candidate_id"], "properties": {"candidate_id": {"type": "string"}, "reason": {"type": "string"}, "day_utc": {"type": "string"}}},
+            success_state_transition="Append operator decision artifact and set workflow state REJECTED_BY_OPERATOR. No broker order is created.",
+            audit_artifact_type="paper_review_decisions.v1.jsonl",
+            safety_classification={**SAFETY, "portal_action_id": "reject_paper_candidate"},
+        ),
+        _command(
+            "CONFIRM_CANDIDATE_CAPTURED",
+            "Confirm Captured",
+            "paper_review_candidate",
+            "Candidate is visible in Today's Candidates and the operator manually captured it outside Aegis.",
+            "Candidate id and paper session id are present; broker submit/transmit remains disabled.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_session_id"], "properties": {"candidate_id": {"type": "string"}, "paper_session_id": {"type": "string"}, "actual_entry": {"type": "string"}, "actual_stop": {"type": "string"}, "quantity": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Record a durable candidate capture command and paper entry receipt. No broker order is created.",
+            audit_artifact_type="aegis_paper_entry_receipts_v1/paper_entry_receipts.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "confirm_candidate_captured"},
+        ),
+        _command(
+            "MARK_CANDIDATE_NOT_CAPTURED",
+            "Mark Not Captured",
+            "paper_review_candidate",
+            "Candidate is visible in Today's Candidates and the operator did not capture it.",
+            "Candidate id and paper session id are present; no receipt or broker order is created.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_session_id"], "properties": {"candidate_id": {"type": "string"}, "paper_session_id": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Append CANDIDATE_NOT_CAPTURED decision event. No broker order is created.",
+            audit_artifact_type="aegis_candidate_decision_ledger_v1/candidate_decision_ledger.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "mark_candidate_not_captured"},
+        ),
+        _command(
+            "DEFER_CANDIDATE",
+            "Defer",
+            "paper_review_candidate",
+            "Candidate is visible in Today's Candidates and the operator is postponing the capture decision.",
+            "Candidate id and paper session id are present.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_session_id"], "properties": {"candidate_id": {"type": "string"}, "paper_session_id": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Append CANDIDATE_DEFERRED decision event. No broker order is created.",
+            audit_artifact_type="aegis_candidate_decision_ledger_v1/candidate_decision_ledger.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "defer_candidate"},
+        ),
+        _command(
+            "CORRECT_CANDIDATE_CAPTURE",
+            "Correct Capture",
+            "paper_review_candidate",
+            "Candidate has capture information the operator needs to inspect or correct.",
+            "Candidate id and paper session id are present.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_session_id"], "properties": {"candidate_id": {"type": "string"}, "paper_session_id": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Record a durable correction command for manual paper capture. No broker order is created.",
+            audit_artifact_type="aegis_paper_entry_receipts_v1/paper_entry_receipts.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "correct_candidate_capture"},
+        ),
+        _command(
+            "RECORD_PAPER_ENTRY",
+            "Record Entry",
+            "paper_review_candidate",
+            "Candidate workflow state is APPROVED_FOR_PAPER.",
+            "Entry price plus quantity or notional is provided; receipt type remains SIMULATED_PAPER.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_entry_price"], "properties": {"candidate_id": {"type": "string"}, "paper_entry_price": {"type": "string"}, "quantity": {"type": "string"}, "notional": {"type": "string"}, "timestamp": {"type": "string"}, "notes": {"type": "string"}}},
+            success_state_transition="Create SIMULATED_PAPER receipt and set workflow state PAPER_POSITION_OPEN. No broker order is created.",
+            audit_artifact_type="paper_trade_receipts.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "record_paper_entry"},
+        ),
+        _command(
+            "RECORD_PAPER_EXIT",
+            "Record Exit",
+            "paper_review_candidate",
+            "Candidate workflow state is PAPER_POSITION_OPEN.",
+            "Exit price is provided for an open SIMULATED_PAPER position.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "required": ["candidate_id", "paper_exit_price"], "properties": {"candidate_id": {"type": "string"}, "paper_exit_price": {"type": "string"}, "timestamp": {"type": "string"}, "notes": {"type": "string"}, "exit_reason_selected_by_operator": {"type": "string"}}},
+            success_state_transition="Append SIMULATED_PAPER exit receipt and close paper_trade_outcomes. No broker order is created.",
+            audit_artifact_type="paper_trade_outcomes.v1.json",
+            safety_classification={**SAFETY, "portal_action_id": "record_paper_exit"},
+        ),
+        _command(
+            "REFRESH_CANDIDATE_CONTRACTS",
+            "Refresh Candidate Contracts",
+            "candidate_contracts",
+            "Entry reference price evidence is missing, stale, uncertified, or mismatched.",
+            "Operational day is present; the command runs only allowlisted market-data, data-registry, and candidate-contract argv arrays.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "properties": {"day_utc": {"type": "string"}}},
+            success_state_transition="Regenerate market data, data registry, and candidate contracts only. No trading, advice, capture, promotion, or broker policy is changed.",
+            failure_behavior="Show the failed argv step and keep Aegis policy gates fail-closed.",
+            audit_artifact_type="aegis_portal_action_record.v1",
+            safety_classification={**SAFETY, "portal_action_id": "refresh_candidate_contracts"},
+        ),
+        _command(
+            "REFRESH_CANDIDATE_PROJECTION",
+            "Refresh Candidate Projection",
+            "candidate_projection",
+            "Candidate diagnostics, contracts, or paper review projection is missing, stale, or mismatched.",
+            "Operational day is present; the command runs only allowlisted Aegis projection refresh argv arrays.",
+            API_COMMAND,
+            endpoint="/api/aegis/commands/execute",
+            input_schema={"type": "object", "properties": {"day_utc": {"type": "string"}}},
+            success_state_transition="Regenerate candidate diagnostics, contracts, paper review queue, canonical operator state, and verified graph/portal model. No trading, advice, capture, promotion, or broker policy is changed.",
+            failure_behavior="Show the failed argv step and keep Aegis policy gates fail-closed.",
+            audit_artifact_type="aegis_portal_action_record.v1",
+            safety_classification={**SAFETY, "portal_action_id": "refresh_candidate_projection"},
+        ),
         _command(
             "MARK_CAPTURE_COMPLETE",
             "Mark IB capture complete",
@@ -251,7 +679,7 @@ def validate_command_registry_v1() -> dict[str, Any]:
         for field in REQUIRED_COMMAND_FIELDS:
             if field not in command:
                 errors.append(f"{command.get('command_id')}:missing:{field}")
-        if command.get("action_type") == API_COMMAND and command.get("endpoint") != "/api/aegis/commands/execute":
+        if command.get("action_type") == API_COMMAND and command.get("endpoint") not in {"/api/aegis/commands/execute", "/api/aegis/commands"}:
             errors.append(f"{command.get('command_id')}:api_command_missing_router_endpoint")
     return {"ok": not errors, "errors": errors, "command_count": len(registry["commands"]), "registry": registry}
 
@@ -263,6 +691,7 @@ def command_for_hypothesis_status_v1(status: str) -> dict[str, Any]:
         "Queued": "VIEW_QUEUE",
         "Scheduled": "VIEW_QUEUE",
         "Researching": "VIEW_PROGRESS",
+        "Collecting Evidence": "VIEW_PROGRESS",
         "Waiting": "VIEW_WAITING_REASON",
         "Complete": "VIEW_FINDINGS",
         "Blocked": "VIEW_BLOCKER",
@@ -384,6 +813,7 @@ def execute_aegis_command_v1(
     day_utc: str,
     actor: str = "operator-ui",
     repair_job_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    command_runner: Callable[..., Any] | None = None,
     research_store_root: Path | str | None = None,
 ) -> dict[str, Any]:
     request = dict(payload or {})
@@ -529,7 +959,7 @@ def execute_aegis_command_v1(
             source = plan.get("required_source_artifact") if isinstance(plan.get("required_source_artifact"), dict) else {}
             label = str(source.get("label") or "required source")
             path = str(source.get("path") or "")
-            message = f"Source setup required for {domain_id}: provide {label}{f' at {path}' if path else ''}."
+            message = f"External source required — not a system failure for {domain_id}: provide {label}{f' at {path}' if path else ''}."
             result = _empty_response(
                 command,
                 status="SOURCE_SETUP_REQUIRED",
@@ -537,9 +967,9 @@ def execute_aegis_command_v1(
                 next_state="WAITING_FOR_INPUT",
                 ok=True,
                 command_result=_command_result_panel_v1(
-                    status_label="Source setup required",
+                    status_label="External source required — not a system failure",
                     plain_english_result=message,
-                    next_required_step="Provide or configure the required source, then run Validate Source.",
+                    next_required_step="Configure the required source path or place the JSON file at the governed artifact path, then run Validate Source.",
                     result_status="SOURCE_SETUP_REQUIRED",
                     missing_source_name=label,
                     expected_source_path=path,
@@ -547,6 +977,18 @@ def execute_aegis_command_v1(
                 ),
             )
             state_after = {"repair_state": "WAITING_FOR_INPUT", "required_source_path": path}
+        elif command_id == "DOWNLOAD_SOURCE_TEMPLATE":
+            body = dict(request.get("payload") or {})
+            domain_id = str(body.get("domain_id") or target_id or request.get("domain_id") or "").strip()
+            template = write_domain_source_template_v1(truth_root=Path(truth_root), day_utc=day_utc, domain_id=domain_id)
+            if template.get("ok") is True:
+                message = str(template.get("message") or f"JSON template written for {domain_id}.")
+                result = _empty_response(command, status="TEMPLATE_READY", message=message, next_state="WAITING_FOR_INPUT", command_result=_command_result_panel_v1(status_label="JSON template ready", plain_english_result=message, next_required_step=f"Replace template rows with real governed source data, set {template.get('required_config_key') or 'the required config key'} to the completed file, then run Validate Source.", result_status="TEMPLATE_READY", expected_source_path=str(template.get("template_path") or ""), copy_required_path=str(template.get("template_path") or "")))
+                state_after = {"template_path": template.get("template_path"), "required_config_key": template.get("required_config_key"), "required_output_path": template.get("required_output_path")}
+            else:
+                message = f"No source template is available for {domain_id}."
+                result = _empty_response(command, status=str(template.get("result_status") or "UNSUPPORTED_TEMPLATE_DOMAIN"), message=message, next_state="UNCHANGED", ok=False, command_result=_command_result_panel_v1(status_label="Template unavailable", plain_english_result=message, next_required_step="Use the listed source contract requirements for this domain.", result_status=str(template.get("result_status") or "UNSUPPORTED_TEMPLATE_DOMAIN"), failure_reason=message))
+                state_after = {"template_available": False}
         elif command_id == "DOWNLOAD_EOD_SOURCE_TEMPLATE":
             from ops.tools.manage_us_equities_eod_source_v1 import template_csv_v1, write_required_universe_v1
 
@@ -585,6 +1027,455 @@ def execute_aegis_command_v1(
                     message = f"EOD source failed validation: missing={len(missing)} stale={len(stale)} invalid_ohlcv={len(invalid)} duplicates={len(dupes)}."
                     result = _empty_response(command, status="INVALID_SOURCE", message=message, next_state="WAITING_FOR_INPUT", ok=False, command_result=_command_result_panel_v1(status_label="Source validation failed", plain_english_result=message, next_required_step="Fix the listed source rows and rerun certification.", result_status="INVALID_SOURCE", expected_source_path=source_file, copy_required_path=source_file, failure_reason=message))
                     state_after = {"repair_state": "WAITING_FOR_INPUT", "validation": validation}
+        elif command_id == "QUEUE_CERTIFICATION":
+            from ops.aegis.dynamic_certification_queue_v1 import build_dynamic_certification_queue_v1, write_dynamic_certification_queue_v1
+
+            body = dict(request.get("payload") or {})
+            queue_day = str(body.get("day_utc") or body.get("operational_day") or day_utc)
+            queue = build_dynamic_certification_queue_v1(truth_root=truth_root, day_utc=queue_day)
+            paths = write_dynamic_certification_queue_v1(truth_root=truth_root, payload=queue)
+            requested = queue.get("requested_symbols") if isinstance(queue.get("requested_symbols"), list) else []
+            message = f"Dynamic certification queue built for {queue_day}: {len(requested)} symbols requested."
+            result = _empty_response(
+                command,
+                status=str(queue.get("certification_status") or "EMPTY"),
+                message=message,
+                next_state="READY_TO_CERTIFY" if requested else "NO_DYNAMIC_CERTIFICATION_NEEDED",
+                ok=True,
+                command_result=_command_result_panel_v1(
+                    status_label="Certification queue ready" if requested else "No certification queue",
+                    plain_english_result=message,
+                    next_required_step="Run Certify Selected Symbols for queued symbols." if requested else "No additional symbols met the dynamic queue policy.",
+                    result_status=str(queue.get("certification_status") or "EMPTY"),
+                    expected_source_path=paths.get("json", ""),
+                    copy_required_path=paths.get("json", ""),
+                ),
+            )
+            result["queue_path"] = paths.get("json", "")
+            result["requested_symbols"] = requested
+            result["estimated_provider_load"] = queue.get("estimated_provider_load", 0)
+            state_after = {"queue_path": paths.get("json", ""), "requested_symbols": requested}
+        elif command_id == "CERTIFY_SELECTED_SYMBOLS":
+            from ops.aegis.dynamic_certification_queue_v1 import certify_dynamic_queue_symbols_v1
+
+            body = dict(request.get("payload") or {})
+            queue_day = str(body.get("day_utc") or body.get("operational_day") or day_utc)
+            selected_symbols = body.get("symbols") if isinstance(body.get("symbols"), list) else []
+            cert = certify_dynamic_queue_symbols_v1(truth_root=truth_root, day_utc=queue_day, symbols=[str(symbol) for symbol in selected_symbols])
+            certified = cert.get("certified_symbols") if isinstance(cert.get("certified_symbols"), list) else []
+            failed = cert.get("failed_symbols") if isinstance(cert.get("failed_symbols"), list) else []
+            message = str(cert.get("message") or f"Dynamic certification completed: {len(certified)} certified, {len(failed)} failed.")
+            result = _empty_response(
+                command,
+                status=str(cert.get("result_status") or "FAILED"),
+                message=message,
+                next_state="CERTIFICATION_REFRESHED" if cert.get("ok") else "CERTIFICATION_FAILED_CLOSED",
+                ok=bool(cert.get("ok")),
+                command_result=_command_result_panel_v1(
+                    status_label="Dynamic certification complete" if cert.get("ok") else "Dynamic certification failed closed",
+                    plain_english_result=message,
+                    next_required_step="Refresh Candidate Funnel and rerun candidate promotion eligibility." if cert.get("ok") else "Review provider failures; failed symbols remain excluded.",
+                    result_status=str(cert.get("result_status") or "FAILED"),
+                    expected_source_path=str(cert.get("final_eod_artifact_path") or cert.get("queue_path") or ""),
+                    copy_required_path=str(cert.get("final_eod_artifact_path") or cert.get("queue_path") or ""),
+                    failure_reason="" if cert.get("ok") else message,
+                ),
+            )
+            result.update(cert)
+            state_after = {"certified_symbols": certified, "failed_symbols": failed, "queue_path": cert.get("queue_path"), "final_eod_artifact_path": cert.get("final_eod_artifact_path")}
+        elif command_id == "VIEW_CERTIFICATION_RESULT":
+            from ops.aegis.dynamic_certification_queue_v1 import latest_dynamic_certification_queue_v1
+
+            body = dict(request.get("payload") or {})
+            queue_day = str(body.get("day_utc") or body.get("operational_day") or day_utc)
+            queue_path, queue = latest_dynamic_certification_queue_v1(truth_root=truth_root, day_utc=queue_day)
+            if queue:
+                requested = queue.get("requested_symbols") if isinstance(queue.get("requested_symbols"), list) else []
+                results = queue.get("certification_results") if isinstance(queue.get("certification_results"), list) else []
+                message = f"Dynamic certification status for {queue_day}: {queue.get('certification_status', 'UNKNOWN')} ({len(requested)} requested, {len(results)} results)."
+                status = str(queue.get("certification_status") or "UNKNOWN")
+                ok = True
+            else:
+                requested = []
+                results = []
+                message = f"No dynamic certification queue exists for {queue_day}."
+                status = "MISSING"
+                ok = False
+            result = _empty_response(
+                command,
+                status=status,
+                message=message,
+                next_state="UNCHANGED",
+                ok=ok,
+                command_result=_command_result_panel_v1(
+                    status_label="Dynamic certification result" if ok else "No certification result",
+                    plain_english_result=message,
+                    next_required_step="Review Candidate Funnel recommendations." if ok else "Queue certification first if candidate pressure exists.",
+                    result_status=status,
+                    expected_source_path=str(queue_path or ""),
+                    copy_required_path=str(queue_path or ""),
+                    failure_reason="" if ok else message,
+                ),
+            )
+            result["queue_path"] = str(queue_path or "")
+            result["requested_symbols"] = requested
+            result["certification_results"] = results
+            state_after = {"queue_path": str(queue_path or ""), "certification_status": status}
+
+        elif command_id == "RUN_CONTEXT_READINESS_COMMAND":
+            body = dict(request.get("payload") or {})
+            action_id = str(body.get("action_id") or target_id or "repair_context_readiness").strip()
+            command_argv = ["npm", "run", "aegis:repair-context-readiness"]
+            if action_id != "repair_context_readiness":
+                message = f"Unsupported context readiness action: {action_id}."
+                result = _empty_response(
+                    command,
+                    status="REJECTED",
+                    message=message,
+                    next_state="UNCHANGED",
+                    ok=False,
+                    command_result=_command_result_panel_v1(
+                        status_label="Rejected",
+                        plain_english_result=message,
+                        next_required_step="Use the allowlisted repair_context_readiness action.",
+                        result_status="REJECTED",
+                        failure_reason=message,
+                    ),
+                )
+            else:
+                runner = command_runner or subprocess.run
+                env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG", "LC_ALL", "TZ"} and value}
+                env["TARGET_DAY"] = str(body.get("day_utc") or day_utc)
+                env["AEGIS_TRUTH_ROOT"] = str(Path(truth_root).expanduser().resolve())
+                env["CI"] = "1"
+                try:
+                    completed = runner(
+                        command_argv,
+                        cwd=str(Path(repo_root).resolve() if repo_root else Path(__file__).resolve().parents[2]),
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                        shell=False,
+                    )
+                    exit_code = int(getattr(completed, "returncode", 1))
+                    stdout = str(getattr(completed, "stdout", "") or "")[-4000:]
+                    stderr = str(getattr(completed, "stderr", "") or "")[-2000:]
+                except subprocess.TimeoutExpired as exc:
+                    exit_code = 124
+                    stdout = str(exc.stdout or "")[-4000:]
+                    stderr = str(exc.stderr or "")[-2000:]
+                ok = exit_code == 0
+                status = "PASS" if ok else ("TIMEOUT" if exit_code == 124 else "FAILED")
+                message = "Context readiness repair completed." if ok else "Context readiness repair did not pass."
+                result = {
+                    **_empty_response(
+                        command,
+                        status=status,
+                        message=message,
+                        next_state="REFRESH_CONTEXT_READINESS" if ok else "UNCHANGED",
+                        ok=ok,
+                        command_result=_command_result_panel_v1(
+                            status_label="Context readiness repaired" if ok else "Context readiness repair failed",
+                            plain_english_result=message,
+                            next_required_step="Review runtime truth and verified graph outputs. Policy gates remain governed by runtime truth.",
+                            result_status=status,
+                            failure_reason="" if ok else stderr or stdout,
+                        ),
+                    ),
+                    "portal_action_id": "repair_context_readiness",
+                    "command_argv": command_argv,
+                    "shell": False,
+                    "exit_code": exit_code,
+                    "stdout_excerpt": stdout,
+                    "stderr_excerpt": stderr,
+                    "safety_policy_summary": {
+                        "broker_submit_transmit_allowed": False,
+                        "broker_execution_allowed": False,
+                        "autonomous_execution_allowed": False,
+                        "trade_advice_allowed": False,
+                        "manual_trade_capture_allowed": False,
+                        "promotion_bypass_allowed": False,
+                    },
+                }
+                state_after = {"portal_action_id": "repair_context_readiness", "exit_code": exit_code, "status": status}
+        elif command_id == "REFRESH_CANDIDATE_CONTRACTS":
+            body = dict(request.get("payload") or {})
+            target_day = str(body.get("day_utc") or day_utc)
+            command_steps = [
+                ["npm", "run", "aegis:refresh-market-data"],
+                ["npm", "run", "aegis:data-registry"],
+                ["npm", "run", "aegis:candidate-contracts"],
+            ]
+            runner = command_runner or subprocess.run
+            env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG", "LC_ALL", "TZ"} and value}
+            env["TARGET_DAY"] = target_day
+            env["AEGIS_TRUTH_ROOT"] = str(Path(truth_root).expanduser().resolve())
+            env["CI"] = "1"
+            step_results = []
+            exit_code = 0
+            for argv in command_steps:
+                try:
+                    completed = runner(
+                        argv,
+                        cwd=str(Path(repo_root).resolve() if repo_root else Path(__file__).resolve().parents[2]),
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        timeout=180,
+                        check=False,
+                        shell=False,
+                    )
+                    step_exit = int(getattr(completed, "returncode", 1))
+                    stdout = str(getattr(completed, "stdout", "") or "")[-2000:]
+                    stderr = str(getattr(completed, "stderr", "") or "")[-1000:]
+                except subprocess.TimeoutExpired as exc:
+                    step_exit = 124
+                    stdout = str(exc.stdout or "")[-2000:]
+                    stderr = str(exc.stderr or "")[-1000:]
+                step_results.append({"argv": argv, "shell": False, "exit_code": step_exit, "stdout_excerpt": stdout, "stderr_excerpt": stderr})
+                if step_exit != 0:
+                    exit_code = step_exit
+                    break
+            ok = exit_code == 0
+            status = "PASS" if ok else ("TIMEOUT" if exit_code == 124 else "FAILED")
+            message = f"Candidate contracts refreshed for {target_day}." if ok else f"Candidate contracts refresh failed for {target_day}."
+            result = {
+                **_empty_response(
+                    command,
+                    status=status,
+                    message=message,
+                    next_state="REFRESH_CANDIDATE_CONTRACTS" if ok else "UNCHANGED",
+                    ok=ok,
+                    command_result=_command_result_panel_v1(
+                        status_label="Candidate contracts refreshed" if ok else "Candidate contracts refresh failed",
+                        plain_english_result=message,
+                        next_required_step="Rerun candidate diagnostics/canonical projection only after reviewing refreshed contract counts. Policy gates remain governed by runtime truth.",
+                        result_status=status,
+                        failure_reason="" if ok else (step_results[-1].get("stderr_excerpt") or step_results[-1].get("stdout_excerpt") if step_results else message),
+                    ),
+                ),
+                "portal_action_id": "refresh_candidate_contracts",
+                "command_argv_sequence": command_steps,
+                "shell": False,
+                "exit_code": exit_code,
+                "step_results": step_results,
+                "safety_policy_summary": {
+                    "broker_submit_transmit_allowed": False,
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "trade_advice_allowed": False,
+                    "manual_trade_capture_allowed": False,
+                    "promotion_bypass_allowed": False,
+                },
+            }
+            state_after = {"portal_action_id": "refresh_candidate_contracts", "exit_code": exit_code, "status": status}
+        elif command_id == "REFRESH_CANDIDATE_PROJECTION":
+            body = dict(request.get("payload") or {})
+            target_day = str(body.get("day_utc") or day_utc)
+            command_steps = [
+                ["npm", "run", "aegis:signal-evidence-graph"],
+                ["npm", "run", "aegis:candidate-contracts"],
+                ["npm", "run", "aegis:signal-death-report"],
+                ["npm", "run", "aegis:candidate-diagnostics"],
+                ["npm", "run", "aegis:paper:review-queue"],
+                ["npm", "run", "aegis:roll-candidate-state"],
+                ["npm", "run", "aegis:run-history"],
+                ["npm", "run", "aegis:canonical-operator-state"],
+                ["npm", "run", "aegis:audit"],
+                ["npm", "run", "aegis:portal-smoke"],
+            ]
+            runner = command_runner or subprocess.run
+            env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG", "LC_ALL", "TZ"} and value}
+            env["TARGET_DAY"] = target_day
+            env["AEGIS_TRUTH_ROOT"] = str(Path(truth_root).expanduser().resolve())
+            env["CI"] = "1"
+            step_results = []
+            exit_code = 0
+            for argv in command_steps:
+                try:
+                    completed = runner(
+                        argv,
+                        cwd=str(Path(repo_root).resolve() if repo_root else Path(__file__).resolve().parents[2]),
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        timeout=180,
+                        check=False,
+                        shell=False,
+                    )
+                    step_exit = int(getattr(completed, "returncode", 1))
+                    stdout = str(getattr(completed, "stdout", "") or "")[-2000:]
+                    stderr = str(getattr(completed, "stderr", "") or "")[-1000:]
+                except subprocess.TimeoutExpired as exc:
+                    step_exit = 124
+                    stdout = str(exc.stdout or "")[-2000:]
+                    stderr = str(exc.stderr or "")[-1000:]
+                step_results.append({"argv": argv, "shell": False, "exit_code": step_exit, "stdout_excerpt": stdout, "stderr_excerpt": stderr})
+                if step_exit != 0:
+                    exit_code = step_exit
+                    break
+            ok = exit_code == 0
+            status = "PASS" if ok else ("TIMEOUT" if exit_code == 124 else "FAILED")
+            message = f"Candidate projection refreshed for {target_day}." if ok else f"Candidate projection refresh failed for {target_day}."
+            canonical_path = Path(truth_root).expanduser().resolve() / "reports" / "aegis_canonical_operator_state_v1" / target_day / "canonical_operator_state.v1.json"
+            try:
+                canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
+            except Exception:
+                canonical_payload = {}
+            projection = canonical_payload.get("candidate_ui_projection") if isinstance(canonical_payload.get("candidate_ui_projection"), dict) else {}
+            projection_source_paths = {
+                "canonical_operator_state": str(canonical_path),
+                "candidate_diagnostics": str(projection.get("candidate_diagnostics_path") or ""),
+                "candidate_contracts": str(projection.get("candidate_contracts_path") or ""),
+                "candidate_review_packet": str(projection.get("candidate_review_packet_path") or ""),
+                "paper_review_queue": str(projection.get("paper_review_queue_path") or ""),
+            }
+            result = {
+                **_empty_response(
+                    command,
+                    status=status,
+                    message=message,
+                    next_state="REFRESH_CANDIDATE_PROJECTION" if ok else "UNCHANGED",
+                    ok=ok,
+                    command_result=_command_result_panel_v1(
+                        status_label="Candidate projection refreshed" if ok else "Candidate projection refresh failed",
+                        plain_english_result=message,
+                        next_required_step="Reload the Candidate page and review source paths/hashes. Policy gates remain governed by runtime truth.",
+                        result_status=status,
+                        failure_reason="" if ok else (step_results[-1].get("stderr_excerpt") or step_results[-1].get("stdout_excerpt") if step_results else message),
+                    ),
+                ),
+                "portal_action_id": "refresh_candidate_projection",
+                "command_argv_sequence": command_steps,
+                "shell": False,
+                "exit_code": exit_code,
+                "step_results": step_results,
+                "candidate_projection_counts": {
+                    "has_candidate_ui_projection": bool(projection),
+                    "candidate_contract_count": int(projection.get("candidate_contract_count") or 0),
+                    "awaiting_review_count": int(projection.get("awaiting_review_count") or 0),
+                    "reviewable_candidate_count": int(projection.get("reviewable_candidate_count") or 0),
+                    "diagnostics_status": str(projection.get("diagnostics_status") or "UNKNOWN"),
+                    "paper_review_queue_status": str(projection.get("paper_review_queue_status") or "UNKNOWN"),
+                    "projection_status": str(projection.get("projection_status") or "MISSING"),
+                },
+                "source_paths": projection_source_paths,
+                "safety_policy_summary": {
+                    "broker_submit_transmit_allowed": False,
+                    "broker_execution_allowed": False,
+                    "autonomous_execution_allowed": False,
+                    "trade_advice_allowed": False,
+                    "manual_trade_capture_allowed": False,
+                    "promotion_bypass_allowed": False,
+                },
+            }
+            state_after = {"portal_action_id": "refresh_candidate_projection", "exit_code": exit_code, "status": status}
+        elif command_id in {"APPROVE_PAPER_CANDIDATE", "REJECT_PAPER_CANDIDATE", "RECORD_PAPER_ENTRY", "PAPER_TRADE_CANDIDATE", "RECORD_PAPER_EXIT"}:
+            from ops.aegis.canonical_operator_state_v1 import build_canonical_operator_state_v1, write_canonical_operator_state_v1
+            from ops.aegis.human_reviewed_paper_mode_v1 import (
+                paper_review_decisions_path_v1,
+                paper_trade_outcomes_path_v1,
+                paper_trade_receipts_path_v1,
+                record_paper_review_decision_v1,
+                record_paper_trade_exit_v1,
+                record_paper_trade_receipt_v1,
+            )
+
+            body = dict(request.get("payload") or {})
+            candidate_id = str(body.get("candidate_id") or target_id or "").strip()
+            if not candidate_id:
+                result = _empty_response(command, status="VALIDATION_FAILED", message="Candidate id is required.", ok=False)
+            elif command_id in {"APPROVE_PAPER_CANDIDATE", "REJECT_PAPER_CANDIDATE"}:
+                decision = "APPROVE" if command_id == "APPROVE_PAPER_CANDIDATE" else "REJECT"
+                event = record_paper_review_decision_v1(
+                    truth_root=Path(truth_root),
+                    day_utc=day_utc,
+                    candidate_id=candidate_id,
+                    decision=decision,
+                    reason=str(body.get("reason") or ("APPROVED_FOR_PAPER" if decision == "APPROVE" else "REJECTED_BY_OPERATOR")),
+                    operator=str(body.get("operator") or actor or "operator-ui"),
+                )
+                canonical = build_canonical_operator_state_v1(truth_root=truth_root, repo_root=repo_root or Path(__file__).resolve().parents[2], day_utc=day_utc)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=truth_root, day_utc=day_utc, payload=canonical)
+                status = str(event.get("status") or "PAPER_REVIEW_DECISION_RECORDED")
+                message = f"{command['label']} recorded for {candidate_id}."
+                result = {
+                    **_empty_response(command, status=status, message=message, next_state=status, ok=True, command_result=_command_result_panel_v1(status_label=command["label"], plain_english_result=message, next_required_step="Record paper entry if approved; otherwise no further action for rejected candidates.", result_status=status, expected_source_path=str(paper_review_decisions_path_v1(truth_root=Path(truth_root), day_utc=day_utc)))),
+                    "event": event,
+                    "canonical_operator_state": canonical_paths,
+                    "workflow_state": status,
+                    "row_update_only": True,
+                    "paper_only": True,
+                    "live_trade_eligible": False,
+                    "broker_submit_transmit_called": False,
+                }
+                state_after = {"candidate_id": candidate_id, "workflow_state": status}
+            elif command_id in {"RECORD_PAPER_ENTRY", "PAPER_TRADE_CANDIDATE"}:
+                if command_id == "PAPER_TRADE_CANDIDATE":
+                    record_paper_review_decision_v1(
+                        truth_root=Path(truth_root),
+                        day_utc=day_utc,
+                        candidate_id=candidate_id,
+                        decision="APPROVE",
+                        reason=str(body.get("reason") or "OPERATOR_PAPER_TRADE_CONFIRMED"),
+                        operator=str(body.get("operator") or actor or "operator-ui"),
+                    )
+                receipt = record_paper_trade_receipt_v1(
+                    truth_root=Path(truth_root),
+                    day_utc=day_utc,
+                    candidate_id=candidate_id,
+                    action=str(body.get("action") or "BUY"),
+                    paper_entry_price=str(body.get("paper_entry_price") or body.get("entry_price") or ""),
+                    quantity=str(body.get("quantity") or ""),
+                    notional=str(body.get("notional") or ""),
+                    timestamp_utc=str(body.get("timestamp") or body.get("timestamp_utc") or ""),
+                    operator=str(body.get("operator") or actor or "operator-ui"),
+                    notes=str(body.get("notes") or ""),
+                )
+                canonical = build_canonical_operator_state_v1(truth_root=truth_root, repo_root=repo_root or Path(__file__).resolve().parents[2], day_utc=day_utc)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=truth_root, day_utc=day_utc, payload=canonical)
+                message = f"SIMULATED_PAPER paper trade recorded for {candidate_id}." if command_id == "PAPER_TRADE_CANDIDATE" else f"SIMULATED_PAPER entry recorded for {candidate_id}."
+                result = {
+                    **_empty_response(command, status="SIMULATED_PAPER_RECEIPT_RECORDED", message=message, next_state="PAPER_POSITION_OPEN", ok=True, command_result=_command_result_panel_v1(status_label="Paper trade recorded" if command_id == "PAPER_TRADE_CANDIDATE" else "Paper entry recorded", plain_english_result=message, next_required_step="Monitor the simulated paper position and record exit when closed.", result_status="SIMULATED_PAPER_RECEIPT_RECORDED", expected_source_path=str(paper_trade_receipts_path_v1(truth_root=Path(truth_root), day_utc=day_utc)))),
+                    "receipt": receipt,
+                    "receipt_type": "SIMULATED_PAPER",
+                    "canonical_operator_state": canonical_paths,
+                    "workflow_state": "PAPER_POSITION_OPEN",
+                    "row_update_only": True,
+                    "paper_only": True,
+                    "live_trade_eligible": False,
+                    "broker_submit_transmit_called": False,
+                }
+                state_after = {"candidate_id": candidate_id, "workflow_state": "PAPER_POSITION_OPEN", "receipt_type": "SIMULATED_PAPER"}
+            else:
+                receipt = record_paper_trade_exit_v1(
+                    truth_root=Path(truth_root),
+                    day_utc=day_utc,
+                    candidate_id=candidate_id,
+                    paper_exit_price=str(body.get("paper_exit_price") or body.get("exit_price") or ""),
+                    timestamp_utc=str(body.get("timestamp") or body.get("timestamp_utc") or ""),
+                    operator=str(body.get("operator") or actor or "operator-ui"),
+                    notes=str(body.get("notes") or ""),
+                    exit_reason_selected_by_operator=str(body.get("exit_reason_selected_by_operator") or body.get("exit_reason") or ""),
+                )
+                canonical = build_canonical_operator_state_v1(truth_root=truth_root, repo_root=repo_root or Path(__file__).resolve().parents[2], day_utc=day_utc)
+                canonical_paths = write_canonical_operator_state_v1(truth_root=truth_root, day_utc=day_utc, payload=canonical)
+                message = f"SIMULATED_PAPER exit recorded for {candidate_id}."
+                result = {
+                    **_empty_response(command, status="PAPER_OUTCOME_CLOSED", message=message, next_state="PAPER_POSITION_CLOSED", ok=True, command_result=_command_result_panel_v1(status_label="Paper exit recorded", plain_english_result=message, next_required_step="Review closed simulated outcome. No broker execution occurred.", result_status="PAPER_OUTCOME_CLOSED", expected_source_path=str(paper_trade_outcomes_path_v1(truth_root=Path(truth_root), day_utc=day_utc)))),
+                    "receipt": receipt,
+                    "receipt_type": "SIMULATED_PAPER",
+                    "canonical_operator_state": canonical_paths,
+                    "workflow_state": "PAPER_POSITION_CLOSED",
+                    "row_update_only": True,
+                    "paper_only": True,
+                    "live_trade_eligible": False,
+                    "broker_submit_transmit_called": False,
+                }
+                state_after = {"candidate_id": candidate_id, "workflow_state": "PAPER_POSITION_CLOSED", "receipt_type": "SIMULATED_PAPER"}
+
         elif command_id == "VALIDATE_SOURCE":
             body = dict(request.get("payload") or {})
             domain_id = str(body.get("domain_id") or target_id or request.get("domain_id") or "").strip()
@@ -637,6 +1528,88 @@ def execute_aegis_command_v1(
                 next_step = "No further repair action is required for this domain."
             result = _empty_response(command, status=result_status, message=message, next_state="RECERTIFYING", ok=not bool(after_plan), command_result=_command_result_panel_v1(status_label="Domain rechecked" if after_plan else "Repair completed", plain_english_result=message, next_required_step=next_step, result_status=result_status, failure_reason="" if not after_plan else message))
             state_after = {"repair_state": result_status, "domain_status": status, "written_paths": paths, "build_result": build}
+        elif command_id == "GENERATE_BACKFILLED_EXIT_PLAN":
+            from ops.aegis.trade_lifecycle.trade_evaluation_projection_v1 import build_paper_trade_evaluation_projection_v1
+            from ops.aegis.trade_lifecycle.trade_intent_ledger_v1 import generate_backfilled_exit_plan_v1
+            from ops.aegis.trade_lifecycle.daily_exit_review_v1 import build_daily_exit_review_v1, write_daily_exit_review_v1
+            from ops.aegis.trade_lifecycle.exit_review_projection_v1 import build_exit_review_projection_v1, write_exit_review_projection_v1
+
+            body = dict(request.get("payload") or {})
+            wanted_trade = str(body.get("trade_id") or target_id or "")
+            wanted_position = str(body.get("position_id") or target_id or "")
+            projection = build_paper_trade_evaluation_projection_v1(truth_root=truth_root, day_utc=day_utc)
+            def _exit_target_matches(row: dict) -> bool:
+                trade_id = str(row.get("trade_id") or "")
+                position_id = str(row.get("position_id") or trade_id.replace(":", "_"))
+                symbol = str(row.get("symbol") or "")
+                return bool(
+                    trade_id == wanted_trade
+                    or trade_id == wanted_position
+                    or trade_id.replace(":", "_") in {wanted_trade, wanted_position}
+                    or position_id in {wanted_trade, wanted_position}
+                    or symbol == wanted_trade
+                )
+            trade = next((row for row in projection.get("open_trades") or [] if isinstance(row, dict) and _exit_target_matches(row)), {})
+            if not trade:
+                message = f"No open trade was found for {target_id}."
+                result = _empty_response(command, status="TRADE_NOT_FOUND", message=message, next_state="UNCHANGED", ok=False, command_result=_command_result_panel_v1(status_label="Backfill unavailable", plain_english_result=message, next_required_step="Refresh Performance/Exit Review and try again for a visible open trade.", result_status="TRADE_NOT_FOUND", failure_reason=message))
+                state_after = {"backfill_status": "TRADE_NOT_FOUND"}
+            else:
+                backfill = generate_backfilled_exit_plan_v1(truth_root=truth_root, day_utc=day_utc, trade=trade, operator_or_system=actor)
+                daily = build_daily_exit_review_v1(truth_root=truth_root, day_utc=day_utc)
+                daily_paths = write_daily_exit_review_v1(truth_root=truth_root, day_utc=day_utc, payload=daily)
+                exit_projection = build_exit_review_projection_v1(truth_root=truth_root, day_utc=day_utc)
+                exit_paths = write_exit_review_projection_v1(truth_root=truth_root, day_utc=day_utc, payload=exit_projection)
+                message = "Backfilled exit intent created." if backfill.get("status") == "BACKFILLED_INTENT_CREATED" else "Backfilled exit intent already exists."
+                result = _empty_response(command, status=str(backfill.get("status") or "BACKFILLED"), message=message, next_state="EXIT_REVIEW_REFRESHED", ok=True, command_result=_command_result_panel_v1(status_label="Backfilled exit plan ready", plain_english_result=message, next_required_step="Review Original Exit Plan and Current Exit Plan in Exit Review. Thesis details were not invented.", result_status=str(backfill.get("status") or "BACKFILLED"), expected_source_path=str(daily_paths.get("daily_exit_review") or exit_paths.get("exit_review_projection") or ""), copy_required_path=str(daily_paths.get("daily_exit_review") or "")))
+                result["backfill"] = backfill
+                result["daily_exit_review_paths"] = daily_paths
+                result["exit_review_paths"] = exit_paths
+                state_after = {"backfill_status": backfill.get("status"), "daily_exit_review": daily_paths.get("daily_exit_review"), "exit_review_projection": exit_paths.get("exit_review_projection")}
+        elif command_id == "ADD_MANUAL_RECEIPT":
+            body = dict(request.get("payload") or {})
+            receipt_result = _write_manual_receipt_from_trade_v1(truth_root=truth_root, day_utc=day_utc, target_id=target_id, payload=body, actor=actor)
+            if receipt_result.get("ok") is True:
+                refreshed = receipt_result.get("refreshed_trade") if isinstance(receipt_result.get("refreshed_trade"), dict) else {}
+                evidence_status = str(refreshed.get("evidence_status") or "")
+                message = f"Manual receipt recorded for {body.get('symbol') or refreshed.get('symbol') or target_id}."
+                result = {
+                    **_empty_response(
+                        command,
+                        status="RECEIPT_RECORDED",
+                        message=message,
+                        next_state=evidence_status or "RECEIPT_RECORDED",
+                        ok=True,
+                        command_result=_command_result_panel_v1(
+                            status_label="Receipt recorded",
+                            plain_english_result=message,
+                            next_required_step="Review the refreshed Performance and Exit Review projections.",
+                            result_status="RECEIPT_RECORDED",
+                            expected_source_path=str(receipt_result.get("receipt_path") or ""),
+                            copy_required_path=str(receipt_result.get("receipt_path") or ""),
+                        ),
+                    ),
+                    **receipt_result,
+                    "updated_projection_hint": "refresh_performance_and_exit_review",
+                }
+                state_after = {
+                    "receipt_id": receipt_result.get("receipt_id"),
+                    "receipt_path": receipt_result.get("receipt_path"),
+                    "evidence_status": evidence_status,
+                    "exit_decision": (receipt_result.get("refreshed_exit_review") or {}).get("exit_decision") if isinstance(receipt_result.get("refreshed_exit_review"), dict) else "",
+                }
+            else:
+                errors = receipt_result.get("errors") if isinstance(receipt_result.get("errors"), list) else []
+                message = "Manual receipt could not be recorded: " + ("; ".join(str(item) for item in errors) if errors else "receipt fields are incomplete")
+                result = _empty_response(
+                    command,
+                    status="RECEIPT_VALIDATION_FAILED",
+                    message=message,
+                    next_state="MISSING_RECEIPT",
+                    ok=False,
+                    command_result=_command_result_panel_v1(status_label="Receipt validation failed", plain_english_result=message, next_required_step="Provide symbol, side, quantity, fill price, fill time, account/source, and operator attestation.", result_status="RECEIPT_VALIDATION_FAILED", failure_reason=message),
+                )
+                state_after = {"receipt_state": "MISSING_RECEIPT", "errors": errors}
         elif command_id == "MARK_CAPTURE_COMPLETE":
             result = _empty_response(command, status="USE_MANUAL_CAPTURE_FORM", message="Use the manual IB capture form. The command contract is registered, but this endpoint does not synthesize capture records without the validated form payload.", next_state="UNCHANGED", ok=False)
         elif command["action_type"] in {IN_PAGE_DETAIL, SCROLL_FOCUS, EXPAND_SECTION, EXTERNAL_LINK}:

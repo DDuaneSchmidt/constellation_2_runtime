@@ -1,0 +1,10 @@
+id: KNW_0011
+statement: Research triage is currently more informative than capital review.
+evidence:
+  - OBS_0006
+  - OBS_0012
+  - OBS_0013
+limitations:
+  - Based on underpowered current research state
+why_it_matters: Attention should focus on evidence gaps before allocation decisions.
+status: SUPPORTED

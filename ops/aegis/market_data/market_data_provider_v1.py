@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
+from ops.aegis.market_context_provider_config_v1 import market_context_provider_chain_v1
 from ops.aegis.market_data.market_data_mode_v1 import (
     FINAL_EOD_CERTIFIED,
     INTRADAY_OPERATIONAL,
@@ -35,7 +36,7 @@ from ops.aegis.market_data.symbol_alias_registry_v1 import (
 
 
 MANUAL_DROP_ROOT = Path("/home/node/constellation_runtime_data/market_data/manual_drop")
-SUPPORTED_PROVIDERS = {"LOCAL_CACHE", "TIINGO", "ALPHA_VANTAGE", "STOOQ", "YFINANCE", "YAHOO_CHART", "MANUAL_CSV_DROP", "CBOE", "DISABLED", "CANONICAL_TRUTH", "CANONICAL_MARKET_DATA_SNAPSHOT_V1"}
+SUPPORTED_PROVIDERS = {"LOCAL_CACHE", "TIINGO", "ALPHA_VANTAGE", "STOOQ", "YFINANCE", "YAHOO_CHART", "MANUAL_CSV_DROP", "CBOE", "FRED", "DISABLED", "CANONICAL_TRUTH", "CANONICAL_MARKET_DATA_SNAPSHOT_V1"}
 RUNTIME_CONFIG_PATH = Path("/home/node/constellation_runtime_data/config/aegis_market_data.env")
 REPO_CONFIG_PATH = Path(__file__).resolve().parents[3] / "ops" / "config" / "aegis_market_data.env"
 
@@ -190,6 +191,7 @@ def _attempt_finish(
             "ended_at_utc": now_utc_v1(),
             "duration_ms": int(max(0.0, ended_mono - started) * 1000),
             "status": status,
+            "normalized_status": _normalized_attempt_status_v1(status=status, rejected_reason=rejected_reason, exception=exception),
             "exception_class": type(exception).__name__ if exception is not None else "",
             "exception_message": _redact_credentials_v1(str(exception)[:500]) if exception is not None else "",
             "raw_output_path": raw_output_path,
@@ -199,6 +201,28 @@ def _attempt_finish(
         }
     )
     return out
+
+
+def _normalized_attempt_status_v1(*, status: str, rejected_reason: str = "", exception: BaseException | None = None) -> str:
+    raw = str(status or "").upper()
+    reason = str(rejected_reason or "").upper()
+    if raw in {"TIMEOUT", "NOT_ATTEMPTED_DEADLINE_EXHAUSTED"}:
+        return "PROVIDER_TIMEOUT"
+    if raw in {"CACHE_STALE", "STALE"} or "SOURCE_SESSION_NOT_CURRENT" in reason or "NOT CURRENT" in reason:
+        return "CACHE_STALE"
+    if raw in {"SOURCE_UNAVAILABLE", "SOURCE_NOT_FINALIZED"}:
+        if "NO PROVIDER MAPPING" in reason or "OUTSIDE PROVIDER" in reason or "REJECTED TICKER" in reason:
+            return "SYMBOL_UNSUPPORTED"
+        return "PROVIDER_NO_DATA"
+    if raw in {"NETWORK_ERROR", "RATE_LIMITED", "SOURCE_SETUP_REQUIRED"}:
+        return "PROVIDER_NO_DATA"
+    if raw == "SUCCESS":
+        return "CERTIFIED"
+    if raw in {"PARSE_ERROR"}:
+        return "PROVIDER_NO_DATA"
+    if raw == "BATCH_STARTED":
+        return "BATCH_STARTED"
+    return raw or "UNKNOWN"
 
 
 def _exception_attempt_status(exc: BaseException) -> str:
@@ -224,6 +248,110 @@ def _attempts_for_missing_deadline(symbols: list[str], provider: str) -> list[di
     return rows
 
 
+def _env_float_v1(name: str, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
+
+
+def _provider_budget_seconds_v1(config: ProviderConfig, provider: str) -> float:
+    total = max(1.0, float(config.total_timeout_seconds or 60))
+    provider_name = str(provider or "").strip().upper()
+    specific_key = f"AEGIS_MARKET_DATA_PROVIDER_TIMEOUT_SECONDS_{provider_name}"
+    if os.environ.get(specific_key):
+        return max(1.0, min(total, _env_float_v1(specific_key, total)))
+    if config.market_data_mode != INTRADAY_OPERATIONAL:
+        return total
+    if provider_name == "LOCAL_CACHE":
+        default = _env_float_v1("AEGIS_MARKET_DATA_INTRADAY_CACHE_TIMEOUT_SECONDS", 2.0)
+    elif provider_capabilities_v1(provider_name).get("supports_intraday_snapshot") is True:
+        default = _env_float_v1("AEGIS_MARKET_DATA_INTRADAY_PROVIDER_TIMEOUT_SECONDS", min(total, 45.0))
+    elif provider_name == "STOOQ":
+        default = _env_float_v1("AEGIS_MARKET_DATA_INTRADAY_FALLBACK_TIMEOUT_SECONDS", total)
+    else:
+        default = _env_float_v1("AEGIS_MARKET_DATA_INTRADAY_FALLBACK_TIMEOUT_SECONDS", min(total, 12.0))
+    return max(1.0, min(total, float(default)))
+
+
+def _provider_deadline_v1(config: ProviderConfig, provider: str, global_deadline: float) -> float:
+    now = time.monotonic()
+    provider_budget = _provider_budget_seconds_v1(config, provider)
+    return min(global_deadline, now + provider_budget)
+
+
+def _read_json_file_v1(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _final_eod_artifact_payload_v1(*, truth_root: Path, day_utc: str) -> tuple[Path | None, dict[str, Any]]:
+    base = truth_root.resolve() / "reports" / "final_eod_market_data_v1" / day_utc
+    for path in (base / "final_eod_market_data.v1.json", base / "final_eod_market_data.current.v1.json"):
+        payload = _read_json_file_v1(path)
+        if not payload:
+            continue
+        artifact_path = Path(str(payload.get("current_artifact_path") or "")) if str(payload.get("schema_id") or "") == "final_eod_market_data_current_manifest.v1" else path
+        artifact = _read_json_file_v1(artifact_path) if artifact_path and artifact_path.exists() else payload
+        if artifact:
+            return artifact_path, artifact
+    return None, {}
+
+
+def _fetch_final_eod_artifact_fallback_v1(*, provider: str, truth_root: Path, day_utc: str, symbols: list[str], config: ProviderConfig) -> ProviderResult:
+    artifact_path, payload = _final_eod_artifact_payload_v1(truth_root=truth_root, day_utc=day_utc)
+    rows = payload.get("symbols") if isinstance(payload.get("symbols"), dict) else {}
+    artifact_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest() if artifact_path and artifact_path.exists() else ""
+    records: list[dict[str, Any]] = []
+    attempts: list[dict[str, Any]] = []
+    status_text = " ".join(str(payload.get(key) or "") for key in ("status", "validation_status", "final_eod_certification_status", "certification_state")).upper()
+    artifact_valid = bool(rows) and any(token in status_text for token in ("VALID", "CURRENT", "CERTIFIED"))
+    for symbol in canonicalize_symbol_list_v1(symbols):
+        attempt = _attempt_start(symbol, provider, symbol)
+        row = rows.get(symbol) if isinstance(rows.get(symbol), dict) else rows.get(str(symbol).upper())
+        if not artifact_valid or not isinstance(row, dict):
+            attempts.append(_attempt_finish(attempt, status="SOURCE_UNAVAILABLE", raw_output_path=str(artifact_path or ""), rejected_reason="No same-day certified final EOD artifact row was available for intraday fallback."))
+            continue
+        session = str(row.get("market_session_date") or row.get("trading_day") or "")[:10]
+        if session != day_utc or str(row.get("freshness_status") or "").upper() == "STALE":
+            attempts.append(_attempt_finish(attempt, status="STALE", raw_output_path=str(artifact_path or ""), rejected_reason="Final EOD artifact row was not current for the requested operational day."))
+            continue
+        close = row.get("last_price") if row.get("last_price") is not None else row.get("close")
+        record = _record(
+            symbol=symbol,
+            provider=provider,
+            provider_symbol=symbol,
+            data_type=market_data_kind_v1(symbol),
+            session_date=session,
+            timestamp_utc=str(row.get("data_timestamp_utc") or row.get("source_timestamp_utc") or f"{session}T21:00:00Z"),
+            open_=row.get("open"),
+            high=row.get("high"),
+            low=row.get("low"),
+            close=close,
+            last=close,
+            volume=row.get("volume"),
+            source=str(artifact_path or ""),
+            config=config,
+            day_utc=day_utc,
+        )
+        record["data_finality"] = "FINAL_EOD"
+        record["market_data_mode"] = FINAL_EOD_CERTIFIED
+        record["usable_for"] = usable_for_v1(record_mode=FINAL_EOD_CERTIFIED, requested_mode=config.market_data_mode)
+        record["candidate_generation_eligible"] = bool(record["usable_for"].get("sleeve_intraday_generation") is True)
+        record["source_hash"] = artifact_hash or record.get("source_hash", "")
+        record["raw_source_hash"] = artifact_hash or record.get("source_hash", "")
+        records.append(record)
+        attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(artifact_path or ""), source_timestamp=str(record.get("timestamp_utc") or ""), accepted_reason="Accepted certified final EOD artifact row as intraday fallback input."))
+    reason = "" if records else "FINAL_EOD_ARTIFACT_MISSING_OR_INCOMPLETE"
+    return _provider_result(provider=provider, requested=symbols, records=records, breadth={}, reason=reason, config=config, provider_attempts=attempts)
+
+
 def fetch_market_data_v1(*, truth_root: Path, day_utc: str, symbols: list[str] | None = None, symbol_map: dict[str, Any] | None = None, config_override: ProviderConfig | None = None) -> ProviderResult:
     config = config_override or provider_config_from_env_v1()
     requested = tuple(canonicalize_symbol_list_v1(symbols or []))
@@ -238,10 +366,21 @@ def fetch_market_data_v1(*, truth_root: Path, day_utc: str, symbols: list[str] |
         return _failed_result(config=config, requested=requested, attempts=attempts, reason=reason, mapping_missing=mapping_missing, provider_attempts=provider_attempts)
     vix_symbol_config = ((symbol_map or {}).get("symbols") or {}).get("VIX") if isinstance((symbol_map or {}).get("symbols"), dict) else {}
     vix_provider_config = vix_symbol_config.get("providers") if isinstance(vix_symbol_config, dict) and isinstance(vix_symbol_config.get("providers"), dict) else {}
-    cboe_allowed = not vix_provider_config or "CBOE" in {str(key).upper() for key in vix_provider_config}
-    if config.market_data_mode != INTRADAY_OPERATIONAL and "VIX" in requested and "CBOE" not in providers and cboe_allowed and _provider_symbol_candidates(symbol_map or {}, "VIX", "CBOE"):
-        insert_at = 1 if providers else 0
-        providers.insert(insert_at, "CBOE")
+    configured_vix_chain = [provider for provider in market_context_provider_chain_v1('vix') if provider and provider != 'FINAL_EOD_ARTIFACT']
+    allowed_vix_chain: list[str] = []
+    for provider in configured_vix_chain:
+        if vix_provider_config and provider not in {str(key).upper() for key in vix_provider_config}:
+            continue
+        if provider == 'CBOE' and not _provider_symbol_candidates(symbol_map or {}, 'VIX', 'CBOE'):
+            continue
+        allowed_vix_chain.append(provider)
+    if "VIX" in requested:
+        merged: list[str] = []
+        for provider in [*allowed_vix_chain, *providers]:
+            name = str(provider or '').upper()
+            if name and name not in merged:
+                merged.append(name)
+        providers = merged
     coverage_plan = provider_coverage_plan_v1(config=config, symbols=list(requested), symbol_map=symbol_map or {}, providers=providers)
     if coverage_plan.get("status") != "FULL_PROVIDER_PLAN":
         return _failed_result(config=config, requested=requested, attempts=[{"provider": "PROVIDER_COVERAGE_PLANNER", "request_status": "FAILED", "timestamp_utc": now_utc_v1(), "returned_data_date": "", "failure_reason": "PROVIDER_COVERAGE_INCOMPLETE", "fetched_symbols": [], "missing_symbols": list(requested), "stale_symbols": [], "provider_coverage_plan": coverage_plan}], reason="PROVIDER_COVERAGE_INCOMPLETE", mapping_missing=tuple(coverage_plan.get("unsupported_symbols") or mapping_missing), provider_attempts=provider_attempts, provider_coverage_plan=coverage_plan)
@@ -260,7 +399,9 @@ def fetch_market_data_v1(*, truth_root: Path, day_utc: str, symbols: list[str] |
             provider_attempts.extend(not_attempted)
             attempts.append({"provider": provider, "request_status": "TIMEOUT", "timestamp_utc": started, "returned_data_date": "", "failure_reason": "MARKET_DATA_REFRESH_TIMEOUT", "fetched_symbols": [], "missing_symbols": list(assigned), "stale_symbols": []})
             break
-        result = _fetch_provider(provider=provider, truth_root=Path(truth_root), day_utc=day_utc, symbols=list(assigned), symbol_map=symbol_map or {}, config=config, deadline=deadline)
+        provider_started_monotonic = time.monotonic()
+        provider_deadline = _provider_deadline_v1(config, provider, deadline)
+        result = _fetch_provider(provider=provider, truth_root=Path(truth_root), day_utc=day_utc, symbols=list(assigned), symbol_map=symbol_map or {}, config=config, deadline=provider_deadline)
         last_result = result
         provider_attempts.extend(result.provider_attempts)
         attempt = {
@@ -273,6 +414,8 @@ def fetch_market_data_v1(*, truth_root: Path, day_utc: str, symbols: list[str] |
             "fetched_symbols": list(result.fetched_symbols),
             "missing_symbols": list(result.missing_symbols),
             "stale_symbols": list(result.stale_symbols),
+            "provider_timeout_seconds": round(max(0.0, provider_deadline - provider_started_monotonic), 3),
+            "provider_timeout_isolated": bool(provider_deadline < deadline),
         }
         attempts.append(attempt)
         if result.fetched_symbols:
@@ -283,10 +426,38 @@ def fetch_market_data_v1(*, truth_root: Path, day_utc: str, symbols: list[str] |
         current = best_partial or result
         unresolved = _unresolved_symbols_v1(result=current, requested=requested, requested_mode=config.market_data_mode)
         if not unresolved:
+            current = _attach_automated_breadth_proxy_v1(current, truth_root=Path(truth_root), day_utc=day_utc, requested=list(requested), config=config)
             return _with_attempts(ProviderResult(**{**current.__dict__, "request_status": "SUCCESS", "failure_reason": "", "provider_coverage_plan": coverage_plan}), attempts, provider_attempts)
         if result.request_status == "STALE" and result.fetched_symbols and index == len(providers) - 1 and best_partial is None:
+            result = _attach_automated_breadth_proxy_v1(result, truth_root=Path(truth_root), day_utc=day_utc, requested=list(requested), config=config)
             return _with_attempts(ProviderResult(**{**result.__dict__, "provider_coverage_plan": coverage_plan}), attempts, provider_attempts)
+    if config.market_data_mode == INTRADAY_OPERATIONAL:
+        current = best_partial or last_result
+        unresolved_for_eod = _unresolved_symbols_v1(result=current, requested=requested, requested_mode=config.market_data_mode) if current is not None else list(requested)
+        if unresolved_for_eod:
+            started = now_utc_v1()
+            fallback = _fetch_final_eod_artifact_fallback_v1(provider="FINAL_EOD_ARTIFACT", truth_root=Path(truth_root), day_utc=day_utc, symbols=list(unresolved_for_eod), config=config)
+            provider_attempts.extend(fallback.provider_attempts)
+            attempts.append({
+                "provider": "FINAL_EOD_ARTIFACT",
+                "request_status": fallback.request_status,
+                "timestamp_utc": started,
+                "returned_data_date": fallback.returned_data_date,
+                "failure_reason": fallback.failure_reason,
+                "assigned_symbols": list(unresolved_for_eod),
+                "fetched_symbols": list(fallback.fetched_symbols),
+                "missing_symbols": list(fallback.missing_symbols),
+                "stale_symbols": list(fallback.stale_symbols),
+                "provider_timeout_seconds": 0,
+                "provider_timeout_isolated": True,
+            })
+            if fallback.fetched_symbols:
+                best_partial = _merge_provider_results(base=current, overlay=fallback, requested=requested) if current is not None else ProviderResult(**{**fallback.__dict__, "requested_symbols": requested, "missing_symbols": tuple(sorted(set(requested) - set(fallback.fetched_symbols)))})
+                if not _unresolved_symbols_v1(result=best_partial, requested=requested, requested_mode=config.market_data_mode):
+                    best_partial = _attach_automated_breadth_proxy_v1(best_partial, truth_root=Path(truth_root), day_utc=day_utc, requested=list(requested), config=config)
+                    return _with_attempts(ProviderResult(**{**best_partial.__dict__, "request_status": "SUCCESS", "failure_reason": "", "provider_coverage_plan": coverage_plan}), attempts, provider_attempts)
     if best_partial is not None:
+        best_partial = _attach_automated_breadth_proxy_v1(best_partial, truth_root=Path(truth_root), day_utc=day_utc, requested=list(requested), config=config)
         return _with_attempts(ProviderResult(**{**best_partial.__dict__, "provider_coverage_plan": coverage_plan}), attempts, provider_attempts)
     if last_result is not None and last_result.request_status in {"SOURCE_NOT_FINALIZED", "SOURCE_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED"}:
         return _with_attempts(last_result, attempts, provider_attempts)
@@ -314,6 +485,8 @@ def _fetch_provider(*, provider: str, truth_root: Path, day_utc: str, symbols: l
         return _fetch_yahoo_chart(provider=provider, truth_root=truth_root, day_utc=day_utc, symbols=symbols, symbol_map=symbol_map, config=config, deadline=deadline)
     if provider == "CBOE":
         return _fetch_cboe(provider=provider, truth_root=truth_root, day_utc=day_utc, symbols=symbols, symbol_map=symbol_map, config=config, deadline=deadline)
+    if provider == "FRED":
+        return _fetch_fred(provider=provider, truth_root=truth_root, day_utc=day_utc, symbols=symbols, symbol_map=symbol_map, config=config, deadline=deadline)
     if provider == "YFINANCE":
         return _fetch_yfinance(provider=provider, day_utc=day_utc, symbols=symbols, symbol_map=symbol_map, config=config, deadline=deadline)
     return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=f"MARKET_DATA_PROVIDER_UNSUPPORTED:{provider}", config=config)
@@ -350,7 +523,11 @@ def _fetch_local_cache(*, provider: str, truth_root: Path, day_utc: str, symbols
                 path = candidate_path
                 provider_symbol_used = provider_symbol
                 source_timestamp = str(row.get("timestamp_utc") or "")
-                attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(candidate_path), source_timestamp=source_timestamp, accepted_reason="Local cache row found; freshness evaluated separately."))
+                source_session = str(row.get("day_utc") or source_timestamp or "")[:10]
+                if config.require_current_session and source_session and source_session != day_utc:
+                    attempts.append(_attempt_finish(attempt, status="CACHE_STALE", raw_output_path=str(candidate_path), source_timestamp=source_timestamp, rejected_reason=f"SOURCE_SESSION_NOT_CURRENT:{source_session};required_day={day_utc}"))
+                else:
+                    attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(candidate_path), source_timestamp=source_timestamp, accepted_reason="Local cache row found; freshness evaluated separately."))
                 break
             attempts.append(_attempt_finish(attempt, status="SOURCE_UNAVAILABLE", raw_output_path=str(candidate_path), rejected_reason="No matching local cache row found."))
         if not row:
@@ -398,6 +575,7 @@ def _fetch_tiingo(*, provider: str, truth_root: Path, day_utc: str, symbols: lis
             attempts.append(_attempt_finish(attempt, status="SOURCE_SETUP_REQUIRED", rejected_reason="TIINGO_API_KEY_MISSING"))
         return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="TIINGO_API_KEY_MISSING", config=config, provider_attempts=attempts)
     timed_out = False
+    retries = max(0, int(config.stooq_retries))
     for symbol in symbols:
         if time.monotonic() >= deadline:
             timed_out = True
@@ -579,8 +757,11 @@ def _fetch_stooq(*, provider: str, truth_root: Path, day_utc: str, symbols: list
     deadline = deadline or (time.monotonic() + max(1.0, float(config.total_timeout_seconds or 60)))
     retries = max(0, int(config.stooq_retries))
     chunk_size = max(1, int(config.stooq_chunk_size or 8))
-    for chunk_start in range(0, len(symbols), chunk_size):
+    batch_id = hashlib.sha256((provider + ":" + day_utc + ":" + ",".join(symbols)).encode("utf-8")).hexdigest()[:16]
+    for chunk_index, chunk_start in enumerate(range(0, len(symbols), chunk_size), start=1):
         chunk = symbols[chunk_start : chunk_start + chunk_size]
+        chunk_attempt_start = _attempt_start("__BATCH__", provider, ",".join(chunk), attempt=chunk_index)
+        attempts.append(_attempt_finish(chunk_attempt_start, status="BATCH_STARTED", accepted_reason=f"batch_id={batch_id};chunk_index={chunk_index};symbol_count={len(chunk)}"))
         for symbol in chunk:
             if time.monotonic() >= deadline:
                 timed_out = True
@@ -718,71 +899,140 @@ def _fetch_cboe(*, provider: str, truth_root: Path, day_utc: str, symbols: list[
     raw_dir = truth_root.resolve() / "reports" / "aegis_market_data_v1" / day_utc / "raw" / "CBOE"
     raw_dir.mkdir(parents=True, exist_ok=True)
     url = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
-    attempt = _attempt_start("VIX", provider, "VIX")
+    retries = max(1, int(config.stooq_retries or 1))
+    for attempt_no in range(1, retries + 2):
+        attempt = _attempt_start("VIX", provider, "VIX", attempt=attempt_no)
+        try:
+            request = urllib.request.Request(url, headers={"Accept": "text/csv", "User-Agent": "AegisMarketData/1.0"})
+            with urllib.request.urlopen(request, timeout=_remaining_timeout(config, deadline)) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            status = _exception_attempt_status(exc)
+            attempts.append(_attempt_finish(attempt, status=status, exception=exc, rejected_reason="CBOE VIX history source could not be fetched."))
+            if status in {"TIMEOUT", "NETWORK_ERROR", "RATE_LIMITED"} and attempt_no <= retries and (deadline is None or time.monotonic() < deadline):
+                time.sleep(min(float(config.stooq_backoff_seconds or 0.5), max(0.0, (deadline or time.monotonic()) - time.monotonic()) if deadline else float(config.stooq_backoff_seconds or 0.5)))
+                continue
+            reason = "CBOE_SOURCE_UNAVAILABLE" if status not in {"TIMEOUT", "RATE_LIMITED"} else status
+            return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=reason, config=config, provider_attempts=attempts)
+        raw_path = raw_dir / f"VIX_History.{attempt_no}.csv"
+        raw_path.write_text(text, encoding="utf-8")
+        raw_source_hash = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+        try:
+            rows = list(csv.DictReader(text.splitlines()))
+        except Exception as exc:
+            attempts.append(_attempt_finish(attempt, status="PARSE_ERROR", raw_output_path=str(raw_path), exception=exc, rejected_reason="CBOE VIX CSV parse failed."))
+            return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="CBOE_PARSE_ERROR", config=config, provider_attempts=attempts)
+        for row in rows:
+            raw_date = str(row.get("DATE") or row.get("Date") or row.get("date") or "").strip()
+            if not raw_date:
+                continue
+            if "/" in raw_date:
+                parts = raw_date.split("/")
+                if len(parts) == 3:
+                    month, day, year = parts
+                    session = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+                else:
+                    session = raw_date[:10]
+            else:
+                session = raw_date[:10]
+            if session != day_utc:
+                continue
+            close = row.get("CLOSE") or row.get("Close") or row.get("close")
+            if _num(close) is None:
+                continue
+            record = _record(
+                symbol="VIX",
+                provider=provider,
+                provider_symbol="VIX",
+                data_type=market_data_kind_v1("VIX"),
+                session_date=session,
+                timestamp_utc=f"{session}T21:00:00Z",
+                open_=row.get("OPEN") or row.get("Open") or row.get("open"),
+                high=row.get("HIGH") or row.get("High") or row.get("high"),
+                low=row.get("LOW") or row.get("Low") or row.get("low"),
+                close=close,
+                last=close,
+                volume=row.get("VOLUME") or row.get("Volume") or row.get("volume"),
+                source=str(raw_path),
+                config=config,
+                day_utc=day_utc,
+            )
+            record["source_hash"] = raw_source_hash
+            record["raw_source_hash"] = raw_source_hash
+            record["transformed_hash"] = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            _append_cboe_vix_cache_row(truth_root=truth_root, row=record, raw_source_hash=raw_source_hash)
+            records.append(record)
+            attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(raw_path), source_timestamp=str(record.get("timestamp_utc") or ""), accepted_reason="Accepted CBOE final VIX row."))
+            return _provider_result(provider=provider, requested=symbols, records=records, breadth={}, reason="", config=config, provider_attempts=attempts)
+        status = _source_missing_status_for_finalization(day_utc)
+        attempts.append(_attempt_finish(attempt, status=status, raw_output_path=str(raw_path), rejected_reason="CBOE VIX history CSV does not contain the requested day row within the finalization policy."))
+        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=status, config=config, provider_attempts=attempts, request_status_override=status)
+    return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="CBOE_SOURCE_UNAVAILABLE", config=config, provider_attempts=attempts)
+
+
+def _fetch_fred(*, provider: str, truth_root: Path, day_utc: str, symbols: list[str], symbol_map: dict[str, Any], config: ProviderConfig, deadline: float | None = None) -> ProviderResult:
+    records = []
+    attempts: list[dict[str, Any]] = []
+    if "VIX" not in canonicalize_symbol_list_v1(symbols):
+        attempt = _attempt_start("VIX", provider, "VIXCLS")
+        attempts.append(_attempt_finish(attempt, status="SOURCE_UNAVAILABLE", rejected_reason="FRED provider only supports VIX and VIX was not requested."))
+        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="FRED_ONLY_SUPPORTS_VIX", config=config, provider_attempts=attempts)
+    raw_dir = truth_root.resolve() / "reports" / "aegis_market_data_v1" / day_utc / "raw" / "FRED"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS&cosd={day_utc}&coed={day_utc}"
+    attempt = _attempt_start("VIX", provider, "VIXCLS")
     try:
-        with urllib.request.urlopen(url, timeout=_remaining_timeout(config, deadline)) as resp:
+        request = urllib.request.Request(url, headers={"Accept": "text/csv", "User-Agent": "AegisMarketData/1.0"})
+        with urllib.request.urlopen(request, timeout=_remaining_timeout(config, deadline)) as resp:
             text = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         status = _exception_attempt_status(exc)
-        reason = "CBOE_SOURCE_UNAVAILABLE" if status not in {"TIMEOUT", "RATE_LIMITED"} else status
-        attempts.append(_attempt_finish(attempt, status=status, exception=exc, rejected_reason="CBOE VIX history source could not be fetched."))
-        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=reason, config=config, provider_attempts=attempts)
-    raw_path = raw_dir / "VIX_History.csv"
+        attempts.append(_attempt_finish(attempt, status=status, exception=exc, rejected_reason="FRED VIXCLS source could not be fetched."))
+        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="FRED_SOURCE_UNAVAILABLE" if status not in {"TIMEOUT", "RATE_LIMITED"} else status, config=config, provider_attempts=attempts)
+    raw_path = raw_dir / "VIXCLS.csv"
     raw_path.write_text(text, encoding="utf-8")
     raw_source_hash = hashlib.sha256(raw_path.read_bytes()).hexdigest()
     try:
         rows = list(csv.DictReader(text.splitlines()))
     except Exception as exc:
-        attempts.append(_attempt_finish(attempt, status="PARSE_ERROR", raw_output_path=str(raw_path), exception=exc, rejected_reason="CBOE VIX CSV parse failed."))
-        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="CBOE_PARSE_ERROR", config=config, provider_attempts=attempts)
+        attempts.append(_attempt_finish(attempt, status="PARSE_ERROR", raw_output_path=str(raw_path), exception=exc, rejected_reason="FRED VIXCLS csv parse failed."))
+        return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="FRED_PARSE_ERROR", config=config, provider_attempts=attempts)
     for row in rows:
-        raw_date = str(row.get("DATE") or row.get("Date") or row.get("date") or "").strip()
-        if not raw_date:
+        if not isinstance(row, dict):
             continue
-        if "/" in raw_date:
-            parts = raw_date.split("/")
-            if len(parts) == 3:
-                month, day, year = parts
-                session = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-            else:
-                session = raw_date[:10]
-        else:
-            session = raw_date[:10]
-        if session != day_utc:
-            continue
-        close = row.get("CLOSE") or row.get("Close") or row.get("close")
-        if _num(close) is None:
+        session = str(row.get('DATE') or row.get('date') or '')[:10]
+        value = row.get('VIXCLS') or row.get('value')
+        if session != day_utc or str(value) in {'', '.'} or _num(value) is None:
             continue
         record = _record(
             symbol="VIX",
             provider=provider,
-            provider_symbol="VIX",
+            provider_symbol="VIXCLS",
             data_type=market_data_kind_v1("VIX"),
             session_date=session,
             timestamp_utc=f"{session}T21:00:00Z",
-            open_=row.get("OPEN") or row.get("Open") or row.get("open"),
-            high=row.get("HIGH") or row.get("High") or row.get("high"),
-            low=row.get("LOW") or row.get("Low") or row.get("low"),
-            close=close,
-            last=close,
-            volume=row.get("VOLUME") or row.get("Volume") or row.get("volume"),
+            open_=value,
+            high=value,
+            low=value,
+            close=value,
+            last=value,
+            volume=None,
             source=str(raw_path),
             config=config,
             day_utc=day_utc,
         )
+        record["data_finality"] = "FINAL_EOD"
+        record["market_data_mode"] = FINAL_EOD_CERTIFIED
         record["source_hash"] = raw_source_hash
         record["raw_source_hash"] = raw_source_hash
         record["transformed_hash"] = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-        _append_cboe_vix_cache_row(truth_root=truth_root, row=record, raw_source_hash=raw_source_hash)
+        _append_market_data_cache_row(truth_root=truth_root, row=record)
         records.append(record)
-        attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(raw_path), source_timestamp=str(record.get("timestamp_utc") or ""), accepted_reason="Accepted CBOE final VIX row."))
-        break
-    if records:
+        attempts.append(_attempt_finish(attempt, status="SUCCESS", raw_output_path=str(raw_path), source_timestamp=str(record.get("timestamp_utc") or ""), accepted_reason="Accepted FRED VIXCLS EOD fallback row."))
         return _provider_result(provider=provider, requested=symbols, records=records, breadth={}, reason="", config=config, provider_attempts=attempts)
     status = _source_missing_status_for_finalization(day_utc)
-    reason = status
-    attempts.append(_attempt_finish(attempt, status=status, raw_output_path=str(raw_path), rejected_reason="CBOE VIX history CSV does not contain the requested day row within the finalization policy."))
-    return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=reason, config=config, provider_attempts=attempts, request_status_override=status)
+    attempts.append(_attempt_finish(attempt, status=status, raw_output_path=str(raw_path), rejected_reason="FRED VIXCLS did not contain the requested day row."))
+    return _provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason=status, config=config, provider_attempts=attempts, request_status_override=status)
 
 
 def _append_market_data_cache_row(*, truth_root: Path, row: dict[str, Any]) -> None:
@@ -1028,6 +1278,121 @@ def _fetch_yfinance(*, provider: str, day_utc: str, symbols: list[str], symbol_m
         row = df.iloc[-1]
         records.append(_record(symbol=symbol, provider=provider, provider_symbol=provider_symbol, data_type=market_data_kind_v1(symbol), session_date=day_utc, timestamp_utc=f"{day_utc}T21:00:00Z", open_=row.get("Open"), high=row.get("High"), low=row.get("Low"), close=row.get("Close"), last=row.get("Close"), volume=row.get("Volume"), source="yfinance", config=config, day_utc=day_utc))
     return _provider_result(provider=provider, requested=symbols, records=records, breadth={}, reason="MARKET_DATA_REFRESH_TIMEOUT" if timed_out else ("" if records else "MARKET_DATA_FETCH_FAILED"), config=config)
+
+
+def _attach_automated_breadth_proxy_v1(result: ProviderResult, *, truth_root: Path, day_utc: str, requested: list[str], config: ProviderConfig) -> ProviderResult:
+    if not isinstance(result, ProviderResult):
+        return result
+    breadth = dict(result.breadth or {})
+    if str(breadth.get("freshness_status") or "").upper() == "CURRENT":
+        return result
+    derived = _breadth_proxy_v1(truth_root=truth_root, day_utc=day_utc, symbols=result.symbols, requested=requested, config=config)
+    return ProviderResult(**{**result.__dict__, "breadth": derived})
+
+
+def _breadth_proxy_v1(*, truth_root: Path, day_utc: str, symbols: dict[str, dict[str, Any]], requested: list[str], config: ProviderConfig) -> dict[str, Any]:
+    current_rows = {
+        str(symbol).upper(): row
+        for symbol, row in symbols.items()
+        if isinstance(row, dict)
+        and str(row.get("freshness_status") or "").upper() == "CURRENT"
+        and str(row.get("market_session_date") or "") == day_utc
+        and (row.get("last_price") is not None or row.get("close") is not None)
+    }
+    min_symbols = max(1, _env_int_v1('AEGIS_MARKET_BREADTH_PROXY_MIN_SYMBOLS', 25))
+    coverage_base = max(len([symbol for symbol in canonicalize_symbol_list_v1(requested) if symbol != 'VIX']), len(current_rows), min_symbols)
+    evaluated = 0
+    advancing = 0
+    declining = 0
+    unchanged = 0
+    latest_timestamp = ''
+    checked_paths: list[str] = []
+    for symbol, row in current_rows.items():
+        prior_close, prior_path = _prior_close_v1(truth_root=truth_root, symbol=symbol, day_utc=day_utc)
+        if prior_path and str(prior_path) not in checked_paths:
+            checked_paths.append(str(prior_path))
+        current_value = _num(row.get('last_price') if row.get('last_price') is not None else row.get('close'))
+        if current_value is None or prior_close is None:
+            continue
+        evaluated += 1
+        latest_timestamp = max(latest_timestamp, str(row.get('data_timestamp_utc') or ''))
+        if current_value > prior_close:
+            advancing += 1
+        elif current_value < prior_close:
+            declining += 1
+        else:
+            unchanged += 1
+    coverage_pct = (evaluated / coverage_base) if coverage_base else 0.0
+    min_coverage = max(0.0, min(1.0, float(os.environ.get('AEGIS_MARKET_BREADTH_PROXY_MIN_COVERAGE_PCT') or 0.60)))
+    if evaluated < min_symbols or coverage_pct < min_coverage:
+        return {
+            'advance_decline_delta': None,
+            'breadth_down_pct': None,
+            'advancing_issues': advancing,
+            'declining_issues': declining,
+            'unchanged_issues': unchanged,
+            'evaluated_symbols': evaluated,
+            'coverage_base_symbols': coverage_base,
+            'coverage_pct': round(coverage_pct, 6),
+            'freshness_status': 'MISSING',
+            'market_session_date': day_utc,
+            'data_timestamp_utc': latest_timestamp,
+            'source': 'BREADTH_PROXY',
+            'quality': 'MEDIUM',
+            'certification_status': 'BLOCKED',
+            'failure_reason': f'BREADTH_PROXY_INSUFFICIENT_COVERAGE:evaluated={evaluated};required_symbols={min_symbols};coverage_pct={coverage_pct:.6f};required_coverage_pct={min_coverage:.6f}',
+            'checked_evidence_paths': checked_paths,
+        }
+    total = advancing + declining + unchanged
+    down_pct = (declining / total) * 100.0 if total else 0.0
+    return {
+        'advance_decline_delta': advancing - declining,
+        'breadth_down_pct': round(down_pct, 6),
+        'advancing_issues': advancing,
+        'declining_issues': declining,
+        'unchanged_issues': unchanged,
+        'evaluated_symbols': evaluated,
+        'coverage_base_symbols': coverage_base,
+        'coverage_pct': round(coverage_pct, 6),
+        'freshness_status': 'CURRENT',
+        'market_session_date': day_utc,
+        'data_timestamp_utc': latest_timestamp or f'{day_utc}T20:00:00Z',
+        'source': 'BREADTH_PROXY',
+        'quality': 'MEDIUM',
+        'certification_status': 'CERTIFIED',
+        'checked_evidence_paths': checked_paths,
+    }
+
+
+def _prior_close_v1(*, truth_root: Path, symbol: str, day_utc: str) -> tuple[float | None, Path | None]:
+    path = truth_root.resolve() / 'market_data_snapshot_v1' / normalize_market_symbol_v1(symbol) / f'{day_utc[:4]}.jsonl'
+    if not path.exists():
+        return (None, None)
+    prior_rows: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding='utf-8').splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                continue
+            row_day = str(row.get('day_utc') or row.get('timestamp_utc') or '')[:10]
+            if row_day and row_day < day_utc:
+                prior_rows.append(row)
+    except Exception:
+        return (None, path)
+    if not prior_rows:
+        return (None, path)
+    prior_rows.sort(key=lambda row: str(row.get('timestamp_utc') or ''))
+    close = _num(prior_rows[-1].get('close') if prior_rows[-1].get('close') is not None else prior_rows[-1].get('value'))
+    return (close, path)
+
+
+def _env_int_v1(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name) or default))
+    except Exception:
+        return int(default)
 
 
 def _remaining_timeout(config: ProviderConfig, deadline: float | None) -> float:
@@ -1438,6 +1803,21 @@ def provider_capabilities_v1(provider: str) -> dict[str, Any]:
             "fallback_priority": 40,
             "certification_eligibility": {"US_EQUITIES_EOD": False, "VOLATILITY": True},
         },
+        "FRED": {
+            "classification": "VOLATILITY_EOD_FALLBACK",
+            "supported_asset_classes": ["VOLATILITY"],
+            "supported_symbols": ["VIX"],
+            "eod_support": True,
+            "intraday_support": False,
+            "supports_intraday_snapshot": False,
+            "supports_final_eod": True,
+            "supports_vix_intraday": False,
+            "supports_bulk_symbols": False,
+            "max_symbols_per_request": 1,
+            "timeout_policy": "daily FRED observations json",
+            "fallback_priority": 45,
+            "certification_eligibility": {"US_EQUITIES_EOD": False, "VOLATILITY": True},
+        },
         "YAHOO_CHART": {
             "classification": "INTRADAY_SNAPSHOT_PROVIDER",
             "supported_asset_classes": ["ETF", "EQUITY", "INDEX", "VOLATILITY", "RATES", "COMMODITY"],
@@ -1526,12 +1906,13 @@ def _provider_supports_symbol_v1(*, provider: str, symbol: str, market_data_mode
     if market_data_mode == FINAL_EOD_CERTIFIED and caps.get("supports_final_eod") is not True:
         return False, "provider does not support final EOD"
     if market_data_mode == INTRADAY_OPERATIONAL and caps.get("supports_intraday_snapshot") is not True and provider not in {"STOOQ", "CBOE"}:
-        return False, "provider does not support intraday snapshots"
+        if not (provider == "FRED" and symbol == "VIX"):
+            return False, "provider does not support intraday snapshots"
     supported_symbols = {str(item).upper() for item in caps.get("supported_symbols") or []}
     if "*" not in supported_symbols and symbol not in supported_symbols:
         return False, "symbol outside provider scope"
     eligibility = caps.get("certification_eligibility") if isinstance(caps.get("certification_eligibility"), dict) else {}
-    if domain_id and eligibility.get(domain_id) is False and symbol != "VIX":
+    if market_data_mode == FINAL_EOD_CERTIFIED and domain_id and eligibility.get(domain_id) is False and symbol != "VIX":
         return False, "provider is not certification-eligible for this domain"
     if not _provider_symbol_candidates(symbol_map, symbol, provider):
         return False, "no symbol mapping for provider"
@@ -1541,8 +1922,18 @@ def _provider_supports_symbol_v1(*, provider: str, symbol: str, market_data_mode
 def provider_coverage_plan_v1(*, config: ProviderConfig, symbols: list[str] | tuple[str, ...], symbol_map: dict[str, Any] | None = None, domain_id: str = "US_EQUITIES_EOD", providers: list[str] | None = None) -> dict[str, Any]:
     requested = list(canonicalize_symbol_list_v1(list(symbols or [])))
     provider_chain = list(providers) if providers is not None else _provider_chain_for_mode(config)
-    if config.market_data_mode == FINAL_EOD_CERTIFIED and "VIX" in requested and "CBOE" not in provider_chain and _provider_symbol_candidates(symbol_map or {}, "VIX", "CBOE"):
-        provider_chain.insert(1 if provider_chain else 0, "CBOE")
+    configured_vix_chain = [provider for provider in market_context_provider_chain_v1('vix') if provider and provider != 'FINAL_EOD_ARTIFACT']
+    if "VIX" in requested:
+        merged: list[str] = []
+        for provider in [*configured_vix_chain, *provider_chain]:
+            name = str(provider or '').strip().upper()
+            if not name:
+                continue
+            if name == 'CBOE' and not _provider_symbol_candidates(symbol_map or {}, 'VIX', 'CBOE'):
+                continue
+            if name not in merged:
+                merged.append(name)
+        provider_chain = merged
     assignment: dict[str, dict[str, Any]] = {}
     unsupported: list[str] = []
     for symbol in requested:
@@ -1602,7 +1993,14 @@ def provider_capability_report_v1(config: ProviderConfig) -> dict[str, Any]:
 
 
 def _provider_chain_for_mode(config: ProviderConfig) -> list[str]:
-    raw = [name for name in (config.intraday_provider, config.primary, config.fallback) if name] if config.market_data_mode == INTRADAY_OPERATIONAL else [name for name in (config.primary, config.fallback) if name]
+    if config.market_data_mode == INTRADAY_OPERATIONAL:
+        raw = [name for name in (config.intraday_provider, config.primary) if name]
+        if not config.intraday_provider and "YAHOO_CHART" not in {str(item).upper() for item in raw}:
+            raw.append("YAHOO_CHART")
+        if config.fallback:
+            raw.append(config.fallback)
+    else:
+        raw = [name for name in (config.primary, config.fallback) if name]
     out: list[str] = []
     for name in raw:
         provider = str(name or "").strip().upper()

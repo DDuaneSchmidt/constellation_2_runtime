@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "content_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "rows": {
+      "items": {
+        "required": [
+          "trade_id",
+          "planned_thesis_state_path",
+          "actual_outcome",
+          "thesis_decay_predicted_outcome",
+          "exit_bias_helped",
+          "recommended_policy_review"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "thesis_outcome_feedback"
+    },
+    "schema_version": {
+      "const": "v1"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "rows",
+    "content_hash"
+  ],
+  "title": "Thesis Outcome Feedback v1",
+  "type": "object"
+}

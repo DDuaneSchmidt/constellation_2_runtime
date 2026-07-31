@@ -1,0 +1,105 @@
+# BACKTEST_002 Data and Baseline Specification
+
+# IMP_002 — 52-Week Breakout
+
+## Data Source
+
+Use the same data source hierarchy now established for BACKTEST_001:
+
+```text
+1. Tiingo
+2. Validated local CSV
+3. Yahoo fallback only if explicitly invoked
+```
+
+Preferred:
+
+```text
+Tiingo adjusted daily OHLCV
+Ticker: SPY
+Start date: 2000-01-01
+End date: latest available full trading day
+```
+
+## Price Fields
+
+Preferred:
+
+```text
+adjOpen
+adjHigh
+adjLow
+adjClose
+adjVolume
+divCash
+splitFactor
+```
+
+Signal:
+
+```text
+adjClose
+```
+
+Execution:
+
+```text
+adjOpen
+```
+
+## Corporate Action Policy
+
+Use dividend-adjusted and split-adjusted prices.
+
+## Cost Application
+
+```text
+10 bps round-trip
+5 bps entry
+5 bps exit
+```
+
+Stress tests:
+
+```text
+20 bps round-trip
+50 bps round-trip
+1-day execution delay
+```
+
+## Random Timing Baseline
+
+```text
+At least 1,000 randomized timing simulations
+Fixed random seed
+Preserve approximate time-in-market of IMP_002
+Report median, 5th percentile, 95th percentile
+Report IMP_002 percentile rank versus random distribution
+```
+
+## Exposure Baseline
+
+```text
+50% SPY / 50% cash
+Monthly rebalance
+Cash return = 0%
+```
+
+## Output Reproducibility
+
+Backtest output must record:
+
+```text
+Data vendor
+Data source type
+Data cache path if used
+Data cache hash if used
+Date range
+Price fields used
+Adjustment policy
+Cost model version
+Random seed
+Number of random simulations
+Code version or script path
+Run timestamp
+```

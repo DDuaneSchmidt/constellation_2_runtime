@@ -100,6 +100,36 @@ def _seed_broker_statement(truth_root: Path, day_utc: str, *, cash_end: str, pos
         _broker_statement_obj(day_utc, cash_end=cash_end, positions=positions),
     )
 
+def _seed_runtime_evaluation(truth_root: Path, day_utc: str, *, runtime_hash: str = "c" * 64) -> None:
+    _write_json(
+        truth_root / "reports" / "aegis_runtime_truth_kernel_v1" / day_utc / "runtime_evaluation.v1.json",
+        {
+            "schema_id": "AEGIS_RUNTIME_TRUTH_KERNEL_V1",
+            "day_utc": day_utc,
+            "deterministic_output_hash": runtime_hash,
+            "runtime_evaluation_hash": runtime_hash,
+        },
+    )
+
+
+def test_positions_v5_runtime_hash_falls_back_from_sleeve_to_canonical_truth(tmp_path: Path) -> None:
+    day_utc = "2026-05-29"
+    runtime_hash = "a" * 64
+    canonical_truth = tmp_path / "runtime" / "truth"
+    sleeve_truth = tmp_path / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _seed_runtime_evaluation(canonical_truth, day_utc, runtime_hash=runtime_hash)
+
+    assert positions_v5._read_runtime_hash(sleeve_truth, day_utc) == runtime_hash
+
+
+def test_positions_v2_bridge_script_imports_from_repo_without_pythonpath() -> None:
+    script = REPO_ROOT / "constellation_2" / "phaseF" / "positions" / "run" / "run_positions_snapshot_day_v2.py"
+    result = subprocess.run([sys.executable, str(script), "--help"], cwd=str(REPO_ROOT), text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0
+    assert "positions_snapshot.v5" in result.stdout
+
+
 
 def _seed_submission_fill(
     truth_root: Path,
@@ -199,6 +229,7 @@ def _seed_submission_fill(
 
 
 def _run_positions_v5(day_utc: str, truth_root: Path) -> Path:
+    _seed_runtime_evaluation(truth_root, day_utc)
     rc = positions_v5.main(
         [
             "--day_utc",

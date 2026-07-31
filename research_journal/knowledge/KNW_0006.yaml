@@ -1,0 +1,10 @@
+id: KNW_0006
+statement: Closed outcomes are the binding constraint for many AEGIS research claims.
+evidence:
+  - OBS_0002
+  - OBS_0012
+  - Outcome flow audit and research quality engine review
+limitations:
+  - Closed outcome definitions may differ by artifact
+why_it_matters: Research claims should wait for outcome maturity, not observation volume.
+status: SUPPORTED

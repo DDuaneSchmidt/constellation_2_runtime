@@ -11,17 +11,20 @@
   <div id="app" class="operator-app">
     <header class="shell-topbar">
       <div class="topbar-brand">
-        <button id="headerBackButton" class="icon-button" type="button" aria-label="Back" onclick="history.back()">‹</button>
-        <div id="brandMark"></div>
         <div class="brand-copy">
-          <div class="section-eyebrow">Aegis / Constellation</div>
+          <div class="brand-identity-line">
+            <div id="brandMark" class="brand-aegis-icon-shell" data-static-brand="true" aria-label="Aegis">
+              <img class="brand-aegis-icon" src="assets/brand/aegis-logo-official-transparent.png" alt="" width="116" height="40" />
+            </div>
+            <div class="section-eyebrow">AEGIS</div>
+          </div>
           <div id="environmentBadge" hidden>UNKNOWN</div>
           <div id="currentDayValue" hidden>UNKNOWN</div>
           <div id="refreshValue" hidden>UNKNOWN</div>
           <div id="brokerIndicator" hidden>UNKNOWN</div>
-          <h1 id="headerPageTitle">Command / Overview</h1>
+          <h1 id="headerPageTitle">AI CIO Briefing</h1>
           <div hidden>Constellation Operator Shell</div>
-          <div class="section-eyebrow">Kernel-Aligned Operator Console</div>
+          <div class="section-eyebrow">Family Investment Office</div>
         </div>
       </div>
       <div class="topbar-controls">
@@ -29,33 +32,14 @@
           <span id="headerEnvironment" class="environment-pill">PRODUCTION</span>
           <span id="headerDataTimestamp" class="header-timestamp">Operational timestamps loading</span>
         </div>
-        <div class="topbar-actions">
-          <button id="refreshButton" class="icon-button" type="button" aria-label="Refresh">↻</button>
-          <button id="commandPaletteButton" class="primary-button" type="button">Quick Actions</button>
-          <button class="icon-button notification-button" type="button" aria-label="Notifications">◇<span id="notificationBadge" class="button-badge">3</span></button>
-          <button class="icon-button" type="button" aria-label="Help">?</button>
-          <button class="avatar-button" type="button" aria-label="User menu">AG</button>
-        </div>
         <div class="topbar-stats compact">
           <div class="topbar-stat">
-            <div class="topbar-stat-label">Effective Config</div>
-            <div class="topbar-stat-value" id="topConfigVersion">backend gap</div>
-          </div>
-          <div class="topbar-stat">
-            <div class="topbar-stat-label">Runtime Mode</div>
+            <div class="topbar-stat-label">Aegis Mode</div>
             <div class="topbar-stat-value" id="topRuntimeMode">UNKNOWN</div>
           </div>
           <div class="topbar-stat">
-            <div class="topbar-stat-label">Readiness</div>
+            <div class="topbar-stat-label">Aegis Status</div>
             <div class="topbar-stat-value" id="topReadiness">UNKNOWN</div>
-          </div>
-          <div class="topbar-stat" hidden>
-            <div class="topbar-stat-label">Portfolio Value</div>
-            <div class="topbar-stat-value" id="topPortfolioValue">backend gap</div>
-          </div>
-          <div class="topbar-stat" hidden>
-            <div class="topbar-stat-label">Notifications</div>
-            <div class="topbar-stat-value" id="topNotificationCount">0</div>
           </div>
         </div>
       </div>
@@ -69,26 +53,23 @@
 
     <div class="shell-frame">
       <aside class="shell-leftnav">
-        <div id="statusStrip" hidden>Kernel Status</div>
-        <div id="alertTray" hidden>Alert Tray</div>
-        <div class="section-eyebrow">Kernel Workspaces</div>
+        <div class="section-eyebrow">Investment Office</div>
         <label class="sidebar-search">
           <span>Search</span>
-          <input id="sidebarSearch" type="search" placeholder="Find domain or truth owner" autocomplete="off" />
+          <input id="sidebarSearch" type="search" placeholder="Find screen or topic" autocomplete="off" />
         </label>
         <nav id="workspaceNav" class="nav-list"></nav>
         <button class="sidebar-collapse-button" type="button" data-sidebar-collapse>
           <span>Collapse</span>
           <strong>‹</strong>
         </button>
-        <div class="nav-section-title kernel-title">Kernel Status</div>
-        <div id="kernelStatusRail" class="kernel-status-rail"></div>
+        <div id="sidebarStatusChip" class="sidebar-status-chip" hidden>Paper Mode Ready</div>
       </aside>
 
       <main class="shell-main">
         <div class="page-toolbar">
           <div>
-            <div id="workspaceEyebrow" class="section-eyebrow">Aegis Command</div>
+            <div id="workspaceEyebrow" class="section-eyebrow">AI CIO</div>
             <h2 id="workspaceTitle" class="page-title">Loading…</h2>
             <div id="workspaceMeta" class="page-meta"></div>
           </div>
@@ -115,24 +96,24 @@
 
     <footer class="bottom-status">
       <div class="shortcut-group">
-        <span>Shortcuts</span>
-        <a href="/operations" data-route="/operations">Active Exceptions</a>
-        <a href="/audit" data-route="/audit">Latest Decisions</a>
-        <a href="/policy" data-route="/policy">Policy Library</a>
-        <a href="/reports" data-route="/reports">Evidence Store</a>
-        <a href="/reliability" data-route="/reliability">Health Monitor</a>
+        <span>Investment Shortcuts</span>
+        <a href="/research-lab" data-route="/research-lab">Research Lab</a>
+        <a href="/advisor-oversight" data-route="/advisor-oversight">Advisor Oversight</a>
+        <a href="/cio-opportunities" data-route="/cio-opportunities">Opportunity Queue</a>
+        <a href="/documents" data-route="/documents">Documents</a>
+        <a href="/retirement-simulator" data-route="/retirement-simulator">Retirement Simulator</a>
       </div>
       <label class="bottom-search">
         <span>Global Search</span>
-        <input type="search" placeholder="Search evidence, policy, accounts" />
+        <input type="search" placeholder="Search accounts, portfolios, research" />
       </label>
       <div class="domain-jump">
-        <a href="/" data-route="/">Command</a>
-        <a href="/capital" data-route="/capital">Capital</a>
-        <a href="/portfolio" data-route="/portfolio">Portfolio</a>
-        <a href="/advisory" data-route="/advisory">Advisory</a>
-        <a href="/tax" data-route="/tax">Taxes</a>
-        <a href="/audit" data-route="/audit">Audit</a>
+        <a href="/" data-route="/">CIO Briefing</a>
+        <a href="/capital-map" data-route="/capital-map">Capital Map</a>
+        <a href="/portfolios" data-route="/portfolios">Portfolios</a>
+        <a href="/research-lab" data-route="/research-lab">Research Lab</a>
+        <a href="/cio-opportunities" data-route="/cio-opportunities">Opportunities</a>
+        <a href="/carolyn" data-route="/carolyn">Carolyn</a>
       </div>
       <div class="bottom-hidden" hidden>
         <strong id="bottomConfigVersion">backend gap</strong>
@@ -144,6 +125,20 @@
       </div>
     </footer>
   </div>
+
+  <dialog id="evidenceDrawer" class="evidence-drawer-dialog" aria-labelledby="evidenceDrawerTitle">
+    <div class="evidence-drawer-panel">
+      <header class="evidence-drawer-header">
+        <div>
+          <div class="section-eyebrow">Evidence Drawer</div>
+          <h3 id="evidenceDrawerTitle">Evidence</h3>
+          <p id="evidenceDrawerSummary">Technical provenance and audit details appear here.</p>
+        </div>
+        <form method="dialog"><button class="ghost-button" type="submit">Close</button></form>
+      </header>
+      <div id="evidenceDrawerBody" class="evidence-drawer-body"></div>
+    </div>
+  </dialog>
 
   <div id="commandPalette" class="command-palette" hidden>
     <div class="palette-panel">

@@ -14,10 +14,7 @@ from ops.aegis.market_data.market_data_mode_v1 import FINAL_EOD_CERTIFIED
 from ops.aegis.market_data.market_data_provider_v1 import fetch_market_data_v1, provider_config_from_env_v1
 from ops.aegis.market_data.symbol_alias_registry_v1 import canonicalize_symbol_list_v1, normalize_market_symbol_v1
 from ops.aegis.market_data.symbol_map_v1 import build_symbol_map_v1
-from ops.aegis.universe.canonical_universe_authority_v1 import (
-    canonical_universe_authority_path,
-    latest_canonical_universe_authority_v1,
-)
+from ops.aegis.dynamic_certification_queue_v1 import latest_dynamic_certification_queue_v1
 
 
 SCHEMA_VERSION = "v1"
@@ -171,6 +168,79 @@ def setup_requirements_v1(*, truth_root: Path | str, day_utc: str, domain_id: st
         "required_fields": list(cfg.get("required_fields") or []),
         "setup_message": str(cfg.get("setup_message") or contract.get("setup_required_message") or "Configure a governed source for this domain."),
         "source_contract": contract,
+    }
+
+
+def example_domain_source_template_v1(*, truth_root: Path | str, day_utc: str, domain_id: str) -> dict[str, Any]:
+    req = setup_requirements_v1(truth_root=truth_root, day_utc=day_utc, domain_id=domain_id)
+    did = req["domain_id"]
+    rows_key = str(DOMAIN_CONFIG.get(did, {}).get("events_key") or "rows")
+    examples = {
+        "MACRO_CALENDAR": {
+            "event_name": "REPLACE_WITH_EVENT_NAME",
+            "time": f"{day_utc}T13:30:00Z",
+            "country": "US",
+            "importance": "HIGH",
+            "source": "REPLACE_WITH_GOVERNED_SOURCE",
+        },
+        "EARNINGS_EVENTS": {
+            "symbol": "REPLACE_WITH_SYMBOL",
+            "company": "REPLACE_WITH_COMPANY",
+            "report_date": day_utc,
+            "report_time": "AFTER_MARKET",
+            "confirmed_or_estimated": "CONFIRMED",
+            "source": "REPLACE_WITH_GOVERNED_SOURCE",
+        },
+        "CORPORATE_ACTIONS": {
+            "symbol": "REPLACE_WITH_SYMBOL",
+            "action_type": "DIVIDEND",
+            "effective_date": day_utc,
+            "source": "REPLACE_WITH_GOVERNED_SOURCE",
+        },
+    }
+    return {
+        "schema_id": DOMAIN_CONFIG.get(did, {}).get("schema_id") or f"{did.lower()}_source_v1",
+        "schema_version": SCHEMA_VERSION,
+        "day_utc": day_utc,
+        "status": "READY",
+        "validation_status": "VALID",
+        "template_only": True,
+        "template_warning": "Example structure only. Replace rows with real governed external source data before validation or certification.",
+        rows_key: [examples.get(did, {field: f"REPLACE_WITH_{field.upper()}" for field in req.get("required_fields", [])})],
+        "required_config_key": req.get("source_file_env") or req.get("source_env") or "",
+        "required_output_path": req.get("required_output_path") or "",
+        "required_fields": req.get("required_fields") or [],
+        "broker_submit_transmit_allowed": False,
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "trade_advice_allowed": False,
+    }
+
+
+def write_domain_source_template_v1(*, truth_root: Path | str, day_utc: str, domain_id: str) -> dict[str, Any]:
+    root = Path(truth_root).expanduser().resolve()
+    did = str(domain_id or "").strip().upper()
+    if did not in {"MACRO_CALENDAR", "EARNINGS_EVENTS", "CORPORATE_ACTIONS"}:
+        return {"ok": False, "result_status": "UNSUPPORTED_TEMPLATE_DOMAIN", "domain_id": did}
+    payload = example_domain_source_template_v1(truth_root=root, day_utc=day_utc, domain_id=did)
+    path = root / "reports" / "domain_source_templates_v1" / day_utc / did.lower() / "source_template.v1.json"
+    paths = write_json_v1(path, payload)
+    return {
+        "ok": True,
+        "result_status": "TEMPLATE_READY",
+        "domain_id": did,
+        "day_utc": day_utc,
+        "template_path": paths["json"],
+        "template_hash": paths["sha256"],
+        "content_hash": paths["content_hash"],
+        "required_config_key": payload.get("required_config_key") or "",
+        "required_output_path": payload.get("required_output_path") or "",
+        "required_fields": payload.get("required_fields") or [],
+        "message": f"JSON template written for {did}: {paths['json']}.",
+        "broker_submit_transmit_allowed": False,
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "trade_advice_allowed": False,
     }
 
 
@@ -347,21 +417,37 @@ def _repo_root_v1() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _stable_final_eod_universe_v1(root: Path, day_utc: str) -> dict[str, Any]:
+    path = _canonical_eod_path(root, day_utc)
+    payload, resolved = _resolve_eod_payload_path_v1(path) if path.exists() else ({}, None)
+    symbols = canonicalize_symbol_list_v1(payload.get("requested_symbols", []) if isinstance(payload.get("requested_symbols"), list) else [])
+    if not symbols:
+        symbols = canonicalize_symbol_list_v1(payload.get("final_eod_symbols", []) if isinstance(payload.get("final_eod_symbols"), list) else [])
+    return {"symbols": symbols, "source_artifact_path": str(resolved or path if symbols else ""), "source_hash": sha256_file_v1(resolved or path) if symbols and (resolved or path).exists() else ""}
+
+
 def _governed_required_eod_universe_v1(root: Path | None, day_utc: str) -> dict[str, Any]:
     if root is not None:
-        try:
-            authority = latest_canonical_universe_authority_v1(truth_root=Path(root), day_utc=day_utc)
-        except Exception:
-            authority = {}
-        symbols = canonicalize_symbol_list_v1(authority.get("universe_symbols", []) if isinstance(authority, dict) else [])
-        if symbols and str(authority.get("authority_status") or "").upper() == "PASS":
-            path = canonical_universe_authority_path(truth_root=Path(root), day_utc=day_utc)
+        stable = _stable_final_eod_universe_v1(Path(root), day_utc)
+        _queue_path, queue = latest_dynamic_certification_queue_v1(truth_root=Path(root), day_utc=day_utc)
+        queued = canonicalize_symbol_list_v1(queue.get("requested_symbols", []) if isinstance(queue, dict) else [])
+        baseline = canonicalize_symbol_list_v1(stable.get("symbols") or [])
+        baseline_source = "stable_certified_universe" if baseline else "symbol_map_required_symbols"
+        if not baseline:
+            try:
+                symbol_map = build_symbol_map_v1(repo_root=_repo_root_v1(), day_utc=day_utc)
+            except Exception:
+                symbol_map = {}
+            baseline = canonicalize_symbol_list_v1(symbol_map.get("required_symbols", []))
+        symbols = canonicalize_symbol_list_v1([*baseline, *queued])
+        if symbols:
             return {
                 "symbols": symbols,
-                "source": "canonical_universe_authority_v1",
-                "source_artifact_path": str(path if path.exists() else ""),
-                "source_hash": str(authority.get("immutable_hash") or ""),
+                "source": f"{baseline_source}+dynamic_certification_queue_v1" if queued else baseline_source,
+                "source_artifact_path": str(stable.get("source_artifact_path") or _queue_path or ""),
+                "source_hash": str(stable.get("source_hash") or (queue.get("content_hash") if isinstance(queue, dict) else "") or ""),
                 "symbol_count": len(symbols),
+                "dynamic_requested_symbols": queued,
             }
     try:
         symbol_map = build_symbol_map_v1(repo_root=_repo_root_v1(), day_utc=day_utc)
@@ -375,6 +461,7 @@ def _governed_required_eod_universe_v1(root: Path | None, day_utc: str) -> dict[
         "source_artifact_path": "",
         "source_hash": "",
         "symbol_count": len(symbols),
+        "dynamic_requested_symbols": [],
     }
 
 

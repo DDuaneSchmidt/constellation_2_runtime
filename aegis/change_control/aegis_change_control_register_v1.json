@@ -1,0 +1,1800 @@
+{
+  "authority_docs": [
+    "docs/aegis_change_control_system_v1_requirements.md",
+    "docs/aegis_change_control_system_v1_spec.md",
+    "docs/aegis_change_control_system_v1_design.md"
+  ],
+  "decision_records": [
+    {
+      "change_id": "ACC-20260530-003",
+      "decided_at": "2026-05-30T00:00:00Z",
+      "decided_by": "SYSTEM",
+      "decision": "APPROVE",
+      "evidence_refs": [
+        "docs/aegis_performance_screen_spec.md",
+        "docs/aegis_positions_screen_spec.md"
+      ],
+      "id": "ACD-20260530-003",
+      "rationale": "Estimated valuation is useful only if visibly labeled as non-certified and cannot be confused with canonical P&L.",
+      "revisit_condition": null
+    },
+    {
+      "change_id": "ACC-20260530-005",
+      "decided_at": "2026-05-30T00:00:00Z",
+      "decided_by": "SYSTEM",
+      "decision": "DEFER",
+      "evidence_refs": [
+        "docs/aegis_operator_screen_spec.md"
+      ],
+      "id": "ACD-20260530-005",
+      "rationale": "Evidence detail is valuable but should not block Operator Shell V1 freeze.",
+      "revisit_condition": "Revisit after Operator Shell V1 has screenshot regression coverage."
+    },
+    {
+      "change_id": "ACC-20260530-009",
+      "controlled_action": "APPROVE",
+      "decided_at": "2026-05-30T23:59:21Z",
+      "decided_by": "David",
+      "decision": "APPROVE",
+      "decision_notes": "",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260530-006",
+      "priority_after": "P1",
+      "rationale": "Controlled decision action recorded: APPROVE.",
+      "revisit_condition": null,
+      "status_after": "DECIDED"
+    },
+    {
+      "change_id": "ACC-20260530-008",
+      "controlled_action": "APPROVE",
+      "decided_at": "2026-05-31T00:05:04Z",
+      "decided_by": "David",
+      "decision": "APPROVE",
+      "decision_notes": "",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-001",
+      "priority_after": "P1",
+      "rationale": "Controlled decision action recorded: APPROVE.",
+      "revisit_condition": null,
+      "status_after": "DECIDED"
+    },
+    {
+      "change_id": "ACC-20260530-008",
+      "controlled_action": "APPROVE",
+      "decided_at": "2026-05-31T00:05:49Z",
+      "decided_by": "David",
+      "decision": "APPROVE",
+      "decision_notes": "",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-002",
+      "priority_after": "P1",
+      "rationale": "Controlled decision action recorded: APPROVE.",
+      "revisit_condition": null,
+      "status_after": "DECIDED"
+    },
+    {
+      "change_id": "ACC-20260530-008",
+      "controlled_action": "NOTE",
+      "decided_at": "2026-05-31T00:42:04Z",
+      "decided_by": "David",
+      "decision": "NOTE",
+      "decision_notes": "Hostile audit score 68/100.\n\nRework package approved.\n\nProceed with implementation of:\n\n- Candidate-generation promotion gate enforcement\n- Protocol-specific evaluators\n- Deterministic hypothesis/sample binding\n- Immutable reproducibility controls\n- Enforced bias controls\n\nACC-20260530-008 remains IMPLEMENTED until hostile re-audit passes.\n\nTarget validation score: >= 85.",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-003",
+      "priority_after": "P1",
+      "rationale": "Hostile audit score 68/100.\n\nRework package approved.\n\nProceed with implementation of:\n\n- Candidate-generation promotion gate enforcement\n- Protocol-specific evaluators\n- Deterministic hypothesis/sample binding\n- Immutable reproducibility controls\n- Enforced bias controls\n\nACC-20260530-008 remains IMPLEMENTED until hostile re-audit passes.\n\nTarget validation score: >= 85.",
+      "revisit_condition": null,
+      "status_after": "IMPLEMENTED"
+    },
+    {
+      "change_id": "ACC-20260530-008",
+      "controlled_action": "NOTE",
+      "decided_at": "2026-05-31T00:55:24Z",
+      "decided_by": "David",
+      "decision": "NOTE",
+      "decision_notes": "Rework implemented.\n\nMove to VALIDATING.\n\nDo not close.\n\nRequire hostile re-audit confirming:\n- promotion gate enforcement\n- protocol-specific evaluator enforcement\n- artifact binding enforcement\n- reproducibility guarantees\n- bias-control enforcement\n\nTarget score:\n>= 85\n\nValidation required before closure.",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-004",
+      "priority_after": "P1",
+      "rationale": "Rework implemented.\n\nMove to VALIDATING.\n\nDo not close.\n\nRequire hostile re-audit confirming:\n- promotion gate enforcement\n- protocol-specific evaluator enforcement\n- artifact binding enforcement\n- reproducibility guarantees\n- bias-control enforcement\n\nTarget score:\n>= 85\n\nValidation required before closure.",
+      "revisit_condition": null,
+      "status_after": "IMPLEMENTED"
+    },
+    {
+      "change_id": "ACC-20260530-008",
+      "controlled_action": "NOTE",
+      "decided_at": "2026-05-31T01:03:39Z",
+      "decided_by": "David",
+      "decision": "NOTE",
+      "decision_notes": "Hostile re-audit score: 78/100.\n\nRework materially improved the engine but validation remains blocked.\n\nP0 finding:\n\nResearch validation is not the final authority in the candidate lifecycle.\n\nCandidate suppression can be overwritten by downstream portfolio-gate and lane-enrichment logic.\n\nResearch-rejected hypotheses may still influence candidate-review eligibility through downstream transformations.\n\nDecision:\n\nApprove Rework Round 2.\n\nACC-20260530-008 remains IMPLEMENTED.\n\nValidation is not approved.\n\nValidation status remains blocked until research validation becomes the final non-overridable gate before candidate review eligibility.\n\nTarget hostile audit score: >= 90.",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-005",
+      "priority_after": "P1",
+      "rationale": "Hostile re-audit score: 78/100.\n\nRework materially improved the engine but validation remains blocked.\n\nP0 finding:\n\nResearch validation is not the final authority in the candidate lifecycle.\n\nCandidate suppression can be overwritten by downstream portfolio-gate and lane-enrichment logic.\n\nResearch-rejected hypotheses may still influence candidate-review eligibility through downstream transformations.\n\nDecision:\n\nApprove Rework Round 2.\n\nACC-20260530-008 remains IMPLEMENTED.\n\nValidation is not approved.\n\nValidation status remains blocked until research validation becomes the final non-overridable gate before candidate review eligibility.\n\nTarget hostile audit score: >= 90.",
+      "revisit_condition": null,
+      "status_after": "IMPLEMENTED"
+    },
+    {
+      "change_id": "ACC-20260530-008A",
+      "controlled_action": "APPROVE",
+      "decided_at": "2026-05-31T18:06:08Z",
+      "decided_by": "David",
+      "decision": "APPROVE",
+      "decision_notes": "",
+      "evidence_refs": [
+        "/aegis-change-control controlled decision workflow"
+      ],
+      "id": "ACD-20260531-006",
+      "priority_after": "P0",
+      "rationale": "Controlled decision action recorded: APPROVE.",
+      "revisit_condition": null,
+      "status_after": "DECIDED"
+    },
+    {
+      "change_id": "ACC-20260531-001",
+      "decided_at": "2026-05-31T18:30:00Z",
+      "decided_by": "codex_on_operator_request",
+      "decision": "APPROVE",
+      "evidence_refs": [
+        "docs/aegis_change_control_intelligence_v1_requirements.md",
+        "docs/aegis_change_control_intelligence_v1_spec.md",
+        "docs/aegis_change_control_intelligence_v1_design.md"
+      ],
+      "id": "ACD-20260531-007",
+      "rationale": "Build the Change Control Intelligence Layer as read-only advisory tooling. Deterministic scoring remains the ranking authority; AI explains but cannot mutate governed records."
+    }
+  ],
+  "generated_at": "2026-05-31T21:35:55Z",
+  "implementation_records": [
+    {
+      "behavior_changed": "Research validation artifacts are generated deterministically. Promotion gate emits candidate-review eligibility only; no candidate generation, sleeve logic, trading, broker, live, autonomous, or safety behavior is changed.",
+      "change_id": "ACC-20260530-008",
+      "commands_added": [
+        "npm run aegis:research-validation-engine",
+        "npm run aegis:research-validation-engine-self-check"
+      ],
+      "evidence_refs": [
+        "docs/aegis_research_validation_engine_v1_spec.md",
+        "truth/reports/aegis_research_validation_result_v1/2026-05-30/research_validation_result.v1.json"
+      ],
+      "files_changed": [
+        "docs/aegis_research_validation_engine_v1_requirements.md",
+        "docs/aegis_research_validation_engine_v1_spec.md",
+        "docs/aegis_research_validation_engine_v1_design.md",
+        "ops/aegis/research_lab/research_validation_engine_v1.py",
+        "ops/tools/build_aegis_research_validation_engine_v1.py",
+        "ops/tools/run_aegis_research_validation_engine_self_check_v1.py",
+        "constellation_2/common/tests/test_aegis_research_validation_engine_v1.py",
+        "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py",
+        "constellation_2/phaseL/ui/static/operator_shell/domain_client/index.js",
+        "constellation_2/phaseL/ui/static/operator_shell/pages/index.js",
+        "package.json",
+        "aegis/modules/operator_portal/aegis.module.yaml"
+      ],
+      "id": "ACI-20260531-001",
+      "implemented_at": "2026-05-31T00:19:19Z",
+      "implemented_by": "Codex",
+      "summary": "Implemented Research Validation Engine V1 with versioned hypothesis registry, deterministic protocol registry, validation runs, validation results, promotion gate, outcome feedback, CLI builders, self-check, tests, and read-only Research UI validation summary."
+    },
+    {
+      "behavior_changed": "Research-derived candidate rows now require SUPPORTED promotion-gate eligibility before remaining candidate-created. Unsupported research-derived rows are suppressed. Core sleeve logic, trading logic, execution, broker/live/autonomous policy, canonical trading artifacts, and safety gates are unchanged.",
+      "change_id": "ACC-20260530-008",
+      "commands_added": [],
+      "evidence_refs": [
+        "docs/aegis_research_validation_engine_v1_rework_requirements.md",
+        "docs/aegis_research_validation_engine_v1_rework_spec.md",
+        "docs/aegis_research_validation_engine_v1_rework_plan.md",
+        "truth/reports/aegis_research_validation_result_v1/2026-05-30/research_validation_result.v1.json",
+        "truth/reports/aegis_research_promotion_gate_v1/2026-05-30/research_promotion_gate.v1.json"
+      ],
+      "files_changed": [
+        "ops/aegis/research_lab/research_validation_engine_v1.py",
+        "constellation_2/common/candidate_observability_v1.py",
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/candidate_generation_manifest.v1.schema.json",
+        "constellation_2/common/tests/test_aegis_research_validation_engine_v1.py",
+        "constellation_2/common/tests/test_aegis_research_validation_candidate_boundary_v1.py",
+        "constellation_2/phaseL/ui/static/operator_shell/pages/index.js",
+        "constellation_2/phaseL/ui/tests/test_aegis_research_review_ui_v1.py",
+        "aegis/modules/operator_portal/aegis.module.yaml"
+      ],
+      "id": "ACI-20260531-002",
+      "implemented_at": "2026-05-31T00:51:54Z",
+      "implemented_by": "Codex",
+      "summary": "Implemented approved Research Validation Engine V1 rework: protocol-specific evaluators, required metric enforcement, artifact binding, immutable reproducibility fields, bias controls, sample-size policy checks, Research UI status details, and research-derived candidate promotion-gate enforcement."
+    },
+    {
+      "behavior_changed": "Aegis can now generate read-only, evidence-frozen, deterministic Change Control next-action recommendations with advisory AI explanation. The UI exposes the recommendation without mutation controls.",
+      "change_id": "ACC-20260531-001",
+      "commands_added": [
+        "npm run aegis:change-control-intelligence",
+        "npm run aegis:change-control-intelligence-self-check"
+      ],
+      "evidence_refs": [
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_evidence_snapshot_v1/2026-05-30/change_control_evidence_snapshot.v1.json",
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_advisor_score_v1/2026-05-30/change_control_advisor_score.v1.json",
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_ai_review_v1/2026-05-30/change_control_ai_review.v1.json"
+      ],
+      "files_changed": [
+        "docs/aegis_change_control_intelligence_v1_requirements.md",
+        "docs/aegis_change_control_intelligence_v1_spec.md",
+        "docs/aegis_change_control_intelligence_v1_design.md",
+        "ops/aegis/change_control_intelligence_v1.py",
+        "ops/tools/run_aegis_change_control_intelligence_v1.py",
+        "package.json",
+        "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py",
+        "constellation_2/phaseL/ui/static/operator_shell/domain_client/index.js",
+        "constellation_2/phaseL/ui/static/operator_shell/pages/index.js",
+        "constellation_2/phaseL/ui/static/operator_shell/navigation_schema.js",
+        "constellation_2/phaseL/ui/static/operator_shell/pages/route_metadata.js",
+        "aegis/modules/operator_portal/aegis.module.yaml",
+        "constellation_2/common/tests/test_aegis_change_control_intelligence_v1.py",
+        "constellation_2/phaseL/ui/tests/test_aegis_change_control_ui_v1.py"
+      ],
+      "id": "ACI-20260531-003",
+      "implemented_at": "2026-05-31T18:30:00Z",
+      "implemented_by": "codex",
+      "summary": "Implemented Change Control Intelligence V1 evidence snapshot, deterministic advisor, advisory AI review artifacts, CLI commands, API endpoint, read-only Change Control Lab route, manifest registration, and tests."
+    }
+  ],
+  "intake_register": [
+    {
+      "acceptance_criteria": [
+        "hypotheses have validation status",
+        "evidence accumulation is tracked",
+        "disproof criteria are explicit",
+        "confidence score is generated from evidence",
+        "insufficient sample size is clearly labeled",
+        "no hypothesis can become a candidate solely from unvalidated research"
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "hypothesis registry",
+        "research run ledger",
+        "research validation samples",
+        "future research validation artifact/API"
+      ],
+      "blocker_ids": [
+        "ACC-20260530-008A"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "child_ids": [
+        "ACC-20260530-008A",
+        "ACC-20260530-008B",
+        "ACC-20260530-008C",
+        "ACC-20260530-008D"
+      ],
+      "completion_rule": "All required child records must be VALIDATED, CLOSED, or explicitly REJECTED before parent may move to VALIDATED.",
+      "created_at": "2026-05-30T23:35:00Z",
+      "decision_ids": [
+        "ACD-20260531-001",
+        "ACD-20260531-002",
+        "ACD-20260531-003",
+        "ACD-20260531-004",
+        "ACD-20260531-005"
+      ],
+      "decision_question": "Should Aegis build deterministic hypothesis validation before expanding autonomous hypothesis generation?",
+      "decision_required": false,
+      "decision_required_reason": "Strategic enhancement captured; scope and deterministic validation boundaries need approval.",
+      "dependencies": [
+        "Existing hypothesis registry and research run ledger.",
+        "Evidence accumulation artifacts.",
+        "Research validation sample artifacts.",
+        "Research Review UI for operator-readable summaries.",
+        "Safety policy gates remaining disabled."
+      ],
+      "description": "Turn research ideas into evidence-backed conclusions with validation, disproof, confidence scoring, and sample sufficiency tracking.",
+      "downstream_records": [
+        "ACC-20260530-009",
+        "ACC-20260530-010"
+      ],
+      "estimated_complexity": "HIGH",
+      "id": "ACC-20260530-008",
+      "implementation_ids": [
+        "ACI-20260531-001",
+        "ACI-20260531-002"
+      ],
+      "implementation_phase": "PHASE_1_REWORK_IMPLEMENTED_AWAITING_HOSTILE_VALIDATION",
+      "non_goals": [
+        "Do not generate trades.",
+        "Do not approve candidates.",
+        "Do not enable autonomous trading.",
+        "Do not replace human review of validation results.",
+        "Do not use freeform AI output as the sole validation basis."
+      ],
+      "operator_value": "David can see whether a research idea is valid, invalid, inconclusive, or still under-sampled without reading raw research artifacts or chat history.",
+      "owner": "research_workflow",
+      "prerequisite_records": [],
+      "previous_status": "DECIDED",
+      "priority": "P1",
+      "problem_statement": "Aegis can capture hypotheses and collect some evidence, but it does not yet have a complete governed engine for proving, disproving, scoring confidence, tracking sample sufficiency, and declaring valid, invalid, or inconclusive outcomes before downstream use.",
+      "proposed_implementation_phases": [
+        "Define validation status model and disproof criteria.",
+        "Create deterministic evidence accumulation and sample sufficiency checks.",
+        "Compute confidence from structured evidence.",
+        "Expose validation results in Research without enabling execution.",
+        "Add self-checks that prevent unvalidated research from feeding candidates."
+      ],
+      "proposed_next_step": "Resolve required child records ACC-20260530-008A through ACC-20260530-008D, then rerun hostile audit before moving to VALIDATING or VALIDATED.",
+      "rationale": "Validation must precede generation so Aegis can reject bad ideas before it creates more of them.",
+      "recommended_option": "APPROVE_PHASED_BUILD_VALIDATION_ENGINE_FIRST",
+      "rejected_options": [
+        "GENERATE_MORE_HYPOTHESES_WITHOUT_VALIDATION",
+        "ALLOW_UNVALIDATED_RESEARCH_TO_CREATE_CANDIDATES",
+        "USE_FREEFORM_AI_AS_VALIDATION_AUTHORITY"
+      ],
+      "relationship_role": "PARENT",
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "research validation self-check output",
+        "artifact/API/browser consistency proof for Research screen"
+      ],
+      "required_child_ids": [
+        "ACC-20260530-008A",
+        "ACC-20260530-008B",
+        "ACC-20260530-008C",
+        "ACC-20260530-008D"
+      ],
+      "required_decision": "Approve, defer, or reject building a deterministic research validation engine before any expansion of automated hypothesis generation.",
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Research screen showing validated/invalid/inconclusive/insufficient-sample states."
+      ],
+      "required_tests": [
+        "research validation artifact tests",
+        "sample sufficiency tests",
+        "disproof criteria tests",
+        "candidate-blocking tests for unvalidated research",
+        "research UI visibility tests",
+        "safety gate regression tests"
+      ],
+      "risks": [
+        "Poor criteria could validate noisy ideas.",
+        "Small sample sizes could create false confidence.",
+        "Overly strict criteria could reject useful hypotheses.",
+        "Incomplete evidence lineage could make validation unauditable."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve rule changes, candidate generation changes, or safety-gate changes are authorized by this record. Any implementation must preserve disabled safety gates.",
+      "screens_impacted": [
+        "Research",
+        "Change Control",
+        "Evidence/Audit Workspace when available"
+      ],
+      "severity": "P1",
+      "source": "Change Control UI V1.1 strategic enhancement seed",
+      "status": "IMPLEMENTED",
+      "strategic_category": "ACC-RESEARCH-VALIDATION",
+      "strategic_priority_rank": 1,
+      "strategic_value": "This becomes the quality gate that prevents weak research ideas from contaminating later candidate, sleeve, or performance workflows.",
+      "tags": [
+        "research_workflow",
+        "validation",
+        "operator_facing"
+      ],
+      "title": "Research Validation Engine",
+      "updated_at": "2026-05-31T01:12:00Z",
+      "validation_evidence_required": "Tests must prove validation statuses, sample sufficiency, confidence scoring, disproof criteria, no unvalidated candidate creation, current-day audit pass, and unchanged safety gates.",
+      "validation_ids": [
+        "ACV-20260531-001",
+        "ACV-20260531-002"
+      ],
+      "why_long_term": "Aegis needs a disciplined way to learn. Without validation, research volume can grow faster than evidence quality."
+    },
+    {
+      "acceptance_criteria": [
+        "generated hypotheses are labeled machine-generated",
+        "each generated hypothesis includes rationale, data source, and test plan",
+        "generated hypotheses enter Research as CAPTURED/PROPOSED, not approved",
+        "validation engine must review before candidate creation",
+        "safety gates unchanged"
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "future hypothesis discovery artifact/API",
+        "hypothesis registry",
+        "research queue/read model"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-30T23:35:00Z",
+      "decision_ids": [
+        "ACD-20260530-006"
+      ],
+      "decision_question": "Should Aegis generate proposed hypotheses automatically once deterministic validation guardrails exist?",
+      "decision_required": true,
+      "decision_required_reason": "Strategic enhancement captured; guardrails against hypothesis spam need approval.",
+      "dependencies": [
+        "ACC-20260530-008 Research Validation Engine.",
+        "Market observation artifacts.",
+        "Prior outcome and failure artifacts.",
+        "Performance attribution artifacts.",
+        "Duplicate/spam guardrails."
+      ],
+      "description": "Generate new research hypotheses from market data, prior outcomes, failures, anomalies, and performance attribution while keeping them proposed until validated.",
+      "downstream_records": [
+        "ACC-20260530-010"
+      ],
+      "estimated_complexity": "HIGH",
+      "id": "ACC-20260530-009",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_DEPENDS_ON_VALIDATION_ENGINE_DECISION",
+      "non_goals": [
+        "Do not approve generated hypotheses automatically.",
+        "Do not create candidates directly.",
+        "Do not bypass the Research Validation Engine.",
+        "Do not generate unlimited or duplicate hypotheses."
+      ],
+      "operator_value": "David can review machine-generated ideas with rationale, source data, and test plans instead of having to invent every hypothesis manually.",
+      "owner": "research_workflow",
+      "prerequisite_records": [
+        "ACC-20260530-008"
+      ],
+      "previous_status": "CAPTURED",
+      "priority": "P1",
+      "problem_statement": "Aegis still depends too heavily on manually supplied research ideas, which limits discovery and makes the research engine less autonomous.",
+      "proposed_implementation_phases": [
+        "Define eligible evidence triggers.",
+        "Add duplicate and spam controls.",
+        "Create proposed hypothesis record format with rationale and test plan.",
+        "Route generated hypotheses into Research as CAPTURED/PROPOSED.",
+        "Require validation before downstream use."
+      ],
+      "proposed_next_step": "Define generation triggers, rationale fields, test plan requirements, and spam controls.",
+      "rationale": "Generation is valuable only if Aegis can reject bad ideas before they affect downstream workflows.",
+      "recommended_option": "DEFER_UNTIL_RESEARCH_VALIDATION_ENGINE_APPROVED",
+      "rejected_options": [
+        "APPROVE_BEFORE_VALIDATION_ENGINE",
+        "ALLOW_GENERATED_HYPOTHESES_TO_CREATE_CANDIDATES",
+        "UNBOUNDED_GENERATION_WITHOUT_SPAM_CONTROLS"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "research workflow self-check output",
+        "artifact/API/browser consistency proof"
+      ],
+      "required_decision": "Approve only after the Research Validation Engine scope is approved, because generation must feed proposed research rather than candidate creation.",
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Research screen showing machine-generated proposed hypotheses with rationale and no candidate action."
+      ],
+      "required_tests": [
+        "hypothesis generation unit tests",
+        "duplicate/spam guardrail tests",
+        "Research UI generated-label tests",
+        "candidate isolation tests",
+        "safety gate regression tests"
+      ],
+      "risks": [
+        "Hypothesis spam could overwhelm Research.",
+        "Generated ideas may reflect noisy data.",
+        "Duplicate ideas could fragment evidence.",
+        "Weak guardrails could create false autonomy."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve rule changes, candidate generation changes, or safety-gate changes are authorized by this record. Any implementation must preserve disabled safety gates.",
+      "screens_impacted": [
+        "Research",
+        "Change Control"
+      ],
+      "severity": "P1",
+      "source": "Change Control UI V1.1 strategic enhancement seed",
+      "status": "DECIDED",
+      "strategic_category": "ACC-RESEARCH-HYPOTHESIS-GENERATION",
+      "strategic_priority_rank": 2,
+      "strategic_value": "A controlled generation system can turn anomalies, failures, and attribution patterns into a governed research backlog.",
+      "tags": [
+        "research_workflow",
+        "hypothesis_generation",
+        "operator_facing"
+      ],
+      "title": "Automated Hypothesis Generation",
+      "updated_at": "2026-05-30T23:59:21Z",
+      "validation_evidence_required": "Tests must prove generated hypotheses are proposed only, include rationale/source/test plan, obey duplicate controls, cannot create candidates without validation, and leave safety gates disabled.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs autonomous discovery, but discovery must be bounded by validation or it will create untrusted noise."
+    },
+    {
+      "acceptance_criteria": [
+        "positions/candidates can be linked to originating hypothesis",
+        "P&L can be summarized by hypothesis",
+        "win/loss and drawdown can be summarized by hypothesis",
+        "weak hypotheses can be flagged for retirement",
+        "attribution is clearly separated from certified portfolio P&L when data is incomplete"
+      ],
+      "affected_domain": "PERFORMANCE_ANALYTICS",
+      "artifacts_apis_impacted": [
+        "future hypothesis attribution artifact/API",
+        "candidate lineage",
+        "position lineage",
+        "performance report",
+        "sleeve analytics inputs"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-30T23:35:00Z",
+      "decision_ids": [],
+      "decision_question": "Should Aegis add hypothesis-level attribution once validated research can be linked to candidates and positions?",
+      "decision_required": true,
+      "decision_required_reason": "Strategic enhancement captured; lineage and incomplete-data semantics need approval.",
+      "dependencies": [
+        "Research Validation Engine.",
+        "Candidate-to-hypothesis lineage.",
+        "Position/candidate lineage.",
+        "Sleeve analytics and performance artifacts.",
+        "Mark coverage and data-quality semantics."
+      ],
+      "description": "Track which underlying research hypotheses contribute to portfolio performance, wins, losses, drawdowns, and retirement signals.",
+      "downstream_records": [],
+      "estimated_complexity": "HIGH",
+      "id": "ACC-20260530-010",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_DEPENDS_ON_VALIDATION_AND_LINEAGE",
+      "non_goals": [
+        "Do not change certified P&L.",
+        "Do not recommend allocation changes.",
+        "Do not auto-retire hypotheses.",
+        "Do not infer lineage by symbol alone."
+      ],
+      "operator_value": "David can see which ideas are actually helping or hurting performance, not just which sleeves made or lost money.",
+      "owner": "performance_analytics",
+      "prerequisite_records": [
+        "ACC-20260530-008",
+        "ACC-20260530-009"
+      ],
+      "priority": "P1",
+      "problem_statement": "Aegis can attribute results by sleeve or position, but not reliably by the original hypothesis that caused an idea to exist.",
+      "proposed_implementation_phases": [
+        "Define hypothesis lineage contract.",
+        "Link candidates and positions to originating hypothesis.",
+        "Summarize P&L/win-loss/drawdown by hypothesis.",
+        "Add data quality and partial-attribution labels.",
+        "Expose weak-hypothesis flags as evidence, not automated decisions."
+      ],
+      "proposed_next_step": "Define hypothesis-to-candidate-to-position lineage and separate incomplete attribution from certified P&L.",
+      "rationale": "Attribution is valuable only if lineage is guarded and incomplete data is clearly separated from certified portfolio P&L.",
+      "recommended_option": "APPROVE_AFTER_VALIDATION_AND_LINEAGE_PREREQUISITES",
+      "rejected_options": [
+        "ATTRIBUTE_BY_SYMBOL_ONLY",
+        "MIX_INCOMPLETE_ATTRIBUTION_WITH_CERTIFIED_PNL",
+        "AUTO_RETIRE_HYPOTHESES_FROM_ATTRIBUTION"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "performance self-check output",
+        "artifact/API/browser consistency proof"
+      ],
+      "required_decision": "Approve, defer, or reject building hypothesis attribution after validation and lineage prerequisites are clear.",
+      "required_safety_proof": [
+        "audit handoff showing no trade advice or allocation automation enabled"
+      ],
+      "required_screenshots": [
+        "Performance screen or future Evidence workspace showing hypothesis attribution with partial/certified separation."
+      ],
+      "required_tests": [
+        "hypothesis lineage tests",
+        "performance attribution tests",
+        "duplicate-symbol safety tests",
+        "partial-data semantic tests",
+        "UI attribution wording tests"
+      ],
+      "risks": [
+        "Incomplete lineage could misattribute P&L.",
+        "Partial marks could make rankings misleading.",
+        "Duplicate symbols across hypotheses could contaminate attribution."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve rule changes, candidate generation changes, or safety-gate changes are authorized by this record. Any implementation must preserve disabled safety gates.",
+      "screens_impacted": [
+        "Performance",
+        "Research",
+        "Change Control",
+        "Evidence/Audit Workspace when available"
+      ],
+      "severity": "P1",
+      "source": "Change Control UI V1.1 strategic enhancement seed",
+      "status": "CAPTURED",
+      "strategic_category": "ACC-PERFORMANCE-HYPOTHESIS-ATTRIBUTION",
+      "strategic_priority_rank": 3,
+      "strategic_value": "Hypothesis-level attribution closes the learning loop from research to validation to paper results and retirement decisions.",
+      "tags": [
+        "performance_analytics",
+        "hypothesis_attribution",
+        "truth_data",
+        "operator_facing"
+      ],
+      "title": "Portfolio Attribution by Hypothesis",
+      "updated_at": "2026-05-30T23:45:00Z",
+      "validation_evidence_required": "Tests must prove guarded lineage, no symbol-only attribution, partial data labeling, and separation from certified P&L.",
+      "validation_ids": [],
+      "why_long_term": "Aegis becomes a learning system only when it can connect research ideas to actual outcomes."
+    },
+    {
+      "acceptance_criteria": [
+        "user can inspect evidence for key screen claims",
+        "linked screenshots and validation records are visible",
+        "artifact/API/browser proof can be reviewed",
+        "evidence remains read-only",
+        "no trading or execution actions enabled"
+      ],
+      "affected_domain": "TRUST_AND_AUDIT",
+      "artifacts_apis_impacted": [
+        "change-control validation records",
+        "operator screenshots",
+        "evidence ledger",
+        "future evidence workspace API"
+      ],
+      "change_type": "ENHANCEMENT",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [
+        "ACD-20260530-005"
+      ],
+      "decision_question": "Should Aegis create a read-only Evidence & Audit Workspace for key operator claims and validation records?",
+      "decision_required": true,
+      "decision_required_reason": "Deferred from V1 freeze; needs a V1.1 scope decision before implementation.",
+      "dependencies": [
+        "Change Control validation records.",
+        "Screenshot regression artifacts.",
+        "Artifact/API/browser consistency evidence.",
+        "Operator shell route inventory."
+      ],
+      "description": "Provide one place to inspect why Aegis believes key screen claims, including screenshots, validation records, and artifact/API/browser proof.",
+      "downstream_records": [],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-005",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_DEFERRED_PENDING_SCOPE_DECISION",
+      "non_goals": [
+        "Do not edit evidence.",
+        "Do not close change-control records.",
+        "Do not trigger repairs or trading workflows.",
+        "Do not replace canonical artifacts."
+      ],
+      "operator_value": "David can inspect proof for key screen claims in one read-only place without reading raw JSON or running shell commands.",
+      "owner": "operator_portal",
+      "prerequisite_records": [
+        "ACC-20260530-002"
+      ],
+      "priority": "P2",
+      "problem_statement": "Evidence, audit proof, screenshots, validation records, and trust statements are spread across screens and CLI outputs, making it hard to inspect why Aegis believes a claim.",
+      "proposed_implementation_phases": [
+        "Define claim-to-evidence index.",
+        "Expose screenshots and validation records read-only.",
+        "Group proof by screen claim.",
+        "Keep raw artifact paths collapsed.",
+        "Add browser acceptance tests."
+      ],
+      "proposed_next_step": "Revisit after screenshot regression coverage is in place.",
+      "rationale": "Evidence should be inspectable, but the workspace must stay operator-readable and read-only.",
+      "recommended_option": "APPROVE_SMALL_READ_ONLY_EVIDENCE_WORKSPACE_AFTER_SCREENSHOT_COVERAGE",
+      "rejected_options": [
+        "BUILD_COMPLEX_ARTIFACT_BROWSER",
+        "ALLOW_EVIDENCE_EDITING",
+        "MIX_REPAIR_COMMANDS_INTO_EVIDENCE_REVIEW"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "portal smoke output",
+        "artifact/API/browser consistency proof"
+      ],
+      "required_decision": "Decide the V1.1 scope for a read-only evidence workspace after screenshot regression coverage exists.",
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Evidence workspace showing key claim evidence and collapsed raw proof."
+      ],
+      "required_tests": [
+        "Evidence workspace route tests",
+        "read-only UI tests",
+        "screenshot evidence rendering tests",
+        "raw diagnostics collapsed tests"
+      ],
+      "risks": [
+        "Could become a raw artifact dump.",
+        "Could confuse operators if evidence is not translated.",
+        "Could duplicate System Health if boundary is not clear."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve rule changes, candidate generation changes, or safety-gate changes are authorized by this record. Any implementation must preserve disabled safety gates.",
+      "screens_impacted": [
+        "Evidence/Audit Workspace",
+        "Change Control",
+        "System Health"
+      ],
+      "severity": "P2",
+      "source": "Operator Shell V1 roadmap",
+      "status": "DEFERRED",
+      "strategic_category": "ACC-EVIDENCE-AUDIT-WORKSPACE",
+      "strategic_priority_rank": 4,
+      "strategic_value": "A centralized evidence workspace improves trust, auditability, and validation discipline for every future change.",
+      "tags": [
+        "ui",
+        "auditability",
+        "trust_and_audit"
+      ],
+      "title": "Evidence & Audit Workspace",
+      "updated_at": "2026-05-30T23:45:00Z",
+      "validation_evidence_required": "Tests and screenshots must prove evidence is visible, read-only, grouped by claim, and not a raw artifact dump.",
+      "validation_ids": [],
+      "why_long_term": "Aegis will only remain trustworthy if evidence for operator-visible claims is easy to find and review."
+    },
+    {
+      "acceptance_criteria": [
+        "estimated value shown when latest marks exist",
+        "canonical P&L remains separate",
+        "estimate is labeled not certified for target day",
+        "no trade advice/broker/autonomous permissions are enabled",
+        "System Health treats expected non-trading-day estimate limitations correctly"
+      ],
+      "affected_domain": "PORTFOLIO_VISIBILITY",
+      "artifacts_apis_impacted": [
+        "future estimated portfolio valuation read model/API",
+        "market marks",
+        "paper P&L report",
+        "surface/semantic checks if applicable"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [
+        "ACD-20260530-003"
+      ],
+      "decision_question": "Should Aegis show a read-only estimated portfolio value when certified same-day P&L is unavailable?",
+      "decision_required": true,
+      "dependencies": [
+        "Latest available mark source.",
+        "Canonical P&L status.",
+        "Performance and Positions screen wording.",
+        "System Health non-trading-day semantics."
+      ],
+      "description": "Show useful read-only portfolio value using latest available marks without confusing it with canonical certified P&L.",
+      "downstream_records": [],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-003",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_DECIDED_SCOPE_NEEDS_IMPLEMENTATION_PLAN",
+      "non_goals": [
+        "Do not replace canonical P&L.",
+        "Do not use estimates for trade advice.",
+        "Do not enable broker or autonomous action.",
+        "Do not hide missing marks."
+      ],
+      "operator_value": "David can see useful portfolio value context while clearly understanding it is estimated and not certified for the target day.",
+      "owner": "operator_portal",
+      "prerequisite_records": [],
+      "priority": "P1",
+      "problem_statement": "On non-trading days or certification-blocked days, Aegis may have useful latest marks but the UI can look unavailable or imply zero value if canonical same-day P&L is incomplete.",
+      "proposed_implementation_phases": [
+        "Define estimated valuation source and freshness rules.",
+        "Add read-only estimate field separate from certified P&L.",
+        "Update Positions/Performance wording.",
+        "Update System Health expected-limitation handling.",
+        "Add semantic tests preventing estimate/canonical confusion."
+      ],
+      "proposed_next_step": "Design the estimated valuation read model and validation proof without changing canonical P&L.",
+      "rationale": "Estimated visibility is useful, but only if the UI makes certification status and mark freshness impossible to misread.",
+      "recommended_option": "APPROVE_LABELED_READ_ONLY_ESTIMATE_SEPARATE_FROM_CANONICAL_PNL",
+      "rejected_options": [
+        "SHOW_ESTIMATE_AS_CANONICAL",
+        "USE_ESTIMATE_FOR_ACTIONABILITY",
+        "HIDE_DATA_QUALITY_LIMITATIONS"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "performance self-check output",
+        "artifact/API/browser consistency proof"
+      ],
+      "required_decision": "Approve only if estimated value is visibly separated from certified P&L and cannot drive actionability.",
+      "required_safety_proof": [
+        "audit handoff showing estimates do not enable trade advice, broker execution, live trading, or autonomous trading"
+      ],
+      "required_screenshots": [
+        "Positions and Performance screenshots showing estimated value separated from certified P&L."
+      ],
+      "required_tests": [
+        "estimated valuation read-model tests",
+        "Performance UI wording tests",
+        "Positions UI wording tests",
+        "semantic invariant tests for estimate/canonical separation",
+        "safety gate regression tests"
+      ],
+      "risks": [
+        "Operators could confuse estimate with certified P&L.",
+        "Stale marks could appear current.",
+        "Partial estimates could overstate completeness."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve rule changes, candidate generation changes, or safety-gate changes are authorized by this record. Any implementation must preserve disabled safety gates.",
+      "screens_impacted": [
+        "Positions",
+        "Performance",
+        "System Health",
+        "Change Control"
+      ],
+      "severity": "P1",
+      "source": "Operator Shell V1 freeze review",
+      "status": "DECIDED",
+      "strategic_category": "ACC-PORTFOLIO-ESTIMATED-VALUATION",
+      "strategic_priority_rank": 5,
+      "strategic_value": "Improves portfolio visibility without weakening canonical P&L or truth gates.",
+      "tags": [
+        "ui",
+        "truth_data",
+        "operator_facing",
+        "portfolio_visibility"
+      ],
+      "title": "Estimated Portfolio Valuation Layer",
+      "updated_at": "2026-05-30T23:45:00Z",
+      "validation_evidence_required": "Tests and screenshots must prove estimates are labeled, canonical P&L is separate, stale/partial marks are visible, and safety gates remain disabled.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs to remain useful on imperfect data days while preserving a hard boundary between estimates and certified truth."
+    },
+    {
+      "change_type": "BUG",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [],
+      "description": "Rendered operator pages must not disagree about current open positions, position values, or stale marks.",
+      "id": "ACC-20260530-001",
+      "implementation_ids": [],
+      "owner": "operator_portal",
+      "priority": "P1",
+      "severity": "P1",
+      "source": "Operator Shell V1 hostile audit",
+      "status": "TRIAGED",
+      "tags": [
+        "ui",
+        "displayed_truth",
+        "truth_data",
+        "operator_facing"
+      ],
+      "title": "Open-position rendered truth divergence",
+      "updated_at": "2026-05-30T00:00:00Z",
+      "validation_ids": []
+    },
+    {
+      "change_type": "TECHNICAL_DEBT",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [],
+      "description": "Freeze quality depends on visible screenshots; add automated rendered-browser regression coverage for current-day operator truth.",
+      "id": "ACC-20260530-002",
+      "implementation_ids": [],
+      "owner": "operator_portal",
+      "priority": "P1",
+      "severity": "P1",
+      "source": "Operator Shell V1 hostile audit",
+      "status": "CAPTURED",
+      "tags": [
+        "ui",
+        "displayed_truth",
+        "tests"
+      ],
+      "title": "Rendered browser truth regression coverage",
+      "updated_at": "2026-05-30T00:00:00Z",
+      "validation_ids": []
+    },
+    {
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [],
+      "description": "Unify no action, optional review, required review, waiting, and repair-needed semantics across Today, Research, and System Health.",
+      "id": "ACC-20260530-004",
+      "implementation_ids": [],
+      "owner": "operator_portal",
+      "priority": "P1",
+      "severity": "P1",
+      "source": "Operator Shell V1 hostile audit",
+      "status": "TRIAGED",
+      "tags": [
+        "ui",
+        "operator_language"
+      ],
+      "title": "Operator attention model",
+      "updated_at": "2026-05-30T00:00:00Z",
+      "validation_ids": []
+    },
+    {
+      "change_type": "OPERATOR_FEEDBACK",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [],
+      "description": "Continue reducing implementation terminology in System Health while preserving recovery evidence.",
+      "id": "ACC-20260530-006",
+      "implementation_ids": [],
+      "owner": "operator_portal",
+      "priority": "P2",
+      "severity": "P2",
+      "source": "Operator Shell V1 visual review",
+      "status": "TRIAGED",
+      "tags": [
+        "ui",
+        "operator_language"
+      ],
+      "title": "System Health technical-density reduction",
+      "updated_at": "2026-05-30T00:00:00Z",
+      "validation_ids": []
+    },
+    {
+      "change_type": "AUDIT_FINDING",
+      "created_at": "2026-05-30T00:00:00Z",
+      "decision_ids": [],
+      "description": "Portal smoke reports projection mismatch diagnostics even when visible shell fails closed; investigate whether the mismatch is expected or defective.",
+      "id": "ACC-20260530-007",
+      "implementation_ids": [],
+      "owner": "operator_portal",
+      "priority": "P1",
+      "severity": "P1",
+      "source": "TARGET_DAY=2026-05-30 portal smoke debug",
+      "status": "CAPTURED",
+      "tags": [
+        "truth_data",
+        "operator_facing",
+        "artifact_api_browser_consistency"
+      ],
+      "title": "Projection status investigation",
+      "updated_at": "2026-05-30T00:00:00Z",
+      "validation_ids": []
+    },
+    {
+      "acceptance_criteria": [
+        "Research validation enforcement is applied after all candidate row transformations.",
+        "Unsupported research-derived rows cannot be CANDIDATE_CREATED.",
+        "Unsupported research-derived rows cannot have manual_capture_eligible or execution_eligible true.",
+        "Self-check fails on portfolio-gate or lane-enrichment resurrection."
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "aegis_research_validation_result_v1",
+        "aegis_research_promotion_gate_v1"
+      ],
+      "blocker_ids": [],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-31T01:12:00Z",
+      "decision_ids": [
+        "ACD-20260531-006"
+      ],
+      "decision_question": "Should this child be completed before validating the parent Research Validation Engine?",
+      "decision_required": false,
+      "dependencies": [
+        "ACC-20260530-008 parent Research Validation Engine record."
+      ],
+      "dependency_ids": [],
+      "description": "Ensure research-derived candidates cannot regain candidate-review or action eligibility after validation suppression through portfolio gate, lane enrichment, or downstream transforms.",
+      "downstream_records": [
+        "ACC-20260530-008B",
+        "ACC-20260530-008D"
+      ],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-008A",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_TRIAGED_REQUIRES_FIX",
+      "non_goals": [
+        "Do not change trading logic.",
+        "Do not enable broker, live, or autonomous execution.",
+        "Do not change sleeve thresholds or candidate generation strategy beyond enforcing validation gates."
+      ],
+      "operator_value": "David can trust that unsupported research cannot appear as candidate-review eligible.",
+      "owner": "research_workflow",
+      "parent_id": "ACC-20260530-008",
+      "prerequisite_records": [],
+      "previous_status": "TRIAGED",
+      "priority": "P0",
+      "problem_statement": "Hostile audit found that research validation suppression can be overwritten later in candidate manifest assembly.",
+      "proposed_next_step": "Implement final non-overridable research validation gate after portfolio and lane enrichment.",
+      "rationale": "Required child work identified by hostile audit before the parent can be validated.",
+      "recommended_option": "COMPLETE_BEFORE_PARENT_VALIDATION",
+      "rejected_options": [
+        "VALIDATE_PARENT_WITH_OPEN_CHILDREN",
+        "IGNORE_HOSTILE_AUDIT_FINDING"
+      ],
+      "relationship_role": "CHILD",
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check"
+      ],
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Change Control parent/child rollup showing this child status when UI-visible."
+      ],
+      "required_tests": [
+        "candidate boundary test for portfolio gate ALLOW after research suppression",
+        "candidate boundary test for certified lane after research suppression",
+        "self-check test for execution/manual eligibility on rejected research rows"
+      ],
+      "risks": [
+        "Leaving this open allows unsupported hypotheses to leak into candidate review."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve changes, or safety-gate changes are authorized.",
+      "screens_impacted": [
+        "Research",
+        "Change Control"
+      ],
+      "severity": "P0",
+      "source": "Hostile audit of reworked Research Validation Engine V1",
+      "status": "DECIDED",
+      "strategic_category": "ACC-RESEARCH-VALIDATION",
+      "strategic_value": "This is the hard promotion boundary required before automated hypothesis generation.",
+      "tags": [
+        "research_workflow",
+        "validation",
+        "operator_facing"
+      ],
+      "title": "Research validation gate final authority",
+      "updated_at": "2026-05-31T18:06:08Z",
+      "validation_evidence_required": "Tests, audit output, and relevant browser/API/artifact proof must demonstrate the child risk is closed.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs parent improvements split into auditable work packages so implementation cannot be mistaken for validation."
+    },
+    {
+      "acceptance_criteria": [
+        "Event-window protocol requires bound event sample artifacts.",
+        "Post-signal protocol requires bound signal survival sample artifacts.",
+        "Wrong-hypothesis artifacts block SUPPORT.",
+        "Missing benchmark/source artifacts block SUPPORT."
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "aegis_research_validation_result_v1",
+        "aegis_research_promotion_gate_v1"
+      ],
+      "blocker_ids": [
+        "ACC-20260530-008A"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-31T01:12:00Z",
+      "decision_ids": [],
+      "decision_question": "Should this child be completed before validating the parent Research Validation Engine?",
+      "decision_required": false,
+      "dependencies": [
+        "ACC-20260530-008 parent Research Validation Engine record."
+      ],
+      "dependency_ids": [
+        "ACC-20260530-008A"
+      ],
+      "description": "Require hypothesis-specific governed sample/source binding for event-window and post-signal protocols before they can ever support a hypothesis.",
+      "downstream_records": [
+        "ACC-20260530-008D"
+      ],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-008B",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_TRIAGED_REQUIRES_PROTOCOL_BINDING",
+      "non_goals": [
+        "Do not change trading logic.",
+        "Do not enable broker, live, or autonomous execution.",
+        "Do not change sleeve thresholds or candidate generation strategy beyond enforcing validation gates."
+      ],
+      "operator_value": "Research status will explain exactly which evidence belongs to each hypothesis.",
+      "owner": "research_workflow",
+      "parent_id": "ACC-20260530-008",
+      "prerequisite_records": [
+        "ACC-20260530-008A"
+      ],
+      "previous_status": "CAPTURED",
+      "priority": "P1",
+      "problem_statement": "Current non-mean-reversion protocols safely fail closed, but artifact binding is not yet hypothesis-specific.",
+      "proposed_next_step": "Define and enforce protocol-specific source artifact ownership for event-window and post-signal validation.",
+      "rationale": "Required child work identified by hostile audit before the parent can be validated.",
+      "recommended_option": "COMPLETE_BEFORE_PARENT_VALIDATION",
+      "rejected_options": [
+        "VALIDATE_PARENT_WITH_OPEN_CHILDREN",
+        "IGNORE_HOSTILE_AUDIT_FINDING"
+      ],
+      "relationship_role": "CHILD",
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check"
+      ],
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Change Control parent/child rollup showing this child status when UI-visible."
+      ],
+      "required_tests": [
+        "wrong-hypothesis event-window artifact test",
+        "wrong-hypothesis post-signal artifact test",
+        "missing benchmark source test"
+      ],
+      "risks": [
+        "Without this, future protocols may appear rigorous while relying on weak generic source binding."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve changes, or safety-gate changes are authorized.",
+      "screens_impacted": [
+        "Research",
+        "Change Control"
+      ],
+      "severity": "P1",
+      "source": "Hostile audit of reworked Research Validation Engine V1",
+      "status": "TRIAGED",
+      "strategic_category": "ACC-RESEARCH-VALIDATION",
+      "strategic_value": "Prevents cross-hypothesis evidence contamination as validation protocols expand.",
+      "tags": [
+        "research_workflow",
+        "validation",
+        "operator_facing"
+      ],
+      "title": "Protocol artifact binding coverage",
+      "updated_at": "2026-05-31T01:12:00Z",
+      "validation_evidence_required": "Tests, audit output, and relevant browser/API/artifact proof must demonstrate the child risk is closed.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs parent improvements split into auditable work packages so implementation cannot be mistaken for validation."
+    },
+    {
+      "acceptance_criteria": [
+        "Validation run records immutable code/protocol/hypothesis/source versions.",
+        "Bias controls include source-backed evidence, not only assertions.",
+        "Sample-size rationale is explicit and defensible per protocol.",
+        "Replay of same inputs yields same status and hashes."
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "aegis_research_validation_result_v1",
+        "aegis_research_promotion_gate_v1"
+      ],
+      "blocker_ids": [
+        "ACC-20260530-008B"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-31T01:12:00Z",
+      "decision_ids": [],
+      "decision_question": "Should this child be completed before validating the parent Research Validation Engine?",
+      "decision_required": false,
+      "dependencies": [
+        "ACC-20260530-008 parent Research Validation Engine record."
+      ],
+      "dependency_ids": [
+        "ACC-20260530-008B"
+      ],
+      "description": "Strengthen immutable version references and bias-control evidence so validation can be reproduced and audited beyond code/hash presence.",
+      "downstream_records": [
+        "ACC-20260530-008D"
+      ],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-008C",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_TRIAGED_REQUIRES_AUDIT_DESIGN",
+      "non_goals": [
+        "Do not change trading logic.",
+        "Do not enable broker, live, or autonomous execution.",
+        "Do not change sleeve thresholds or candidate generation strategy beyond enforcing validation gates."
+      ],
+      "operator_value": "David can see why a validation result is reproducible and not biased by stale or cherry-picked evidence.",
+      "owner": "research_workflow",
+      "parent_id": "ACC-20260530-008",
+      "prerequisite_records": [
+        "ACC-20260530-008B"
+      ],
+      "previous_status": "CAPTURED",
+      "priority": "P1",
+      "problem_statement": "Rework added hashes and bias checks, but hostile audit found remaining weakness in survivorship and statistical defensibility.",
+      "proposed_next_step": "Add replay and source-backed bias evidence checks before validation closure.",
+      "rationale": "Required child work identified by hostile audit before the parent can be validated.",
+      "recommended_option": "COMPLETE_BEFORE_PARENT_VALIDATION",
+      "rejected_options": [
+        "VALIDATE_PARENT_WITH_OPEN_CHILDREN",
+        "IGNORE_HOSTILE_AUDIT_FINDING"
+      ],
+      "relationship_role": "CHILD",
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check"
+      ],
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Change Control parent/child rollup showing this child status when UI-visible."
+      ],
+      "required_tests": [
+        "replay determinism test",
+        "survivorship-bias source evidence test",
+        "sample-size policy regression test"
+      ],
+      "risks": [
+        "Weak bias controls could validate noisy or selection-biased hypotheses."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve changes, or safety-gate changes are authorized.",
+      "screens_impacted": [
+        "Research",
+        "Change Control"
+      ],
+      "severity": "P1",
+      "source": "Hostile audit of reworked Research Validation Engine V1",
+      "status": "TRIAGED",
+      "strategic_category": "ACC-RESEARCH-VALIDATION",
+      "strategic_value": "Makes validation auditable enough for long-term learning and later hypothesis generation.",
+      "tags": [
+        "research_workflow",
+        "validation",
+        "operator_facing"
+      ],
+      "title": "Research validation reproducibility and bias proof hardening",
+      "updated_at": "2026-05-31T01:12:00Z",
+      "validation_evidence_required": "Tests, audit output, and relevant browser/API/artifact proof must demonstrate the child risk is closed.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs parent improvements split into auditable work packages so implementation cannot be mistaken for validation."
+    },
+    {
+      "acceptance_criteria": [
+        "Research UI shows validation status and promotion eligibility accurately.",
+        "Change Control shows parent-child rollup and blockers.",
+        "Hostile audit score meets target threshold.",
+        "Parent remains unvalidated until required children are complete."
+      ],
+      "affected_domain": "RESEARCH_WORKFLOW",
+      "artifacts_apis_impacted": [
+        "aegis_research_validation_result_v1",
+        "aegis_research_promotion_gate_v1"
+      ],
+      "blocker_ids": [
+        "ACC-20260530-008A",
+        "ACC-20260530-008B",
+        "ACC-20260530-008C"
+      ],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "created_at": "2026-05-31T01:12:00Z",
+      "decision_ids": [],
+      "decision_question": "Should this child be completed before validating the parent Research Validation Engine?",
+      "decision_required": false,
+      "dependencies": [
+        "ACC-20260530-008 parent Research Validation Engine record."
+      ],
+      "dependency_ids": [
+        "ACC-20260530-008A",
+        "ACC-20260530-008B",
+        "ACC-20260530-008C"
+      ],
+      "description": "Ensure Research and Change Control visibly explain validation status, child blockers, promotion eligibility, and closure evidence.",
+      "downstream_records": [],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260530-008D",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_TRIAGED_REQUIRES_VALIDATION_EVIDENCE",
+      "non_goals": [
+        "Do not change trading logic.",
+        "Do not enable broker, live, or autonomous execution.",
+        "Do not change sleeve thresholds or candidate generation strategy beyond enforcing validation gates."
+      ],
+      "operator_value": "David can see why the parent is not validated and what evidence remains.",
+      "owner": "research_workflow",
+      "parent_id": "ACC-20260530-008",
+      "prerequisite_records": [
+        "ACC-20260530-008A",
+        "ACC-20260530-008B",
+        "ACC-20260530-008C"
+      ],
+      "previous_status": "CAPTURED",
+      "priority": "P1",
+      "problem_statement": "Parent Research Validation Engine cannot be validated until required child work is complete and browser/API/artifact proof exists.",
+      "proposed_next_step": "Collect browser/API/artifact proof after child fixes are implemented.",
+      "rationale": "Required child work identified by hostile audit before the parent can be validated.",
+      "recommended_option": "COMPLETE_BEFORE_PARENT_VALIDATION",
+      "rejected_options": [
+        "VALIDATE_PARENT_WITH_OPEN_CHILDREN",
+        "IGNORE_HOSTILE_AUDIT_FINDING"
+      ],
+      "relationship_role": "CHILD",
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check"
+      ],
+      "required_safety_proof": [
+        "audit handoff showing all execution/trading gates disabled"
+      ],
+      "required_screenshots": [
+        "Change Control parent/child rollup showing this child status when UI-visible."
+      ],
+      "required_tests": [
+        "Research UI validation display test",
+        "Change Control dependency graph UI test",
+        "hostile audit checklist rerun"
+      ],
+      "risks": [
+        "Without visible evidence, implementation can be mistaken for validation."
+      ],
+      "safety_impact": "No trade advice, broker execution, live trading, autonomous execution, sleeve changes, or safety-gate changes are authorized.",
+      "screens_impacted": [
+        "Research",
+        "Change Control"
+      ],
+      "severity": "P1",
+      "source": "Hostile audit of reworked Research Validation Engine V1",
+      "status": "TRIAGED",
+      "strategic_category": "ACC-RESEARCH-VALIDATION",
+      "strategic_value": "Prevents claimed completion without visible browser/API/artifact validation proof.",
+      "tags": [
+        "research_workflow",
+        "validation",
+        "operator_facing"
+      ],
+      "title": "Research validation UI and hostile-audit closure evidence",
+      "updated_at": "2026-05-31T01:12:00Z",
+      "validation_evidence_required": "Tests, audit output, and relevant browser/API/artifact proof must demonstrate the child risk is closed.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs parent improvements split into auditable work packages so implementation cannot be mistaken for validation."
+    },
+    {
+      "affected_domain": "CHANGE_CONTROL",
+      "artifacts_apis_impacted": [
+        "aegis_change_control_evidence_snapshot_v1",
+        "aegis_change_control_advisor_score_v1",
+        "aegis_change_control_ai_review_v1",
+        "/api/aegis/change-control/intelligence/latest"
+      ],
+      "blocker_ids": [],
+      "change_type": "PRODUCT_IMPROVEMENT",
+      "child_ids": [],
+      "created_at": "2026-05-31T00:00:00Z",
+      "decision_ids": [
+        "ACD-20260531-007"
+      ],
+      "decision_question": "Should Aegis use deterministic Change Control scoring with advisory AI explanations to guide David toward the next governed action?",
+      "decision_required": false,
+      "dependencies": [
+        "aegis_change_control_register_v1",
+        "aegis_change_control_report_v1",
+        "runtime truth and verified graph artifacts when available"
+      ],
+      "dependency_ids": [],
+      "description": "Add an advisory intelligence layer that freezes Change Control evidence, ranks next actions deterministically, and provides AI explanations without mutating governed records.",
+      "downstream_records": [],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260531-001",
+      "implementation_ids": [
+        "ACI-20260531-003"
+      ],
+      "implementation_phase": "PHASE_1_MINIMAL_V1_VALIDATED_NOT_CLOSED",
+      "non_goals": [
+        "No mutation controls",
+        "No validation or closure authority",
+        "No implementation authority",
+        "No trading or execution authority"
+      ],
+      "operator_value": "David can see the next best Change Control action without reconstructing dependencies and blockers manually.",
+      "owner": "operator_portal",
+      "parent_id": null,
+      "prerequisite_records": [],
+      "previous_status": "IMPLEMENTED",
+      "priority": "P1",
+      "proposed_next_step": "Keep read-only intelligence in operator workflow; future changes must still use governed Change Control records.",
+      "rationale": "David needs help deciding what to do next, but governance requires deterministic evidence-backed ranking and human decisions.",
+      "recommended_option": "APPROVE_ADVISORY_ONLY_INTELLIGENCE_LAYER",
+      "rejected_options": [
+        "LET_AI_MUTATE_CHANGE_CONTROL",
+        "USE_UNSCORED_FREEFORM_AI_RECOMMENDATIONS",
+        "BUILD_KANBAN_OR_JIRA_CLONE"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit"
+      ],
+      "required_child_ids": [],
+      "required_safety_proof": [
+        "Safety gates remain disabled in audit output"
+      ],
+      "required_screenshots": [
+        "Change Control Lab recommendation screenshot"
+      ],
+      "required_tests": [
+        "Change Control Intelligence unit tests",
+        "Change Control UI tests",
+        "portal smoke",
+        "audit"
+      ],
+      "risks": [
+        "AI explanation could be mistaken for authority if UI wording is unclear.",
+        "Recommendations can become stale when register hash changes."
+      ],
+      "safety_impact": "No trading, broker, live, autonomous, sleeve, candidate-generation, or safety-gate behavior is changed. AI remains advisory only.",
+      "screens_impacted": [
+        "Change Control",
+        "Change Control Lab"
+      ],
+      "severity": "P1",
+      "source": "Operator request: Change Control Intelligence Layer V1",
+      "status": "VALIDATED",
+      "strategic_value": "Creates governed product-memory intelligence while preserving evidence-driven closure and human decision authority.",
+      "tags": [
+        "ui",
+        "operator_facing",
+        "change_control",
+        "ai_advisory"
+      ],
+      "title": "Change Control Intelligence Layer V1",
+      "updated_at": "2026-05-31T18:30:00Z",
+      "validation_evidence_required": "Artifact, UI, test, audit, and safety proof required before closure.",
+      "validation_ids": [
+        "ACV-20260531-003"
+      ],
+      "why_long_term": "Aegis needs a durable way to prioritize improvement work as the product grows without letting AI become source of truth."
+    },
+    {
+      "acceptance_criteria": [
+        "Change Control UI has a clear Your Actions section.",
+        "Every open record has a current owner: DAVID, CODEX, VALIDATION, or SYSTEM.",
+        "David-only actions are surfaced separately from Codex, system, and validation work.",
+        "ACC-20260530-008A clearly shows David action required: approve implementation when awaiting approval.",
+        "Blocked records clearly show who or what they are blocked by.",
+        "Intelligence Layer uses the ownership model when recommending next action.",
+        "No trading, broker, autonomous, or safety behavior is changed."
+      ],
+      "affected_domain": "OPERATOR_EXPERIENCE / CHANGE_CONTROL",
+      "artifacts_apis_impacted": [
+        "aegis_change_control_register_v1",
+        "aegis_change_control_report_v1",
+        "Change Control UI",
+        "Change Control Intelligence Layer"
+      ],
+      "blocker_ids": [],
+      "change_type": "ENHANCEMENT",
+      "child_ids": [],
+      "created_at": "2026-05-31T18:36:48Z",
+      "decision_ids": [],
+      "decision_question": "Should Aegis add an explicit ownership model so Change Control can separate David, Codex, validation, and system recovery actions?",
+      "decision_required": true,
+      "decision_required_reason": "Future enhancement captured; implementation scope and ownership semantics need approval before work begins.",
+      "dependencies": [
+        "Change Control UI",
+        "Change Control Intelligence Layer V1",
+        "Change Control register and report schemas"
+      ],
+      "dependency_ids": [
+        "ACC-20260531-001"
+      ],
+      "description": "Add an operator action ownership model that makes it obvious whether an open Change Control item is waiting on David, Codex, validation, or system recovery.",
+      "downstream_records": [],
+      "estimated_complexity": "MEDIUM",
+      "id": "ACC-20260531-002",
+      "implementation_ids": [],
+      "implementation_phase": "PHASE_0_CAPTURED_PENDING_DECISION",
+      "non_goals": [
+        "Do not implement ownership routing in this record capture step.",
+        "Do not change trading logic.",
+        "Do not enable broker execution.",
+        "Do not enable live trading.",
+        "Do not enable autonomous execution.",
+        "Do not change safety gates."
+      ],
+      "operator_value": "David can immediately distinguish his required decisions from Codex implementation work, validation work, and system recovery tasks.",
+      "owner": "operator_portal",
+      "parent_id": null,
+      "prerequisite_records": [
+        "ACC-20260531-001"
+      ],
+      "priority": "P1",
+      "problem_statement": "Aegis can recommend next actions, but the UI does not clearly separate David action required, Codex action required, validation required, and system blocked or recovery required.",
+      "proposed_implementation_phases": [
+        "Define current_owner values DAVID, CODEX, VALIDATION, and SYSTEM for open Change Control records.",
+        "Add Your Actions grouping to Change Control UI.",
+        "Separate David-only actions from Codex, validation, and system recovery work.",
+        "Expose blocked-by owner semantics for blocked records.",
+        "Update Change Control Intelligence recommendations to use the ownership model.",
+        "Validate that no trading, broker, autonomous, or safety behavior changes."
+      ],
+      "proposed_next_step": "Approve, defer, or reject a scoped ownership-model design before implementation.",
+      "rationale": "Change Control recommendations are more useful when the next action is tied to the responsible owner instead of a generic action list.",
+      "recommended_option": "APPROVE_SCOPED_OPERATOR_ACTION_OWNERSHIP_MODEL",
+      "rejected_options": [
+        "KEEP_GENERIC_NEXT_ACTIONS_ONLY",
+        "MIX_DAVID_AND_SYSTEM_ACTIONS_IN_ONE_QUEUE",
+        "LET_AI_INFER_OWNER_WITHOUT_REGISTERED_SEMANTICS"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "npm run aegis:change-control-validate",
+        "npm run aegis:change-control-report"
+      ],
+      "required_decision": "Approve, defer, or reject implementing an explicit owner model for Change Control actions.",
+      "required_safety_proof": [
+        "Audit handoff showing trading, broker, live, autonomous, and safety-gate behavior unchanged."
+      ],
+      "required_screenshots": [
+        "Change Control UI showing a Your Actions section and owner grouping when implemented."
+      ],
+      "required_tests": [
+        "Change Control owner taxonomy tests",
+        "Change Control UI Your Actions tests",
+        "Change Control Intelligence recommendation owner tests",
+        "blocked-by owner semantics tests",
+        "portal smoke",
+        "audit"
+      ],
+      "risks": [
+        "Owner labels could be mistaken for authorization if not clearly read-only and governed.",
+        "Incorrect owner assignment could hide David decisions or system recovery work.",
+        "Intelligence recommendations could become stale if ownership is not evidence-backed."
+      ],
+      "safety_impact": "No trading, broker execution, live trading, autonomous execution, sleeve logic, candidate generation, canonical artifacts, or safety-gate behavior is changed or authorized by this record.",
+      "screens_impacted": [
+        "Change Control",
+        "Change Control Lab",
+        "Today",
+        "System Health"
+      ],
+      "severity": "P1",
+      "source": "Operator request: future enhancement for action ownership semantics",
+      "status": "CAPTURED",
+      "strategic_category": "ACC-OPERATOR-ACTION-OWNERSHIP",
+      "strategic_value": "Reduces operator ambiguity by assigning every open governance action to the party or system state responsible for moving it forward.",
+      "tags": [
+        "ui",
+        "operator_facing",
+        "change_control",
+        "operator_actions",
+        "ownership_model"
+      ],
+      "title": "Operator Action Ownership Model",
+      "updated_at": "2026-05-31T18:36:48Z",
+      "validation_evidence_required": "Tests, UI screenshots, report output, and audit proof must show ownership semantics without changing trading or safety behavior before closure.",
+      "validation_ids": [],
+      "why_long_term": "Aegis needs durable action ownership so governance recommendations remain clear as the number of open records grows."
+    },
+    {
+      "acceptance_criteria": [
+        "Record is clearly marked FUTURE_ENHANCEMENT and not current implementation work.",
+        "Portfolio Capital Allocation is explicitly separated from Research Capital Allocation.",
+        "Future architecture follows Hypothesis to Validation to Paper Track Record to Capital Eligibility to Portfolio Allocation Recommendation to Human Approval to Manual Execution.",
+        "Design includes capital eligibility gates, sleeve and hypothesis validation thresholds, maximum allocation limits, drawdown limits, confidence-adjusted sizing, diversification constraints, correlation checks, live pilot limits, kill switch, manual approval, Oak Harvest compatibility, and explicit no-autonomous-IB-execution policy.",
+        "Research allocation recommendations cannot become capital allocation recommendations.",
+        "No IB connection, live trading automation, autonomous execution, broker execution, or safety-gate behavior is changed.",
+        "Aegis does not imply readiness for real brokerage capital until closed outcomes, validation samples, statistical sufficiency, and paper-trading proof exist."
+      ],
+      "affected_domain": "PORTFOLIO_GOVERNANCE / CHANGE_CONTROL",
+      "artifacts_apis_impacted": [
+        "future portfolio_capital_allocation_engine_v1",
+        "future capital_eligibility_gate_v1",
+        "future portfolio_allocation_recommendation_v1",
+        "aegis_change_control_register_v1",
+        "docs/aegis_future_enhancements_v1.md"
+      ],
+      "blocker_ids": [],
+      "change_type": "ENHANCEMENT",
+      "child_ids": [],
+      "created_at": "2026-05-31T21:35:55Z",
+      "decision_ids": [],
+      "decision_question": "Should Aegis eventually design a governed Portfolio Capital Allocation Engine after sufficient validation, outcomes, and paper-trading evidence exist?",
+      "decision_required": true,
+      "decision_required_reason": "Future enhancement captured; real-capital allocation semantics require explicit approval and evidence prerequisites before any design or implementation work.",
+      "dependencies": [
+        "Validated sleeve and hypothesis evidence.",
+        "Closed outcome history with statistical sufficiency.",
+        "Paper track record and drawdown evidence.",
+        "Research Capital Allocation remains research-attention-only.",
+        "Oak Harvest compatibility review.",
+        "Manual approval and manual execution operating model."
+      ],
+      "dependency_ids": [
+        "ACC-20260530-008",
+        "ACC-20260530-010"
+      ],
+      "description": "Future-state Portfolio Capital Allocation Engine to determine when a validated sleeve or hypothesis should receive more, less, or no real portfolio capital, without confusing research attention allocation with real brokerage capital allocation.",
+      "downstream_records": [],
+      "estimated_complexity": "HIGH",
+      "id": "ACC-20260531-003",
+      "implementation_ids": [],
+      "implementation_phase": "FUTURE_ENHANCEMENT_CAPTURED_NOT_IMPLEMENTATION_WORK",
+      "non_goals": [
+        "Do not implement this now.",
+        "Do not connect to IB.",
+        "Do not automate live trading.",
+        "Do not imply Aegis is ready for real capital.",
+        "Do not allow research allocation recommendations to become capital allocation recommendations.",
+        "Do not change trading logic, broker execution, live trading, autonomous execution, sleeve logic, candidate generation, canonical artifacts, or safety gates."
+      ],
+      "operator_value": "David has a governed placeholder for future real-capital allocation design while preserving the boundary between research attention and brokerage capital.",
+      "owner": "portfolio_governance",
+      "parent_id": null,
+      "prerequisite_records": [
+        "ACC-20260530-008",
+        "ACC-20260530-010"
+      ],
+      "priority": "P1",
+      "problem_statement": "Aegis has or is implementing research-capital allocation logic for research attention only; without a separate future record, that could be confused with real brokerage capital allocation readiness.",
+      "proposed_implementation_phases": [
+        "Do not start implementation until prerequisites are met and approved.",
+        "Define capital eligibility gate using validation, closed outcomes, statistical sufficiency, and paper track record evidence.",
+        "Define safety limits: maximum allocation, drawdown, diversification, correlation, live pilot, kill switch, and manual approval controls.",
+        "Define read-only portfolio allocation recommendation artifact that cannot execute trades.",
+        "Validate Oak Harvest compatibility and manual execution workflow.",
+        "Prove no autonomous IB execution and no broker automation before any pilot."
+      ],
+      "proposed_next_step": "Keep as future enhancement; revisit only after validated sleeves or hypotheses have sufficient closed outcomes, samples, statistical sufficiency, and paper-trading proof.",
+      "rationale": "Portfolio capital allocation is materially different from research attention allocation and requires a stricter evidence, governance, and safety boundary.",
+      "recommended_option": "DEFER_UNTIL_VALIDATED_OUTCOMES_AND_PAPER_TRACK_RECORD_EXIST",
+      "rejected_options": [
+        "TREAT_RESEARCH_ALLOCATION_AS_CAPITAL_ALLOCATION",
+        "CONNECT_TO_IB_OR_AUTOMATE_EXECUTION",
+        "ALLOCATE_REAL_CAPITAL_WITHOUT_STATISTICAL_SUFFICIENCY",
+        "SKIP_HUMAN_APPROVAL_OR_MANUAL_EXECUTION"
+      ],
+      "required_audit_proof": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit",
+        "npm run aegis:change-control-validate",
+        "npm run aegis:change-control-report"
+      ],
+      "required_decision": "Approve, defer, or reject future design work only after evidence prerequisites are met; this record does not approve implementation.",
+      "required_safety_proof": [
+        "Audit handoff showing broker, live, autonomous, and trade-advice gates unchanged and disabled where policy requires.",
+        "Proof that future recommendations are read-only and require human approval plus manual execution.",
+        "Proof that research allocation outputs cannot feed portfolio capital allocation outputs."
+      ],
+      "required_screenshots": [
+        "Future Change Control or roadmap view showing this item as FUTURE_ENHANCEMENT when UI-visible."
+      ],
+      "required_tests": [
+        "future capital eligibility gate tests",
+        "future no research-to-capital promotion tests",
+        "future max allocation and drawdown limit tests",
+        "future diversification and correlation tests",
+        "future no broker/autonomous execution tests",
+        "future manual approval requirement tests"
+      ],
+      "risks": [
+        "Research attention recommendations could be misread as real-money allocation recommendations.",
+        "Premature capital allocation could overfit limited samples or incomplete outcomes.",
+        "Without hard execution boundaries, a recommendation layer could be mistaken for live trading readiness.",
+        "Oak Harvest or broader portfolio constraints could be bypassed if compatibility is not explicit."
+      ],
+      "safety_impact": "No trading, broker execution, live trading, autonomous execution, sleeve logic, candidate generation, canonical artifacts, or safety-gate behavior is changed or authorized by this future enhancement record.",
+      "screens_impacted": [
+        "Change Control",
+        "Future Enhancements Roadmap"
+      ],
+      "severity": "P1",
+      "source": "Operator request: future enhancement for separate Portfolio Capital Allocation Engine",
+      "status": "CAPTURED",
+      "strategic_category": "ACC-PORTFOLIO-CAPITAL-ALLOCATION",
+      "strategic_priority_rank": 6,
+      "strategic_value": "Preserves a governed path toward future real-capital recommendations while preventing premature or automated brokerage allocation behavior.",
+      "tags": [
+        "future_enhancement",
+        "change_control",
+        "portfolio_governance",
+        "capital_allocation",
+        "operator_facing"
+      ],
+      "title": "Portfolio Capital Allocation Engine",
+      "updated_at": "2026-05-31T21:35:55Z",
+      "validation_evidence_required": "Before closure, evidence must prove the engine is future-scoped or, if later implemented under a separate approved record, is read-only, manually approved, manually executed, statistically supported, Oak Harvest compatible, and unable to execute through IB/autonomous pathways.",
+      "validation_ids": [],
+      "why_long_term": "Aegis should eventually distinguish validated research quality from real capital sizing, but only after durable evidence and governance controls exist."
+    }
+  ],
+  "register_id": "aegis-change-control-register-v1",
+  "schema_id": "aegis_change_control_register_v1",
+  "schema_version": "v1",
+  "validation_records": [
+    {
+      "api_evidence": [
+        "/api/research-lab/validation-engine/latest?day=2026-05-30"
+      ],
+      "artifact_evidence": [
+        "truth/reports/aegis_research_hypothesis_registry_v1/2026-05-30/research_hypothesis_registry.v1.json",
+        "truth/reports/aegis_research_validation_protocol_v1/2026-05-30/research_validation_protocol.v1.json",
+        "truth/reports/aegis_research_validation_run_v1/2026-05-30/research_validation_run.v1.json",
+        "truth/reports/aegis_research_validation_result_v1/2026-05-30/research_validation_result.v1.json",
+        "truth/reports/aegis_research_promotion_gate_v1/2026-05-30/research_promotion_gate.v1.json",
+        "truth/reports/aegis_research_outcome_feedback_v1/2026-05-30/research_outcome_feedback.v1.json"
+      ],
+      "browser_evidence": [],
+      "change_id": "ACC-20260530-008",
+      "commands_run": [
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check",
+        "pytest constellation_2/common/tests/test_aegis_research_validation_engine_v1.py -q"
+      ],
+      "id": "ACV-20260531-001",
+      "remaining_gaps": [
+        "Not closed. Broader portal smoke and audit still required in final validation."
+      ],
+      "safety_gate_evidence": [
+        "trade_advice_allowed=false",
+        "broker_execution_allowed=false",
+        "broker_submit_transmit_allowed=false",
+        "live_trading_allowed=false",
+        "autonomous_live_trading_allowed=false"
+      ],
+      "screenshot_evidence": [],
+      "test_results": [
+        "7 passed in constellation_2/common/tests/test_aegis_research_validation_engine_v1.py"
+      ],
+      "validated_at": "2026-05-31T00:19:19Z",
+      "validated_by": "Codex",
+      "validation_summary": "Research Validation Engine V1 generated all required artifacts for 2026-05-30 and self-check verified versioning, promotion gating, source references, outcome immutability, and disabled safety gates. Full portal/audit validation remains part of final task validation before closure."
+    },
+    {
+      "api_evidence": [
+        "/api/research-lab/validation-engine/latest?day=2026-05-30"
+      ],
+      "artifact_evidence": [
+        "truth/reports/aegis_research_validation_protocol_v1/2026-05-30/research_validation_protocol.v1.json",
+        "truth/reports/aegis_research_validation_run_v1/2026-05-30/research_validation_run.v1.json",
+        "truth/reports/aegis_research_validation_result_v1/2026-05-30/research_validation_result.v1.json",
+        "truth/reports/aegis_research_promotion_gate_v1/2026-05-30/research_promotion_gate.v1.json"
+      ],
+      "browser_evidence": [],
+      "change_id": "ACC-20260530-008",
+      "commands_run": [
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine",
+        "TARGET_DAY=2026-05-30 npm run aegis:research-validation-engine-self-check",
+        "pytest constellation_2/common/tests/test_aegis_research_validation_engine_v1.py constellation_2/common/tests/test_aegis_research_validation_candidate_boundary_v1.py constellation_2/phaseL/ui/tests/test_aegis_research_review_ui_v1.py -q",
+        "npm run aegis:change-control-validate",
+        "TARGET_DAY=2026-05-30 npm run aegis:portal-smoke",
+        "TARGET_DAY=2026-05-30 npm run aegis:audit"
+      ],
+      "id": "ACV-20260531-002",
+      "remaining_gaps": [
+        "Do not move to VALIDATED automatically. Hostile audit score and David approval remain required before status transition."
+      ],
+      "safety_gate_evidence": [
+        "trade_advice_allowed=false",
+        "broker_execution_allowed=false",
+        "broker_submit_transmit_allowed=false",
+        "live_trading_allowed=false",
+        "autonomous_live_trading_allowed=false"
+      ],
+      "screenshot_evidence": [],
+      "test_results": [
+        "19 passed across research validation engine, research-derived candidate boundary, and Research UI tests",
+        "portal smoke: 21 passed",
+        "audit: verified graph READY; runtime truth remains PARTIAL_CONTEXT/BLOCKED by policy"
+      ],
+      "validated_at": "2026-05-31T00:51:54Z",
+      "validated_by": "Codex",
+      "validation_summary": "Rework validation evidence collected. Research Validation Engine self-check passes hardened checks, candidate-boundary tests prove unsupported research-derived candidates are suppressed, Research UI tests pass, portal smoke passes, and audit completes. This is evidence for rework implementation, not automatic closure or VALIDATED status."
+    },
+    {
+      "api_evidence": [
+        "/api/aegis/change-control/intelligence/latest?day=2026-05-30 returned ok=true, top=ACC-20260530-008A, blocked_parent completion_rollup=0/4 complete."
+      ],
+      "artifact_evidence": [
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_evidence_snapshot_v1/2026-05-30/change_control_evidence_snapshot.v1.json",
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_advisor_score_v1/2026-05-30/change_control_advisor_score.v1.json",
+        "/home/node/constellation_runtime_data/truth/reports/aegis_change_control_ai_review_v1/2026-05-30/change_control_ai_review.v1.json"
+      ],
+      "browser_evidence": [
+        "/aegis-change-control-lab?day=2026-05-30 rendered ACC-20260530-008A, blocked parent ACC-20260530-008, 0/4 complete child rollup, and advisory prompt with no mutation controls."
+      ],
+      "change_id": "ACC-20260531-001",
+      "commands_run": [
+        "npm run aegis:change-control-validate",
+        "npm run aegis:change-control-report",
+        "TARGET_DAY=2026-05-30 npm run aegis:change-control-intelligence",
+        "TARGET_DAY=2026-05-30 npm run aegis:change-control-intelligence-self-check",
+        "pytest constellation_2/common/tests/test_aegis_change_control_intelligence_v1.py -q",
+        "pytest constellation_2/phaseL/ui/tests/test_aegis_change_control_ui_v1.py -q",
+        "pytest constellation_2/phaseL/ui/tests/test_aegis_operator_shell_layout_v1.py constellation_2/phaseL/ui/tests/test_aegis_operator_workspace_navigation_v1.py -q",
+        "npm run aegis:ui:restart",
+        "TARGET_DAY=2026-05-30 npm run aegis:portal-smoke",
+        "TARGET_DAY=2026-05-30 npm run aegis:audit"
+      ],
+      "id": "ACV-20260531-003",
+      "remaining_gaps": [
+        "Runtime audit remains BLOCKED/PARTIAL_CONTEXT because of pre-existing missing/stale runtime sources unrelated to Change Control Intelligence."
+      ],
+      "safety_gate_evidence": [
+        "TARGET_DAY=2026-05-30 npm run aegis:audit output preserved trade_advice_allowed=false, manual_trade_capture_allowed=false, autonomous_execution_allowed=false; audit remains blocked by pre-existing runtime truth PARTIAL_CONTEXT."
+      ],
+      "screenshot_evidence": [
+        "docs/screenshots/aegis_change_control_lab_2026-05-30.png"
+      ],
+      "test_results": [
+        "4 passed in change-control intelligence unit tests",
+        "14 passed in Change Control UI tests",
+        "36 passed in operator shell layout/navigation tests",
+        "21 passed in portal smoke UI tests"
+      ],
+      "validated_at": "2026-05-31T18:30:00Z",
+      "validated_by": "codex",
+      "validation_summary": "Change Control Intelligence V1 generated current-day artifacts, ranked ACC-20260530-008A as top next action, rendered the read-only lab in browser, passed focused tests, portal smoke passed, and audit preserved disabled safety gates while remaining blocked by pre-existing runtime truth partial context."
+    }
+  ]
+}

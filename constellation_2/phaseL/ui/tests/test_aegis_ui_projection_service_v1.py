@@ -9,6 +9,7 @@ import pytest
 
 from constellation_2.phaseL.ui.server import run_ops_dashboard_v1 as server
 from ops.tools import run_ui_service_authority_v1 as authority
+from ops.runtime import supervisor
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -43,6 +44,64 @@ def test_runtime_manifest_uses_canonical_host_port_and_healthz() -> None:
     assert "port: 8787" in manifest
     assert "entrypoint: constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py" in manifest
     assert "health_url: http://127.0.0.1:8787/healthz" in manifest
+
+
+
+
+def test_runtime_manifest_validates_dashboard_service_and_ignores_workflow_events() -> None:
+    specs = supervisor.load_manifest(ROOT / "ops/runtime/runtime_manifest.yaml")
+
+    assert [spec.name for spec in specs] == ["ops_dashboard"]
+    service = specs[0]
+    assert service.host == "127.0.0.1"
+    assert service.port == 8787
+    assert service.entrypoint == "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py"
+    assert service.health_url == "http://127.0.0.1:8787/healthz"
+
+
+def test_supervisor_parser_stops_services_at_next_top_level_manifest_section(tmp_path: Path) -> None:
+    manifest = tmp_path / "runtime_manifest.yaml"
+    manifest.write_text(
+        "schema_version: 1\n"
+        "services:\n"
+        "  - name: ops_dashboard\n"
+        "    required: true\n"
+        "    host: 127.0.0.1\n"
+        "    port: 8787\n"
+        "    entrypoint: constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py\n"
+        "    health_url: http://127.0.0.1:8787/healthz\n"
+        "operator_workflow_events:\n"
+        "  - event_key: morning_ai_run\n"
+        "    event_name: Morning AI Run\n",
+        encoding="utf-8",
+    )
+
+    specs = supervisor.load_manifest(manifest)
+
+    assert len(specs) == 1
+    assert specs[0].name == "ops_dashboard"
+
+
+def test_supervisor_manifest_invalid_service_reports_clear_missing_keys(tmp_path: Path) -> None:
+    manifest = tmp_path / "runtime_manifest.yaml"
+    manifest.write_text(
+        "schema_version: 1\n"
+        "services:\n"
+        "  - name: broken_dashboard\n"
+        "    required: true\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(supervisor.SupervisorError) as excinfo:
+        supervisor.load_manifest(manifest)
+
+    message = str(excinfo.value)
+    assert "MANIFEST_INVALID_SERVICE" in message
+    assert "service=broken_dashboard" in message
+    assert "entrypoint" in message
+    assert "health_url" in message
+    assert "host" in message
+    assert "port" in message
 
 
 def test_supervisor_duplicate_start_returns_already_ready() -> None:

@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ops.aegis.duplicate_candidate_v1 import build_and_write_duplicate_candidate_v1, render_duplicate_candidate_v1  # noqa: E402
+from ops.aegis.runtime_truth_kernel_v1 import DEFAULT_TRUTH_ROOT  # noqa: E402
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build Aegis duplicate candidate boundary report.")
+    parser.add_argument("--truth-root", "--truth_root", dest="truth_root", default=str(DEFAULT_TRUTH_ROOT))
+    parser.add_argument("--day", "--day-utc", dest="day_utc", required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    payload, path = build_and_write_duplicate_candidate_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc))
+    if args.json:
+        summary = {key: payload.get(key) for key in (
+            "status",
+            "paper_session_id",
+            "current_output_candidate_count",
+            "new_distinct_setup_count",
+            "duplicate_open_position_count",
+            "duplicate_recent_capture_count",
+            "duplicate_recent_rejection_count",
+            "duplicate_recently_closed_count",
+            "improved_add_on_count",
+            "suppressed_duplicate_count",
+            "classification_counts",
+        )}
+        summary["path"] = str(path)
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(render_duplicate_candidate_v1(payload), end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

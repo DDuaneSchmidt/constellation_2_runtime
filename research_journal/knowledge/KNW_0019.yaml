@@ -1,0 +1,9 @@
+id: KNW_0019
+statement: Verified-graph blockers can result from evidence-ID contract mismatches even when artifacts exist and are valid.
+evidence:
+  - Verified graph blocker diagnosis for trend_eq_realized_vs_unrealized_diagnostic_v1
+  - Existing paper position ledger and sleeve performance truth artifacts for 2026-06-03
+limitations:
+  - Specific to verified-graph evidence resolution behavior observed in this repair
+why_it_matters: Future blocker triage should compare required evidence IDs to declared evidence IDs before regenerating artifacts.
+status: SUPPORTED

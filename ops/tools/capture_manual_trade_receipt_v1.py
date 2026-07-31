@@ -200,9 +200,23 @@ def write_manual_execution_receipt_aggregate_v1(*, truth_root: Path, day_utc: st
         "manual_fill_present": bool(receipts),
         "fill_details_present": bool(receipts),
         "source": "manual_entry" if receipts else "operator_declaration",
-        "trade_ids": [str(row["receipt_id"]) for row in receipts],
+        "trade_ids": [str(row.get("trade_id") or row["receipt_id"]) for row in receipts],
+        "receipt_ids": [str(row["receipt_id"]) for row in receipts],
         "manual_trade_receipt_count": len(receipts),
         "last_receipt_id": str(receipts[-1]["receipt_id"]) if receipts else None,
+        "receipts": [
+            {
+                "receipt_id": str(row.get("receipt_id") or ""),
+                "trade_id": str(row.get("trade_id") or ""),
+                "symbol": str(row.get("symbol") or ""),
+                "side": str(row.get("side") or ""),
+                "quantity": str(row.get("quantity") or ""),
+                "price": str(row.get("price") or ""),
+                "execution_time": str(row.get("execution_time") or row.get("timestamp") or ""),
+                "evidence_path": str(row.get("_path") or ""),
+            }
+            for row in receipts
+        ],
         "validation_status": "VALID",
         "validation_errors": [],
         "evidence_paths": [str(row["_path"]) for row in receipts],

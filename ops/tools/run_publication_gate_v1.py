@@ -7,6 +7,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
 try:
     from constellation_2.common.runtime_base_v1 import advisor_runtime_path, advisor_runtime_root, canonical_tools_root, ensure_repo_root_on_sys_path, source_root_from_file
 except ModuleNotFoundError:  # pragma: no cover - direct script execution bootstrap

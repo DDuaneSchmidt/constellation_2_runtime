@@ -1,0 +1,6 @@
+id: FAIL_0013
+what_we_expected: A clean audit state would be enough to declare research understanding mature.
+what_failed: Daily research integrity still passed with warnings and runtime readiness remained blocked.
+why_failed: Auditability and understanding maturity are related but not identical.
+what_to_try_next: Use warnings as journal inputs for future evidence checks.
+status: OPEN

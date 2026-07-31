@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/paper_trade_evaluation_projection.v1.schema.json",
+  "title": "Paper Trade Evaluation Projection v1",
+  "type": "object",
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "open_trades",
+    "closed_trades",
+    "missing_evidence_trades",
+    "realized_pnl",
+    "unrealized_pnl",
+    "total_pnl",
+    "content_hash",
+    "broker_submit_transmit_allowed",
+    "broker_execution_allowed",
+    "autonomous_execution_allowed",
+    "trade_advice_allowed"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_trade_evaluation_projection" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "trade_count": { "type": "integer", "minimum": 0 },
+    "open_trade_count": { "type": "integer", "minimum": 0 },
+    "closed_trade_count": { "type": "integer", "minimum": 0 },
+    "missing_evidence_count": { "type": "integer", "minimum": 0 },
+    "realized_pnl": { "type": "number" },
+    "unrealized_pnl": { "type": "number" },
+    "total_pnl": { "type": "number" },
+    "return_pct": { "type": ["number", "null"] },
+    "open_trades": { "$ref": "#/$defs/trades" },
+    "closed_trades": { "$ref": "#/$defs/trades" },
+    "missing_evidence_trades": { "$ref": "#/$defs/trades" },
+    "all_trades": { "$ref": "#/$defs/trades" },
+    "sleeve_attribution": { "$ref": "#/$defs/attribution_rows" },
+    "hypothesis_attribution": { "$ref": "#/$defs/attribution_rows" },
+    "trade_lifecycle_ledger": { "type": "object" },
+    "source_artifacts": { "type": "array", "items": { "type": "string" } },
+    "content_hash": { "type": "string" },
+    "broker_submit_transmit_allowed": { "const": false },
+    "broker_execution_allowed": { "const": false },
+    "order_routing_allowed": { "const": false },
+    "autonomous_execution_allowed": { "const": false },
+    "trade_advice_allowed": { "const": false }
+  },
+  "$defs": {
+    "trades": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "trade_id",
+          "status",
+          "evaluation_summary",
+          "evidence_status",
+          "next_action",
+          "next_action_command"
+        ],
+        "properties": {
+          "trade_id": { "type": "string" },
+          "symbol": { "type": "string" },
+          "side": { "type": "string" },
+          "quantity": { "type": ["number", "integer", "null"] },
+          "entry_price": { "type": ["number", "null"] },
+          "exit_price": { "type": ["number", "null"] },
+          "current_mark": { "type": ["number", "null"] },
+          "realized_pnl": { "type": ["number", "null"] },
+          "unrealized_pnl": { "type": ["number", "null"] },
+          "total_pnl": { "type": ["number", "null"] },
+          "return_pct": { "type": ["number", "null"] },
+          "MFE": { "type": ["number", "null"] },
+          "MAE": { "type": ["number", "null"] },
+          "sleeve_id": { "type": "string" },
+          "hypothesis_id": { "type": "string" },
+          "status": { "type": "string" },
+          "evaluation_summary": {
+            "enum": ["WORKED", "FAILED", "STILL_OPEN", "INCONCLUSIVE", "NOT_EVALUABLE"]
+          },
+          "evidence_status": {
+            "enum": ["COMPLETE", "MISSING_RECEIPT", "MISSING_EXIT", "MISSING_MARKET_DATA", "MISSING_ATTRIBUTION"]
+          },
+          "next_action": { "type": "string" },
+          "next_action_command": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "attribution_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "trade_count", "total_pnl"],
+        "properties": {
+          "id": { "type": "string" },
+          "trade_count": { "type": "integer", "minimum": 0 },
+          "realized_pnl": { "type": "number" },
+          "unrealized_pnl": { "type": "number" },
+          "total_pnl": { "type": "number" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

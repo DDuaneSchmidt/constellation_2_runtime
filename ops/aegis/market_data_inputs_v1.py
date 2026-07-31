@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ops.aegis.event_append_transaction_v1 import (
     contract_input_hashes_for_paths_v1,
@@ -151,9 +152,19 @@ def build_market_data_inputs_v1(
     generated_at = generated_at_utc or utc_now_v1()
     contracts_path, contracts = latest_json_v1(root, "aegis_sleeve_input_contracts_v1", day_utc, "sleeve_input_contracts.v1.json")
     required_item_ids, optional_item_ids, sleeve_dependencies = _required_market_inputs(contracts)
+    candidate_market_demand = _current_session_candidate_market_data_demand_v1(root=root, day_utc=day_utc)
+    candidate_symbols = candidate_market_demand["candidate_symbols"]
+    candidate_item_ids = [f"market.price.{symbol}" for symbol in candidate_symbols]
+    required_item_ids = sorted(set(required_item_ids) | set(candidate_item_ids))
+    for item_id in candidate_item_ids:
+        sleeve_dependencies.setdefault(item_id, [])
+        sleeve_dependencies[item_id] = sorted(set([*sleeve_dependencies[item_id], "current_session_candidates"]))
+    symbol_map = symbol_map_override if isinstance(symbol_map_override, dict) else build_symbol_map_v1(repo_root=Path(__file__).resolve().parents[2], day_utc=day_utc, truth_root=root)
+    raw_signal_symbols = [normalize_market_symbol_v1(symbol) for symbol in (symbol_map.get("raw_signal_symbols") if isinstance(symbol_map.get("raw_signal_symbols"), list) else []) if str(symbol)]
+    raw_signal_item_ids = ["market.volatility.VIX" if symbol == "VIX" else f"market.price.{symbol}" for symbol in raw_signal_symbols]
+    required_item_ids = sorted(set(required_item_ids) | set(raw_signal_item_ids))
     all_item_ids = sorted(set(required_item_ids) | set(optional_item_ids))
     symbols = _symbols_from_item_ids(all_item_ids)
-    symbol_map = symbol_map_override if isinstance(symbol_map_override, dict) else build_symbol_map_v1(repo_root=Path(__file__).resolve().parents[2], day_utc=day_utc)
     symbol_map_paths = write_symbol_map_v1(truth_root=root, day_utc=day_utc, payload=symbol_map)
     symbol_map_path = Path(symbol_map_paths["json"])
     config = provider_config_from_env_v1()
@@ -163,12 +174,15 @@ def build_market_data_inputs_v1(
         result, final_eod_lineage = _provider_result_from_final_eod_artifact_v1(root=root, day_utc=day_utc, symbols=symbols, generated_at_utc=generated_at)
     else:
         result = fetch_market_data_v1(truth_root=root, day_utc=day_utc, symbols=symbols, symbol_map=symbol_map)
+    resolved_symbols = dict(result.symbols)
+    raw_candidate_bindings = _candidate_yahoo_raw_bindings_v1(root=root, day_utc=day_utc, candidate_symbols=candidate_symbols, already_bound_symbols=resolved_symbols, generated_at_utc=generated_at, requested_mode=requested_mode)
+    resolved_symbols.update(raw_candidate_bindings["bound_rows"])
     records = [
         _input_record(
             item_id=item_id,
             day_utc=day_utc,
             retrieved_at_utc=result.timestamp_utc or generated_at,
-            row=_row_for_item(result.symbols, item_id),
+            row=_row_for_item(resolved_symbols, item_id),
             required=item_id in required_item_ids,
             provider_request_status=result.request_status,
             provider_failure_reason=_provider_failure_reason_for_item(result=result, item_id=item_id),
@@ -178,6 +192,11 @@ def build_market_data_inputs_v1(
         )
         for item_id in all_item_ids
     ]
+    candidate_binding_diagnostics = _candidate_market_data_binding_diagnostics_v1(
+        candidate_demand=candidate_market_demand,
+        records=records,
+        raw_binding=raw_candidate_bindings,
+    )
     status = _overall_status(records, required_item_ids)
     downstream_invariant = _downstream_certification_invariant_v1(
         records=records,
@@ -222,11 +241,12 @@ def build_market_data_inputs_v1(
         "optional_market_input_ids": optional_item_ids,
         "sleeve_dependencies": sleeve_dependencies,
         "requested_symbols": symbols,
-        "fetched_symbols": list(result.fetched_symbols),
-        "missing_symbols": list(result.missing_symbols),
+        "fetched_symbols": sorted({*list(result.fetched_symbols), *raw_candidate_bindings["bound_symbols"]}),
+        "missing_symbols": sorted(set(symbols) - {row["symbol"] for row in records if row.get("validation_status") == "VALID"}),
         "stale_symbols": list(result.stale_symbols),
         "mapping_missing_symbols": list(result.mapping_missing_symbols),
-        "provider_failed_symbols": list(result.provider_failed_symbols),
+        "provider_failed_symbols": sorted(set(result.provider_failed_symbols) - set(raw_candidate_bindings["bound_symbols"])),
+        "candidate_market_data_binding": candidate_binding_diagnostics,
         "symbol_map_path": str(symbol_map_path),
         "symbol_map_hash": sha256_file_v1(symbol_map_path) if symbol_map_path.exists() else "",
         "sleeve_input_contracts_path": str(contracts_path or ""),
@@ -262,6 +282,179 @@ def _downstream_certification_invariant_v1(*, records: list[dict[str, Any]], req
         "source_artifact_path": final_eod_lineage.get("artifact_path", ""),
         "blocked_input_ids": blocked_ids,
         "blocked_reasons": {str(row.get("data_item_id") or ""): str(row.get("reason") or row.get("validation_status") or "") for row in invalid},
+    }
+
+
+def _current_session_candidate_market_data_demand_v1(*, root: Path, day_utc: str) -> dict[str, Any]:
+    sources: list[str] = []
+    candidates: list[dict[str, Any]] = []
+    lifecycle_path = root / "reports" / "aegis_candidate_lifecycle_projection_v1" / day_utc / "candidate_lifecycle_projection.v1.json"
+    lifecycle = read_json_local_v1(lifecycle_path)
+    if isinstance(lifecycle.get("current_session_candidates"), list):
+        for row in lifecycle["current_session_candidates"]:
+            if isinstance(row, dict):
+                candidates.append(row)
+        if candidates:
+            sources.append(str(lifecycle_path))
+    if not candidates:
+        queue_path = root / "reports" / "aegis_paper_review_queue_v1" / day_utc / "paper_review_queue.v1.json"
+        queue = read_json_local_v1(queue_path)
+        for row in queue.get("rows", []) if isinstance(queue.get("rows"), list) else []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("rollover_status") or "").upper() != "CURRENT_DAY":
+                continue
+            if str(row.get("decision_reason") or "").upper() == "PAPER_TRADE_SMOKE":
+                continue
+            candidates.append(row)
+        if candidates:
+            sources.append(str(queue_path))
+    packet_path = root / "reports" / "aegis_candidate_review_packet_v1" / day_utc / "candidate_review_packet.v1.json"
+    packet = read_json_local_v1(packet_path)
+    for row in packet.get("review_candidates", []) if isinstance(packet.get("review_candidates"), list) else []:
+        if isinstance(row, dict):
+            candidates.append(row)
+    if packet.get("review_candidates"):
+        sources.append(str(packet_path))
+    symbols = canonicalize_symbol_list_v1(row.get("symbol") for row in candidates if isinstance(row, dict) and str(row.get("symbol") or "").strip())
+    return {
+        "source_artifact_paths": sorted(set(sources)),
+        "candidate_symbol_count": len(symbols),
+        "candidate_symbols": symbols,
+    }
+
+
+def _candidate_yahoo_raw_bindings_v1(
+    *,
+    root: Path,
+    day_utc: str,
+    candidate_symbols: list[str],
+    already_bound_symbols: dict[str, dict[str, Any]],
+    generated_at_utc: str,
+    requested_mode: str,
+) -> dict[str, Any]:
+    bound_rows: dict[str, dict[str, Any]] = {}
+    raw_available: list[str] = []
+    invalid_raw: dict[str, str] = {}
+    raw_dir = root / "reports" / "aegis_market_data_v1" / day_utc / "raw" / "YAHOO_CHART"
+    for symbol in canonicalize_symbol_list_v1(candidate_symbols):
+        if symbol in already_bound_symbols:
+            continue
+        raw_path = raw_dir / f"{symbol}.json"
+        if not raw_path.exists():
+            continue
+        raw_available.append(symbol)
+        row, reason = _market_row_from_yahoo_chart_raw_v1(raw_path=raw_path, symbol=symbol, day_utc=day_utc, generated_at_utc=generated_at_utc, requested_mode=requested_mode)
+        if row:
+            bound_rows[symbol] = row
+        else:
+            invalid_raw[symbol] = reason or "RAW_YAHOO_CHART_UNUSABLE"
+    return {
+        "bound_rows": bound_rows,
+        "bound_symbols": sorted(bound_rows),
+        "raw_available_symbols": sorted(raw_available),
+        "raw_invalid_symbols": invalid_raw,
+        "raw_provider": "YAHOO_CHART",
+        "raw_directory": str(raw_dir),
+    }
+
+
+def _market_row_from_yahoo_chart_raw_v1(*, raw_path: Path, symbol: str, day_utc: str, generated_at_utc: str, requested_mode: str) -> tuple[dict[str, Any], str]:
+    payload = read_json_local_v1(raw_path)
+    result = (((payload.get("chart") or {}).get("result") or [None])[0]) if isinstance(payload.get("chart"), dict) else None
+    if not isinstance(result, dict):
+        return {}, "YAHOO_CHART_RESULT_MISSING"
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    timestamps = result.get("timestamp") if isinstance(result.get("timestamp"), list) else []
+    quote = ((((result.get("indicators") or {}).get("quote") or [None])[0]) if isinstance(result.get("indicators"), dict) else {})
+    quote = quote if isinstance(quote, dict) else {}
+    closes = quote.get("close") if isinstance(quote.get("close"), list) else []
+    opens = quote.get("open") if isinstance(quote.get("open"), list) else []
+    highs = quote.get("high") if isinstance(quote.get("high"), list) else []
+    lows = quote.get("low") if isinstance(quote.get("low"), list) else []
+    volumes = quote.get("volume") if isinstance(quote.get("volume"), list) else []
+    selected_index = -1
+    for index in range(min(len(timestamps), len(closes)) - 1, -1, -1):
+        if closes[index] is not None:
+            selected_index = index
+            break
+    if selected_index < 0:
+        return {}, "YAHOO_CHART_CLOSE_MISSING"
+    try:
+        timestamp = int(timestamps[selected_index])
+        parsed = datetime.fromtimestamp(timestamp, tz=UTC).replace(microsecond=0)
+    except Exception:
+        return {}, "YAHOO_CHART_TIMESTAMP_INVALID"
+    try:
+        exchange_tz = ZoneInfo(str(meta.get("exchangeTimezoneName") or "America/New_York"))
+    except Exception:
+        exchange_tz = ZoneInfo("America/New_York")
+    session_date = parsed.astimezone(exchange_tz).date().isoformat()
+    close = closes[selected_index]
+    source_hash = sha256_file_v1(raw_path)
+    canonical = normalize_market_symbol_v1(symbol)
+    usable_for = {
+        "final_eod_certification": False,
+        "sleeve_intraday_generation": normalize_market_data_mode_v1(requested_mode) == INTRADAY_OPERATIONAL,
+        "operator_visibility": True,
+    }
+    return {
+        "symbol": canonical,
+        "canonical_symbol": canonical,
+        "provider": "YAHOO_CHART",
+        "provider_symbol": str(meta.get("symbol") or canonical),
+        "last_price": close,
+        "close": close,
+        "open": opens[selected_index] if selected_index < len(opens) else close,
+        "high": highs[selected_index] if selected_index < len(highs) else close,
+        "low": lows[selected_index] if selected_index < len(lows) else close,
+        "volume": volumes[selected_index] if selected_index < len(volumes) else meta.get("regularMarketVolume"),
+        "data_timestamp_utc": parsed.isoformat().replace("+00:00", "Z"),
+        "source_timestamp_utc": parsed.isoformat().replace("+00:00", "Z"),
+        "retrieved_at_utc": generated_at_utc,
+        "market_session_date": session_date,
+        "source": "YAHOO_CHART",
+        "source_url_or_path": str(raw_path),
+        "source_hash": source_hash,
+        "freshness_status": "CURRENT" if session_date == day_utc else "STALE",
+        "data_finality": "PROVISIONAL_INTRADAY",
+        "market_data_mode": "PROVISIONAL_INTRADAY",
+        "freshness_ttl_seconds": 900,
+        "finalization_status": "NOT_FINAL_YET" if session_date == day_utc else "FINAL_UNAVAILABLE",
+        "usable_for": usable_for,
+        "candidate_generation_eligible": session_date == day_utc,
+        "quality": "MEDIUM" if session_date == day_utc else "LOW",
+    }, ""
+
+
+def _candidate_market_data_binding_diagnostics_v1(*, candidate_demand: dict[str, Any], records: list[dict[str, Any]], raw_binding: dict[str, Any]) -> dict[str, Any]:
+    candidate_symbols = list(candidate_demand.get("candidate_symbols") or [])
+    by_symbol = {row.get("symbol"): row for row in records if isinstance(row, dict)}
+    bound = sorted(symbol for symbol in candidate_symbols if (by_symbol.get(symbol) or {}).get("validation_status") == "VALID")
+    missing = sorted(symbol for symbol in candidate_symbols if not by_symbol.get(symbol) or (by_symbol.get(symbol) or {}).get("validation_status") in {"MISSING", "UNAVAILABLE_EXTERNAL_SOURCE"})
+    blocked = sorted(set(candidate_symbols) - set(bound))
+    raw_available = set(raw_binding.get("raw_available_symbols") or [])
+    blocked_reasons: dict[str, dict[str, Any]] = {}
+    for symbol in blocked:
+        row = by_symbol.get(symbol) or {}
+        blocked_reasons[symbol] = {
+            "validation_status": str(row.get("validation_status") or "MISSING"),
+            "reason": str(row.get("reason") or "NO_MARKET_DATA_INPUT_RECORD"),
+            "source_vendor": str(row.get("source_vendor") or ""),
+            "source_timestamp_utc": str(row.get("source_timestamp_utc") or ""),
+            "source_path": str(row.get("source_path") or ""),
+            "repair_action": "Bind current-session market data before stop and quantity construction." if not row else "Refresh/bind current-session market data before stop and quantity construction.",
+        }
+    return {
+        "candidate_symbol_count": len(candidate_symbols),
+        "market_data_bound_count": len(bound),
+        "missing_from_market_data_inputs": missing,
+        "construction_blocked_symbols": blocked,
+        "construction_blocked_binding_reasons": blocked_reasons,
+        "provider_fetch_available_but_unbound": sorted(symbol for symbol in missing if symbol in raw_available),
+        "provider_fetch_available_bound_from_raw": list(raw_binding.get("bound_symbols") or []),
+        "raw_invalid_symbols": dict(raw_binding.get("raw_invalid_symbols") or {}),
+        "source_artifact_paths": list(candidate_demand.get("source_artifact_paths") or []),
     }
 
 def build_market_data_readiness_v1(*, inputs_payload: dict[str, Any]) -> dict[str, Any]:

@@ -1,0 +1,12 @@
+id: KNW_0015
+statement: Raw signals should be separated into expected portfolio suppression and certification bottlenecks before judging candidate-generation quality.
+evidence:
+  - OBS_0016 evidence review
+  - Candidate diagnostics showed 42 raw signals, 1 generated candidate, 41 aggregate candidate-conversion rejections, and 1 portfolio-scoring rejection
+  - Detailed raw-signal rows showed 40 portfolio-gate suppressions and 2 non-certified candidate snapshot blocks
+  - Portfolio activation gate showed 40 one-primary-per-regime-bucket suppressions and 2 allowed provisional non-certified intents
+limitations:
+  - Reviewed artifacts cover 2026-06-03 only
+  - Aggregate rejection-stage counts and detailed raw-signal rows use different lenses
+why_it_matters: Researchers should not treat all raw-signal rejections as defects; some are expected governance suppression and some are certification bottlenecks.
+status: SUPPORTED

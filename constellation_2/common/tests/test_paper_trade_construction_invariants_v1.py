@@ -33,6 +33,180 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows), encoding="utf-8")
 
 
+
+def _seed_candidate_packet_and_queue(root: Path, *, symbol: str = "QQQ") -> None:
+    candidate = {
+        "candidate_id": "paper-candidate-1",
+        "symbol": symbol,
+        "direction": "LONG",
+        "paper_trade_eligible": True,
+        "live_trade_eligible": False,
+        "entry_reference_price": "500.00",
+        "entry_reference_price_source": "market_data_inputs_v1",
+    }
+    _write(root / "reports" / "aegis_candidate_review_packet_v1" / DAY / "candidate_review_packet.v1.json", {
+        "schema_id": "candidate_review_packet",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T14:00:00Z",
+        "candidate_count": 1,
+        "review_candidates": [candidate],
+        "safety": {"paper_only": True, "broker_submit_transmit_allowed": False, "autonomous_execution_allowed": False},
+    })
+    _write(root / "reports" / "aegis_paper_review_queue_v1" / DAY / "paper_review_queue.v1.json", {
+        "schema_id": "paper_review_queue",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T14:00:00Z",
+        "rows": [{**candidate, "status": "AWAITING_REVIEW"}],
+        "safety": {"paper_only": True, "broker_submit_transmit_allowed": False, "autonomous_execution_allowed": False},
+    })
+
+
+def _seed_market_data_inputs(root: Path, *, symbol: str = "QQQ", value: str = "500.00", day: str = DAY) -> None:
+    _write(root / "reports" / "market_data_inputs_v1" / DAY / "market_data_inputs.v1.json", {
+        "schema_id": "market_data_inputs",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T14:00:00Z",
+        "validation_status": "VALID",
+        "input_records": [{"symbol": symbol, "value": value, "day_utc": day, "validation_status": "VALID", "source_path": "/tmp/market-data.json"}],
+    })
+
+
+def test_candidate_paper_construction_uses_canonical_market_data_inputs(tmp_path: Path) -> None:
+    _seed_candidate_packet_and_queue(tmp_path)
+    _seed_market_data_inputs(tmp_path)
+
+    construction = build_paper_trade_construction_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T14:00:00Z")
+
+    assert construction["trade_construction_status"] == "complete"
+    assert construction["paper_submit_created"] is True
+    assert construction["constructed_paper_trade_count"] == 1
+    assert construction["constructed_paper_trades"][0]["symbol"] == "QQQ"
+    assert construction["constructed_paper_trades"][0]["live_trading_allowed"] is False
+    assert construction["constructed_paper_trades"][0]["order_routing_allowed"] is False
+    assert construction["broker_execution_allowed"] is False
+    assert construction["live_trading_allowed"] is False
+    assert construction["order_routing_allowed"] is False
+
+
+def test_candidate_paper_construction_reports_precise_missing_market_data(tmp_path: Path) -> None:
+    _seed_candidate_packet_and_queue(tmp_path, symbol="QQQ")
+
+    construction = build_paper_trade_construction_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T14:00:00Z")
+
+    assert construction["trade_construction_status"] == "blocked_missing_market_data"
+    assert construction["paper_submit_created"] is False
+    assert construction["constructed_paper_trade_count"] == 0
+    diag = construction["market_data_diagnostics"][0]
+    assert diag["symbol"] == "QQQ"
+    assert diag["missing_field"] == "market_data.current_price"
+    assert diag["expected_source_artifact"] == "market_data_inputs_v1"
+    assert diag["status"] == "ABSENT"
+    assert diag["artifact_path_checked"].endswith(f"/reports/market_data_inputs_v1/{DAY}/market_data_inputs.v1.json")
+
+
+def test_candidate_paper_construction_rejects_stale_review_packet_when_contracts_are_newer(tmp_path: Path) -> None:
+    stale_candidate = {
+        "candidate_id": "stale-candidate",
+        "symbol": "OLD",
+        "direction": "LONG",
+        "paper_trade_eligible": True,
+        "entry_reference_price": "10.00",
+        "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+    }
+    current_candidates = [
+        {
+            "candidate_id": "candidate-current-1",
+            "raw_signal_id": "raw-current-1",
+            "symbol": "QQQ",
+            "direction": "LONG",
+            "paper_trade_eligible": True,
+            "entry_reference_price": "500.00",
+            "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+            "status": "AWAITING_REVIEW",
+        },
+        {
+            "candidate_id": "candidate-current-2",
+            "raw_signal_id": "raw-current-2",
+            "symbol": "SPY",
+            "direction": "LONG",
+            "paper_trade_eligible": True,
+            "entry_reference_price": "600.00",
+            "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+            "status": "AWAITING_REVIEW",
+        },
+        {
+            "candidate_id": "candidate-already-open",
+            "raw_signal_id": "raw-already-open",
+            "symbol": "DIA",
+            "direction": "LONG",
+            "paper_trade_eligible": True,
+            "entry_reference_price": "400.00",
+            "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+            "status": "PAPER_POSITION_OPEN",
+        },
+    ]
+    _write(tmp_path / "reports" / "aegis_candidate_review_packet_v1" / DAY / "candidate_review_packet.v1.json", {
+        "schema_id": "candidate_review_packet",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T14:00:00Z",
+        "candidate_count": 1,
+        "review_candidates": [stale_candidate],
+        "safety": {"paper_only": True, "broker_submit_transmit_allowed": False, "autonomous_execution_allowed": False},
+    })
+    _write(tmp_path / "reports" / "aegis_candidate_contracts_v1" / DAY / "candidate_contracts.v1.json", {
+        "schema_id": "candidate_contracts",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T15:00:00Z",
+        "candidate_contracts": [{**row, "contract_validation_status": "VALID"} for row in current_candidates[:2]],
+    })
+    _write(tmp_path / "reports" / "aegis_paper_review_queue_v1" / DAY / "paper_review_queue.v1.json", {
+        "schema_id": "paper_review_queue",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T15:01:00Z",
+        "rows": current_candidates,
+        "safety": {"paper_only": True, "broker_submit_transmit_allowed": False, "autonomous_execution_allowed": False},
+    })
+    _write(tmp_path / "reports" / "market_data_inputs_v1" / DAY / "market_data_inputs.v1.json", {
+        "schema_id": "market_data_inputs",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "generated_at_utc": f"{DAY}T15:01:00Z",
+        "validation_status": "VALID",
+        "input_records": [
+            {"symbol": "QQQ", "value": "500.00", "day_utc": DAY, "validation_status": "VALID"},
+            {"symbol": "SPY", "value": "600.00", "day_utc": DAY, "validation_status": "VALID"},
+            {"symbol": "DIA", "value": "400.00", "day_utc": DAY, "validation_status": "VALID"},
+        ],
+    })
+
+    construction = build_paper_trade_construction_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T15:02:00Z")
+
+    summary = construction["candidate_construction_summary"]
+    assert summary["candidate_source"] == "aegis_paper_review_queue_v1"
+    assert summary["candidate_count"] == 2
+    assert summary["constructed_count"] == 2
+    constructed_ids = {row["candidate_id"] for row in construction["constructed_paper_trades"]}
+    assert constructed_ids == {"candidate-current-1", "candidate-current-2"}
+    assert "stale-candidate" not in constructed_ids
+    assert "candidate-already-open" not in constructed_ids
+    assert summary["stale_authority_rejections"] == [{
+        "artifact_id": "aegis_candidate_review_packet_v1",
+        "path": str(tmp_path / "reports" / "aegis_candidate_review_packet_v1" / DAY / "candidate_review_packet.v1.json"),
+        "status": "REJECTED_STALE_AUTHORITY",
+        "reason_code": "STALE_REVIEW_PACKET_NEWER_CANDIDATE_CONTRACTS",
+        "artifact_generated_at_utc": f"{DAY}T14:00:00Z",
+        "authoritative_artifact_id": "aegis_candidate_contracts_v1",
+        "authoritative_path": str(tmp_path / "reports" / "aegis_candidate_contracts_v1" / DAY / "candidate_contracts.v1.json"),
+        "authoritative_generated_at_utc": f"{DAY}T15:00:00Z",
+        "authoritative_valid_candidate_count": 2,
+    }]
+
 def _seed_runtime(root: Path) -> str:
     caps = {
         "TRADE_ADVICE_ALLOWED": {"allowed": False, "reason": "Trade advice disabled for test."},

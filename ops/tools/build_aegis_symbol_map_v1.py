@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--truth_root", "--truth-root", dest="truth_root", default=str(DEFAULT_TRUTH_ROOT))
     parser.add_argument("--day", "--day-utc", dest="day_utc", default=datetime.now(UTC).strftime("%Y-%m-%d"))
     args = parser.parse_args(argv)
-    payload = build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=str(args.day_utc))
+    payload = build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=str(args.day_utc), truth_root=Path(args.truth_root))
     paths = write_symbol_map_v1(truth_root=Path(args.truth_root), day_utc=str(args.day_utc), payload=payload)
     print(json.dumps({**paths, "required_symbols": len(payload["required_symbols"]), "mapping_missing_symbols": payload["mapping_missing_symbols"], "broker_execution_allowed": False, "autonomous_execution_allowed": False}, sort_keys=True))
     return 0

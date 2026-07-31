@@ -136,7 +136,8 @@
       "type": "string",
       "enum": [
         "NONE_DECLARED",
-        "MANUAL_FILL_RECORDED"
+        "MANUAL_FILL_RECORDED",
+        "SIMULATED_PAPER"
       ]
     },
     "operator_declared_no_manual_execution": {

@@ -2,7 +2,7 @@ import { escapeHtml, renderError, renderOperatorDiagnosticPanel } from "/operato
 import { renderAegisMark, renderStatusPill } from "/operator_shell/aegis_components/index.js";
 import {
   ROUTES,
-  LEGACY_ROUTE_ALIASES,
+  activeNavSelectionForPath,
   buildPaletteEntries,
   executeCandidateWorkflow,
   executeEdgeLabWorkflow,
@@ -13,20 +13,32 @@ import {
   executeResearchConsoleWorkflow,
   executeResearchDataAcquisitionWorkflow,
   loadRouteView,
+  normalizeRoutePath,
+  operatorShellRouteContractForPath,
+  routeShouldPreserveDayQuery,
 } from "/operator_shell/pages/index.js";
 import {
+  ENGINEERING_NAVIGATION_SCHEMA,
   NAVIGATION_SCHEMA,
   activeNavigationForPath,
 } from "/operator_shell/navigation_schema.js";
 import {
   executeAegisCommand,
+  executeAegisVerifiedRuntimeAction,
+  executePaperPromotionAction,
+  appendOperatorActionEvent,
+  fetchAegisCommandStatus,
   fetchAlerts,
   fetchFinancialState,
   fetchOperatorWorkflow,
   fetchRuntimeStatus,
+  askAegisAiOperations,
   fetchStatusRail,
   fetchStatusSemantics,
   fetchSystemSummary,
+  recordAegisCommand,
+  recordAegisChangeControlDecision,
+  saveAegisAdvisorBenchmark,
 } from "/operator_shell/domain_client/index.js";
 import { formatUsd } from "/operator_shell/pages/index.js";
 
@@ -39,6 +51,47 @@ const LEGACY_ROUTE_CONTRACT = [
   { path: "/submission", id: "submission" },
   { path: "/lifecycle", id: "lifecycle" },
 ];
+const OPERATIONAL_LAYOUT = "OPERATIONAL_LAYOUT";
+const WORKFLOW_LAYOUT = "WORKFLOW_LAYOUT";
+const OPERATIONAL_LAYOUT_ROUTE_IDS = new Set([
+  "aegis_opportunities",
+  "aegis_today",
+  "aegis_runtime_timeline",
+  "aegis_repair_center",
+]);
+const WORKFLOW_LAYOUT_ROUTE_IDS = new Set([
+  "aegis_candidates",
+  "aegis_candidate_funnel",
+  "aegis_exit_review",
+  "aegis_theses",
+  "aegis_edge_lab",
+  "aegis_paper_performance",
+  "aegis_sleeve_validation",
+  "aegis_sleeve_analytics",
+  "aegis_performance",
+  "aegis_journal",
+  "aegis_captured_trades",
+  "aegis_review",
+  "aegis_research",
+  "aegis_history",
+  "research_lab",
+  "research_start",
+  "research_hypothesis_queue",
+  "research_plans",
+  "research_evidence",
+  "research_paper_trials",
+  "research_sleeve_reviews",
+  "research_blocked_work",
+  "research_backlog",
+]);
+
+function resolveWorkspaceLayoutMode(route, view = {}) {
+  if (view.layoutMode === WORKFLOW_LAYOUT || view.layoutMode === OPERATIONAL_LAYOUT) return view.layoutMode;
+  if (WORKFLOW_LAYOUT_ROUTE_IDS.has(route?.id)) return WORKFLOW_LAYOUT;
+  if (OPERATIONAL_LAYOUT_ROUTE_IDS.has(route?.id)) return OPERATIONAL_LAYOUT;
+  return OPERATIONAL_LAYOUT;
+}
+
 const LEGACY_ENDPOINT_CONTRACT = [
   'fetchJson("/api/shell/status-rail")',
   'fetchJson("/api/work-queue")',
@@ -89,14 +142,50 @@ const state = {
     recovery_command: "npm run aegis:ui:restart",
   },
   activeView: null,
+  openCommandDetail: null,
+  routeRenderInProgress: 0,
+  routeRenderGeneration: 0,
+  routeRenderedOnce: false,
+  lastRenderedRouteId: "",
+  routeCache: new Map(),
+  bootDiagnostics: {
+    bootStart: 0,
+    boot_time_ms: 0,
+    first_paint_ms: 0,
+    data_ready_ms: 0,
+    duplicate_fetch_count: 0,
+    route_rerender_count: 0,
+    content_clear_count: 0,
+  },
   paletteOpen: false,
   sidebarMode: localStorage.getItem("aegis.sidebar.mode") || "expanded",
+  operatorMode: "operator",
+  engineeringDrawerOpen: false,
   sidebarOpenGroups: new Set(NAVIGATION_SCHEMA.flatMap((section) => section.domains.map((domain) => domain.id))),
 };
 
 function logTiming(phase, startedAt, extra = {}) {
   const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
   console.info("[aegis-ui-timing]", { phase, duration_ms: durationMs, ...extra });
+}
+
+function markBootEvent(source, extra = {}) {
+  const now = performance.now();
+  const bootStart = state.bootDiagnostics.bootStart || now;
+  const event = { source, at_ms: Math.round((now - bootStart) * 10) / 10, ...extra };
+  state.bootDiagnostics.events = [...(state.bootDiagnostics.events || []), event].slice(-80);
+  if (typeof window !== "undefined") {
+    window.__AEGIS_BOOT_DIAGNOSTICS = { ...state.bootDiagnostics };
+  }
+  console.info(`[aegis-boot] ${source}`, event);
+}
+
+function updateBootDiagnostic(key, value) {
+  state.bootDiagnostics[key] = value;
+  if (typeof window !== "undefined") {
+    state.bootDiagnostics.duplicate_fetch_count = Number(window.__AEGIS_DUPLICATE_FETCH_COUNT || 0);
+    window.__AEGIS_BOOT_DIAGNOSTICS = { ...state.bootDiagnostics };
+  }
 }
 
 async function timedAsync(phase, action, extra = {}) {
@@ -106,6 +195,23 @@ async function timedAsync(phase, action, extra = {}) {
   } finally {
     logTiming(phase, startedAt, extra);
   }
+}
+
+function setWorkspaceUpdating({ active = false, warning = "" } = {}) {
+  const host = document.getElementById("workspaceContent");
+  if (!host) return;
+  let indicator = host.querySelector(":scope > .workspace-refresh-indicator");
+  if (!active && !warning) {
+    indicator?.remove();
+    return;
+  }
+  if (!indicator) {
+    indicator = document.createElement("div");
+    indicator.className = "workspace-refresh-indicator";
+    host.prepend(indicator);
+  }
+  indicator.dataset.tone = warning ? "warning" : "updating";
+  indicator.textContent = warning || "Updating...";
 }
 
 function formatHeaderTimestamp(value) {
@@ -152,33 +258,38 @@ function formatDisplayLabel(value) {
 }
 
 function normalizePath(path) {
-  const normalized = String(path || "/").replace(/\/+$/, "") || "/";
-  if (normalized.startsWith("/reliability/work-orders/") && normalized !== "/reliability/work-orders") {
-    return "/reliability/work-orders/detail";
-  }
-  if (normalized.startsWith("/research-lab/") && !ROUTES.some((route) => route.path === normalized)) {
-    return "/research-lab";
-  }
-  return LEGACY_ROUTE_ALIASES[normalized] || normalized;
+  return normalizeRoutePath(path);
 }
 
 function currentRoute() {
-  const normalized = normalizePath(window.location.pathname);
-  return ROUTES.find((route) => route.path === normalized) || ROUTES[0];
+  return operatorShellRouteContractForPath(window.location.pathname);
 }
 
 function renderBrand() {
-  document.getElementById("brandMark").innerHTML = renderAegisMark({ size: "sm", label: "Aegis" });
+  const brandMark = document.getElementById("brandMark");
+  if (!brandMark || brandMark.dataset.staticBrand === "true") {
+    return;
+  }
+  brandMark.innerHTML = renderAegisMark({ size: "sm", label: "Aegis" });
 }
 
 function renderNav() {
   const startedAt = performance.now();
-  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
+  state.operatorMode = "operator";
+  const navigationSchema = NAVIGATION_SCHEMA;
+  const activeSelection = activeNavSelectionForPath(window.location.pathname);
+  const engineeringRoutes = ENGINEERING_NAVIGATION_SCHEMA.flatMap((section) => section.domains || []);
+  const activeEngineeringRoute = activeSelection.workspace_id === "engineering"
+    ? engineeringRoutes.find((route) => route.id === activeSelection.nav_item_id || route.id === activeSelection.parent_nav_item_id) || null
+    : null;
+  const active = activeSelection.workspace_id === "engineering" ? null : activeNavigationForPath(window.location.pathname, navigationSchema);
   const query = String(document.getElementById("sidebarSearch")?.value || "").trim().toLowerCase();
+  const queryActive = Boolean(query);
   state.sidebarMode = ["expanded", "collapsed"].includes(state.sidebarMode) ? state.sidebarMode : "collapsed";
   document.body.classList.toggle("sidebar-collapsed", state.sidebarMode === "collapsed");
   document.body.classList.toggle("sidebar-expanded", state.sidebarMode === "expanded");
   document.body.classList.toggle("sidebar-drawer-open", state.sidebarMode === "expanded" && window.matchMedia("(max-width: 900px)").matches);
+  document.body.classList.toggle("engineering-drawer-open", state.engineeringDrawerOpen === true);
   const collapseButton = document.querySelector("[data-sidebar-collapse]");
   if (collapseButton) {
     const isNarrow = window.matchMedia("(max-width: 900px)").matches;
@@ -196,88 +307,149 @@ function renderNav() {
   if (scrim) {
     scrim.hidden = !(state.sidebarMode === "expanded" && window.matchMedia("(max-width: 900px)").matches);
   }
-  document.getElementById("workspaceNav").innerHTML = NAVIGATION_SCHEMA.map((section) => {
-    const domains = section.domains
-      .map((domain) => {
-        const children = Array.isArray(domain.children) ? domain.children : [];
-        const matchesDomain = [domain.label, domain.description, domain.truthOwner].some((value) =>
-          String(value || "").toLowerCase().includes(query),
-        );
-        const filteredChildren = children.filter((child) => {
-          if (!query) {
-            return true;
-          }
-          return [child.label, child.description, child.truthOwner].some((value) =>
-            String(value || "").toLowerCase().includes(query),
-          );
-        });
-        if (query && !matchesDomain && filteredChildren.length === 0) {
-          return "";
-        }
-        const isActiveParent = active?.id === domain.id || active?.parentId === domain.id;
-        const isOpen = state.sidebarOpenGroups.has(domain.id) || Boolean(query);
-        const visibleChildren = query && filteredChildren.length ? filteredChildren : children;
-        const domainBadge = [domain, ...children].reduce((total, item) => total + Number(item.badgeCount || 0), 0);
-        const childrenId = `nav-children-${domain.id}`;
-        return `
-          <div class="sidebar-group accent-${escapeHtml(domain.accent)} ${isActiveParent ? "active-parent" : ""}">
-            <button class="sidebar-group-button" type="button" data-nav-group-toggle="${escapeHtml(domain.id)}" data-route="${escapeHtml(domain.route)}" aria-expanded="${isOpen ? "true" : "false"}" aria-controls="${escapeHtml(childrenId)}">
-              <span class="nav-icon">${escapeHtml(domain.icon)}</span>
-              <span class="nav-text">
-                <strong>${escapeHtml(domain.label)}</strong>
-                <small>${escapeHtml(domain.truthOwner || "")}</small>
-              </span>
-              ${domainBadge ? `<span class="nav-badge">${escapeHtml(String(domainBadge))}</span>` : ""}
-              <span class="nav-caret" aria-hidden="true">${isOpen ? "⌄" : "›"}</span>
-            </button>
-            <div class="sidebar-children" id="${escapeHtml(childrenId)}" ${isOpen ? "" : "hidden"}>
-              ${visibleChildren.map((child) => {
-                const childActive = active?.id === child.id || (!active?.parentId && active?.route === child.route && child.id.endsWith("overview"));
-                return `
-                  <a class="nav-link ${childActive ? "active" : ""}" href="${escapeHtml(child.route)}" data-route="${escapeHtml(child.route)}">
-                    <span class="nav-icon">${escapeHtml(child.icon)}</span>
-                    <span class="nav-text">
-                      <span>${escapeHtml(child.label)}</span>
-                      <small>${escapeHtml(child.truthOwner || domain.truthOwner || "")}</small>
-                    </span>
-                    ${child.badgeCount ? `<span class="nav-badge">${escapeHtml(String(child.badgeCount))}</span>` : ""}
-                  </a>
-                `;
+  const renderDomain = (domain) => {
+    const children = Array.isArray(domain.children) ? domain.children : [];
+    const matchesDomain = [domain.label, domain.description, domain.truthOwner].some((value) =>
+      String(value || "").toLowerCase().includes(query),
+    );
+    const filteredChildren = children.filter((child) => {
+      if (!query) return true;
+      return [child.label, child.description, child.truthOwner].some((value) =>
+        String(value || "").toLowerCase().includes(query),
+      );
+    });
+    if (queryActive && !matchesDomain && filteredChildren.length === 0) return "";
+    const isActiveParent = active?.id === domain.id || active?.parentId === domain.id;
+    const visibleChildren = queryActive && filteredChildren.length ? filteredChildren : children;
+    const domainBadge = [domain, ...children].reduce((total, item) => total + Number(item.badgeCount || 0), 0);
+    const childrenId = `nav-children-${domain.id}`;
+    const hasChildren = visibleChildren.length > 0;
+    return `
+      <div class="sidebar-group accent-${escapeHtml(domain.accent)} ${isActiveParent ? "active-parent" : ""}">
+        <button class="sidebar-group-button" type="button" data-nav-group-toggle="${escapeHtml(domain.id)}" data-route="${escapeHtml(domain.route)}" aria-expanded="false" aria-controls="${escapeHtml(childrenId)}">
+          <span class="nav-icon">${escapeHtml(domain.icon)}</span>
+          <span class="nav-text">
+            <strong>${escapeHtml(domain.label)}</strong>
+            <small>${escapeHtml(domain.truthOwner || "")}</small>
+          </span>
+          ${domainBadge ? `<span class="nav-badge">${escapeHtml(String(domainBadge))}</span>` : ""}
+          ${hasChildren ? `<span class="nav-caret" aria-hidden="true">›</span>` : ""}
+        </button>
+        ${hasChildren ? `<div class="sidebar-children" id="${escapeHtml(childrenId)}" hidden>${visibleChildren.map((child) => {
+          const childActive = active?.id === child.id || (!active?.parentId && active?.route === child.route && child.id.endsWith("overview"));
+          return `
+            <a class="nav-link ${childActive ? "active" : ""}" href="${escapeHtml(child.route)}" data-route="${escapeHtml(child.route)}">
+              <span class="nav-icon">${escapeHtml(child.icon)}</span>
+              <span class="nav-text"><span>${escapeHtml(child.label)}</span><small>${escapeHtml(child.truthOwner || domain.truthOwner || "")}</small></span>
+              ${child.badgeCount ? `<span class="nav-badge">${escapeHtml(String(child.badgeCount))}</span>` : ""}
+            </a>`;
+        }).join("")}</div>` : ""}
+      </div>
+    `;
+  };
+  const operatorSections = navigationSchema.map((section) => `
+    <section class="sidebar-section" data-sidebar-operator-section="true">
+      ${section.domains.map(renderDomain).join("")}
+    </section>
+  `).join("");
+  const engineeringRouteById = Object.fromEntries(engineeringRoutes.map((route) => [route.id, route]));
+  const engineeringGroups = [
+    { label: "System", routes: ["aegis_dashboard", "aegis_verified_runtime", "runtime_timeline"].map((id) => engineeringRouteById[id]).filter(Boolean) },
+    { label: "Diagnostics", routes: [
+      engineeringRouteById.aegis_input_checks,
+      { id: "aegis_market_data_coverage", label: "Market Data Coverage", operatorLabel: "Market Data Coverage", icon: "M", route: "/aegis-opportunities#market-data-coverage", truthOwner: "aegis_market_data_coverage_v1", description: "Certified market-data coverage, stale symbols, and downstream consumers." },
+      engineeringRouteById.aegis_hash_lineage,
+      engineeringRouteById.aegis_provider_health,
+    ].filter(Boolean) },
+    { label: "Audit", routes: [
+      engineeringRouteById.aegis_candidate_funnel,
+      engineeringRouteById.aegis_candidate_lineage,
+      engineeringRouteById.aegis_evidence_ledger,
+      { id: "aegis_legacy_captures", label: "Legacy / Partial Historical Trades", operatorLabel: "Legacy / Partial Historical Trades", icon: "L", route: "/aegis-journal#legacy-captures", truthOwner: "aegis_canonical_operator_state_v1", description: "Legacy historical trade records separated from open paper positions." },
+    ].filter(Boolean) },
+    { label: "Repairs", routes: [
+      engineeringRouteById.repair_center,
+      { id: "aegis_repair_commands", label: "Repair Commands", operatorLabel: "Repair Commands", icon: "R", route: "/aegis-repair-center#repair-commands", truthOwner: "aegis_repair_center_projection_v1", description: "Repair command inventory and guarded command actions." },
+    ].filter(Boolean) },
+  ].filter((group) => group.routes.length > 0);
+  const runtimeStatusRows = state.shell.statusRail.filter((kernel) => String(kernel.kernel_id || "").toLowerCase() !== "control");
+  const runtimeStatusPanel = state.engineeringDrawerOpen ? `
+    <details class="engineering-runtime-status-panel">
+      <summary>Runtime Status</summary>
+      <div class="engineering-runtime-status-list">
+        ${runtimeStatusRows.map((kernel) => {
+          const routePath = normalizePath(kernel.href || "/");
+          const label = kernel.label || kernel.kernel_id || "Kernel";
+          const status = kernel.status?.label || kernel.status?.code || "Unknown";
+          const tooltip = kernel.status?.reason_codes?.join(", ") || "";
+          return `<a class="status-rail-item" href="${escapeHtml(routePath)}" data-route="${escapeHtml(routePath)}" title="${escapeHtml(tooltip)}"><span>${escapeHtml(label)}</span>${renderStatusPill(status, kernel.status?.semantic || "unknown", state.semantics)}</a>`;
+        }).join("") || `<div class="muted-mini">Runtime status has not loaded yet.</div>`}
+      </div>
+      <div class="kernel-safety-strip">READ-ONLY GOVERNANCE · NO BROKER EXECUTION · MANUAL CAPTURE ONLY</div>
+    </details>
+  ` : "";
+  const bootDiagnosticsPanel = state.engineeringDrawerOpen ? `
+    <details class="engineering-runtime-status-panel boot-diagnostics-panel">
+      <summary>Boot Diagnostics</summary>
+      <div class="runtime-diagnostics-grid">
+        <div><span>boot_time_ms</span><strong>${escapeHtml(String(state.bootDiagnostics.boot_time_ms || 0))}</strong></div>
+        <div><span>first_paint_ms</span><strong>${escapeHtml(String(state.bootDiagnostics.first_paint_ms || 0))}</strong></div>
+        <div><span>data_ready_ms</span><strong>${escapeHtml(String(state.bootDiagnostics.data_ready_ms || 0))}</strong></div>
+        <div><span>duplicate_fetch_count</span><strong>${escapeHtml(String(state.bootDiagnostics.duplicate_fetch_count || 0))}</strong></div>
+        <div><span>route_rerender_count</span><strong>${escapeHtml(String(state.bootDiagnostics.route_rerender_count || 0))}</strong></div>
+      </div>
+    </details>
+  ` : "";
+  const engineeringNavStatus = state.activeView?.engineeringNavStatus || state.activeView?.topReadinessLabel || "Internal routes";
+  const engineeringDrawer = `
+    <section class="sidebar-section sidebar-engineering-control">
+      <button class="sidebar-group-button engineering-toggle-button ${state.engineeringDrawerOpen || activeEngineeringRoute ? "active open" : ""}" type="button" data-engineering-drawer-toggle="true" data-route="/aegis-opportunities" aria-expanded="${state.engineeringDrawerOpen ? "true" : "false"}" aria-controls="engineeringDrawer">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-text"><strong>System Health</strong><small>${escapeHtml(engineeringNavStatus)}</small></span>
+      </button>
+    </section>
+    <aside id="engineeringDrawer" class="engineering-drawer" data-engineering-drawer ${state.engineeringDrawerOpen ? "" : "hidden"}>
+      <header class="engineering-drawer-header">
+        <div><div class="drawer-eyebrow">System Health</div><h3>Internal tools</h3></div>
+        <button class="ghost-button" type="button" data-engineering-drawer-close>Close</button>
+      </header>
+      ${runtimeStatusPanel}
+      ${bootDiagnosticsPanel}
+      <div class="engineering-route-list" data-engineering-route-list>
+        ${state.engineeringDrawerOpen ? (engineeringGroups.length ? engineeringGroups.map((group) => `
+          <section class="engineering-route-group" data-engineering-route-group="${escapeHtml(group.label)}">
+            <h4>${escapeHtml(group.label)}</h4>
+            <div class="engineering-route-group-list">
+              ${group.routes.map((route) => {
+                const routePath = normalizePath(String(route.route || "").split("#")[0] || "");
+                const isRouteActive = activeEngineeringRoute?.id === route.id || normalizePath(window.location.pathname) === routePath;
+                const label = route.operatorLabel || route.label;
+                return `<a class="engineering-route-link ${isRouteActive ? "active" : ""}" href="${escapeHtml(route.route)}" data-route="${escapeHtml(route.route)}" data-engineering-route-id="${escapeHtml(route.id || label)}">
+                  <span class="nav-icon">${escapeHtml(route.icon || "•")}</span>
+                  <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(route.description || route.truthOwner || "")}</small></span>
+                </a>`;
               }).join("")}
             </div>
-          </div>
-        `;
-      })
-      .join("");
-    return `
-      <section class="sidebar-section">
-        <div class="nav-section-title">${escapeHtml(section.section)}</div>
-        ${domains}
-      </section>
-    `;
-  }).join("");
-  logTiming("workspace/navigation load", startedAt, { mode: state.sidebarMode });
+          </section>
+        `).join("") : `<div class="muted-mini" data-engineering-empty>No engineering tools available</div>`) : ""}
+      </div>
+    </aside>
+  `;
+  document.getElementById("workspaceNav").innerHTML = `${operatorSections}${engineeringDrawer}`;
+  logTiming("workspace/navigation load", startedAt, { mode: state.sidebarMode, operatorMode: state.operatorMode, engineeringDrawerOpen: state.engineeringDrawerOpen });
 }
 
 function renderKernelRail() {
-  const host = document.getElementById("kernelStatusRail");
-  const visibleRail = state.shell.statusRail.filter((kernel) => String(kernel.kernel_id || "").toLowerCase() !== "control");
-  host.innerHTML = `${visibleRail.map((kernel) => {
-    const routePath = normalizePath(kernel.href || "/");
-    const label = kernel.label || kernel.kernel_id || "Kernel";
-    const status = kernel.status?.label || kernel.status?.code || "Unknown";
-    const tooltip = kernel.kernel_id === "advisory" && status === "Partial"
-      ? "Candidate exists, but evidence projection is incomplete."
-      : kernel.status?.reason_codes?.join(", ") || "";
-    return `
-      <a class="status-rail-item" href="${escapeHtml(routePath)}" data-route="${escapeHtml(routePath)}" title="${escapeHtml(tooltip)}">
-        <span>${escapeHtml(label)}</span>
-        ${renderStatusPill(status, kernel.status?.semantic || "unknown", state.semantics)}
-      </a>
-    `;
-  }).join("")}
-    <div class="kernel-safety-strip">READ-ONLY GOVERNANCE · NO BROKER EXECUTION · MANUAL CAPTURE ONLY</div>
-  `;
+  const chip = document.getElementById("sidebarStatusChip");
+  if (!chip) return;
+  const summary = state.shell.systemSummary || {};
+  const readiness = summary.readiness_summary || {};
+  const runtimeStatus = state.shell.runtimeStatus || {};
+  const activeMode = runtimeStatus.active_mode_readiness_status || readiness.active_mode_readiness_status || readiness.status || "";
+  const truth = state.activeView?.operatorTruth || {};
+  const label = truth.primaryStatus || state.activeView?.sidebarStatusLabel || (String(activeMode).toUpperCase() === "BLOCKED" || readiness.blocked ? "Paper Research Mode" : "Review only");
+  chip.textContent = label;
+  chip.hidden = false;
 }
 
 function renderTopBar() {
@@ -288,26 +460,32 @@ function renderTopBar() {
   const topLevelItems = Array.isArray(summary.top_level_items) ? summary.top_level_items : [];
   const trustPreserved = Array.isArray(summary.trust_preserved_items) ? summary.trust_preserved_items : [];
   const topAlert = trustPreserved[0] || topLevelItems[0] || null;
-  const readinessStatus = readiness.blocked ? (readiness.blocked_state || "BLOCKED") : "READY";
-  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
-  const pageTitle = active?.parentLabel ? `${active.parentLabel} / ${active.label}` : `${active?.label || "Command"} / Overview`;
-
-  document.getElementById("headerPageTitle").textContent = pageTitle;
-  document.getElementById("headerEnvironment").textContent = "PRODUCTION";
-  document.getElementById("headerDataTimestamp").textContent = "Operational timestamps loading";
-  document.getElementById("topRuntimeMode").textContent = formatDisplayLabel(summary.environment || summary.runtime_mode || runtimeStatus.runtime_mode || "UNKNOWN");
-  document.getElementById("topConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || summary.summary_id || "governed");
-  document.getElementById("topReadiness").innerHTML = renderStatusPill(
+  const truth = state.activeView?.operatorTruth || {};
+  const readinessStatus = truth.primaryStatus || state.activeView?.topReadinessLabel || (readiness.blocked ? "Paper Research Mode" : "Review only");
+  const readinessTone = truth.primaryTone || state.activeView?.topReadinessTone || (readiness.blocked ? "warning" : "neutral");
+  document.getElementById("headerPageTitle").textContent = state.activeView?.headerTitle || "Command / Overview";
+  document.getElementById("headerEnvironment").textContent = state.activeView?.environmentLabel || "Paper Research Mode";
+  document.getElementById("headerDataTimestamp").textContent = state.activeView?.dataTimestamp || "Operational timestamps loading";
+  const topRuntimeMode = document.getElementById("topRuntimeMode");
+  if (topRuntimeMode) topRuntimeMode.textContent = state.activeView?.runtimeModeLabel || formatDisplayLabel(summary.environment || summary.runtime_mode || runtimeStatus.runtime_mode || "UNKNOWN");
+  const topConfigVersion = document.getElementById("topConfigVersion");
+  if (topConfigVersion) topConfigVersion.textContent = formatDisplayLabel(summary.kernel_version || summary.summary_id || "governed");
+  const topReadiness = document.getElementById("topReadiness");
+  if (topReadiness) topReadiness.innerHTML = renderStatusPill(
     readinessStatus,
-    readiness.blocked ? "blocked" : "healthy",
+    readinessTone,
     state.semantics,
   );
-  document.getElementById("topPortfolioValue").textContent =
-    financialState.financial_status === "FAIL_CLOSED"
+  const topPortfolioValue = document.getElementById("topPortfolioValue");
+  if (topPortfolioValue) {
+    topPortfolioValue.textContent = financialState.financial_status === "FAIL_CLOSED"
       ? "fail closed"
       : formatUsd(financialState.investable_summary?.investable_assets_total_usd);
-  document.getElementById("topNotificationCount").textContent = String(trustPreserved.length);
-  document.getElementById("notificationBadge").textContent = String(Math.max(trustPreserved.length, 3));
+  }
+  const notificationCount = document.getElementById("topNotificationCount");
+  if (notificationCount) notificationCount.textContent = String(trustPreserved.length);
+  const notificationBadge = document.getElementById("notificationBadge");
+  if (notificationBadge) notificationBadge.textContent = String(Math.max(trustPreserved.length, 3));
   document.getElementById("bottomConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || "governed");
   document.getElementById("bottomFreshness").textContent = summary.last_refresh_utc || state.shell.refreshedAt || "n/a";
   document.getElementById("bottomReadiness").textContent = readinessStatus;
@@ -320,13 +498,137 @@ function renderTopBar() {
       : `${connectionState}: ${state.connection?.recovery_command || "npm run aegis:ui:restart"}`;
 }
 
+function showCommandDetailPanel(panel) {
+  if (!panel) return false;
+  document.querySelectorAll("dialog[open][data-command-detail-panel]").forEach((dialog) => {
+    if (dialog !== panel) {
+      dialog.close?.();
+      dialog.removeAttribute("open");
+    }
+  });
+  if (panel.showModal && !panel.open) {
+    try {
+      panel.showModal();
+    } catch (_error) {
+      panel.setAttribute("open", "");
+      panel.hidden = false;
+    }
+  } else if (!panel.open) {
+    panel.setAttribute("open", "");
+    panel.hidden = false;
+  }
+  return true;
+}
+
+
+function openAegisExitReviewDetailFallback(panelId, symbol = "Position", decision = "UNKNOWN", reason = "No reason reported") {
+  if (!panelId) return false;
+  let panel = document.getElementById(panelId);
+  if (!panel) {
+    panel = document.createElement("dialog");
+    panel.id = panelId;
+    panel.className = "command-detail-dialog";
+    panel.setAttribute("data-command-detail-panel", "");
+    panel.innerHTML = `<div class="command-detail-dialog-inner">
+      <header class="command-detail-header"><div><p class="eyebrow">EXIT_REVIEW_DETAIL</p><h3>${escapeHtml(symbol || "Position")}</h3><p>${escapeHtml(decision || "UNKNOWN")} - ${escapeHtml(reason || "No reason reported")}</p></div><form method="dialog"><button class="ghost-button" type="submit">Close</button></form></header>
+      <dl class="definition-list"><div><dt>Exit decision</dt><dd>${escapeHtml(decision || "UNKNOWN")}</dd></div><div><dt>Reason</dt><dd>${escapeHtml(reason || "No reason reported")}</dd></div><div><dt>Stop</dt><dd>See artifact</dd></div><div><dt>Target</dt><dd>See artifact</dd></div><div><dt>P&L</dt><dd>See artifact</dd></div><div><dt>Evidence</dt><dd>Artifact-backed exit_review_projection_v1 detail.</dd></div><div><dt>Next action</dt><dd>Manual review only.</dd></div><div><dt>Safety</dt><dd>Manual review only. No broker submission, order routing, or autonomous execution.</dd></div></dl>
+    </div>`;
+    document.body.appendChild(panel);
+  }
+  showCommandDetailPanel(panel);
+  return Boolean(panel.open);
+}
+
+window.openAegisExitReviewDetailFallback = openAegisExitReviewDetailFallback;
+
+function rememberOpenCommandDetail(commandElement, panelId) {
+  state.openCommandDetail = {
+    panelId,
+    routePath: window.location.pathname,
+    commandId: String(commandElement.getAttribute("data-aegis-command-id") || "").trim(),
+    label: String(commandElement.textContent || commandElement.getAttribute("data-aegis-command-id") || "View details").trim(),
+  };
+}
+
+function clearRememberedCommandDetail(panel) {
+  if (state.routeRenderInProgress > 0) {
+    return;
+  }
+  if (!panel || !document.body.contains(panel)) {
+    return;
+  }
+  if (state.openCommandDetail?.panelId === panel?.id) {
+    state.openCommandDetail = null;
+  }
+}
+
+function resetPaperTradeDialog(dialog) {
+  if (!dialog || !dialog.matches?.("[data-paper-entry-dialog]")) return;
+  dialog.dataset.paperSubmitting = "false";
+  dialog.querySelectorAll(".paper-candidate-action-form").forEach((form) => {
+    form.dataset.paperSubmitting = "false";
+    form.reset?.();
+    const statusNode = form.querySelector("[data-paper-candidate-status]");
+    if (statusNode) {
+      statusNode.hidden = true;
+      statusNode.textContent = "";
+      statusNode.dataset.tone = "";
+    }
+    form.querySelectorAll("button[type='submit']").forEach((button) => {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      if (button.dataset.originalLabel) {
+        button.textContent = button.dataset.originalLabel;
+      }
+    });
+  });
+}
+
+function closePaperTradeDialog(dialog) {
+  if (!dialog || !dialog.matches?.("[data-paper-entry-dialog]")) return false;
+  resetPaperTradeDialog(dialog);
+  if (dialog.close) dialog.close("cancel");
+  else dialog.removeAttribute("open");
+  return true;
+}
+
+
+function wireCommandDetailClose(panel) {
+  if (!panel || panel.dataset.commandDetailCloseWired === "true") return;
+  panel.dataset.commandDetailCloseWired = "true";
+  panel.addEventListener("close", () => {
+    resetPaperTradeDialog(panel);
+    clearRememberedCommandDetail(panel);
+  });
+  panel.addEventListener("cancel", () => {
+    resetPaperTradeDialog(panel);
+    clearRememberedCommandDetail(panel);
+  });
+}
+
+function restoreOpenCommandDetailAfterRender() {
+  const remembered = state.openCommandDetail;
+  if (!remembered || remembered.routePath !== window.location.pathname) return;
+  const panel = document.getElementById(remembered.panelId);
+  if (!panel) return;
+  showCommandDetailPanel(panel);
+  panel.dataset.openedBy = remembered.label || remembered.commandId || "View details";
+  panel.dataset.commandDetailOpenCommand = remembered.commandId || "";
+  wireCommandDetailClose(panel);
+  window.setTimeout(() => panel.focus?.({ preventScroll: true }), 0);
+}
+
 function setPageChrome(route, view) {
   document.title = `${view.title || route.label} | Aegis`;
   document.getElementById("workspaceTitle").textContent = view.title || route.label;
   document.getElementById("workspaceEyebrow").textContent = route.eyebrow || route.label;
   document.getElementById("workspaceMeta").textContent = view.meta || route.subtitle || "";
-  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
-  document.getElementById("headerPageTitle").textContent = active?.parentLabel ? `${active.parentLabel} / ${active.label}` : "Command / Overview";
+  document.getElementById("headerPageTitle").textContent = view.headerTitle || "Command / Overview";
+  const truth = view.operatorTruth || {};
+  if (truth.primaryStatus || view.topReadinessLabel) {
+    const topReadiness = document.getElementById("topReadiness");
+    if (topReadiness) topReadiness.innerHTML = renderStatusPill(truth.primaryStatus || view.topReadinessLabel, truth.primaryTone || view.topReadinessTone || "neutral", state.semantics);
+  }
   const timestampHost = document.getElementById("headerDataTimestamp");
   if (view.hideHeaderTimestamp) {
     timestampHost.textContent = "";
@@ -418,26 +720,85 @@ function researchConsoleErrorText(error) {
   return reason ? `${message} ${reason}` : message;
 }
 
-async function renderRoute() {
+async function renderRoute({ backgroundRefresh = false, source = "route" } = {}) {
   const startedAt = performance.now();
+  const renderGeneration = ++state.routeRenderGeneration;
+  state.routeRenderInProgress += 1;
   const route = currentRoute();
+  if (source === "refresh") {
+    markBootEvent("REFRESH_START", { route_id: route.id });
+  } else {
+    markBootEvent("RENDER_START", { route_id: route.id });
+  }
+  markBootEvent("ROUTE_RESOLVED", { route_id: route.id, path: route.path });
   renderNav();
+  document.title = `${route.label} | Aegis`;
+  const provisionalTitle = document.getElementById("workspaceTitle");
+  if (provisionalTitle) provisionalTitle.textContent = route.label;
   const mainHost = document.getElementById("workspaceContent");
   const contextHost = document.getElementById("contextRailContent");
-  mainHost.innerHTML = `<div class="page-loading">Loading ${escapeHtml(route.label)}…</div>`;
-  contextHost.innerHTML = "";
+  const sameRenderedRoute = state.routeRenderedOnce && state.lastRenderedRouteId === route.id;
+  const cachedView = state.routeCache.get(route.id);
+  const shouldPreserveContent = backgroundRefresh || sameRenderedRoute || Boolean(cachedView);
+  if (!shouldPreserveContent) {
+    markBootEvent("CONTENT_CLEARED", { route_id: route.id, reason: "initial_route_load" });
+    updateBootDiagnostic("content_clear_count", Number(state.bootDiagnostics.content_clear_count || 0) + 1);
+    mainHost.innerHTML = `<div class="page-loading">Loading ${escapeHtml(route.label)}...</div>`;
+    contextHost.innerHTML = "";
+  } else {
+    setWorkspaceUpdating({ active: true });
+  }
   try {
+    markBootEvent("STATE_FETCH_START", { route_id: route.id });
     const view = await timedAsync("workspace route load", () => loadRouteView(route.id, state), { route_id: route.id });
+    markBootEvent("STATE_FETCH_END", { route_id: route.id });
+    if (renderGeneration !== state.routeRenderGeneration) {
+      markBootEvent("ROUTE_REPLACED", { route_id: route.id, reason: "stale_render_generation" });
+      return;
+    }
+    if (state.routeRenderedOnce && state.lastRenderedRouteId === route.id) {
+      updateBootDiagnostic("route_rerender_count", Number(state.bootDiagnostics.route_rerender_count || 0) + 1);
+    }
     state.activeView = view;
+    state.routeCache.set(route.id, view);
+    renderNav();
+    renderKernelRail();
+    renderTopBar();
     setPageChrome(route, view);
+    const layoutMode = resolveWorkspaceLayoutMode(route, view);
+    const rightRailHidden = view.dashboardIncidentMode === true || view.hideContextRail === true || layoutMode === WORKFLOW_LAYOUT;
     document.body.classList.toggle("dashboard-incident-mode", view.dashboardIncidentMode === true);
-    document.body.classList.toggle("dashboard-main-only", view.hideContextRail === true);
+    document.body.classList.toggle("dashboard-main-only", view.hideContextRail === true && layoutMode !== WORKFLOW_LAYOUT);
+    document.body.classList.toggle("workflow-layout", layoutMode === WORKFLOW_LAYOUT);
+    document.body.classList.toggle("operational-layout", layoutMode === OPERATIONAL_LAYOUT);
+    document.body.dataset.workspaceLayoutMode = layoutMode;
+    setWorkspaceUpdating({ active: false });
     mainHost.innerHTML = view.html;
-    contextHost.hidden = view.dashboardIncidentMode === true || view.hideContextRail === true;
-    contextHost.innerHTML = (view.dashboardIncidentMode === true || view.hideContextRail === true) ? "" : (view.contextHtml || `<div class="empty-state">No contextual evidence for this surface.</div>`);
+    contextHost.hidden = rightRailHidden;
+    contextHost.innerHTML = rightRailHidden ? "" : (view.contextHtml || `<div class="empty-state">No contextual evidence for this surface.</div>`);
+    state.routeRenderedOnce = true;
+    state.lastRenderedRouteId = route.id;
+    if (!state.bootDiagnostics.first_paint_ms) {
+      updateBootDiagnostic("first_paint_ms", Math.round((performance.now() - state.bootDiagnostics.bootStart) * 10) / 10);
+    }
+    restoreOpenCommandDetailAfterRender();
+    revealCurrentHashTarget();
+    markBootEvent("RENDER_END", { route_id: route.id });
   } catch (error) {
+    if (source === "refresh") {
+      markBootEvent("REFRESH_END", { route_id: route.id, error: true });
+    } else {
+      markBootEvent("RENDER_END", { route_id: route.id, error: true });
+    }
+    if (shouldPreserveContent && state.routeRenderedOnce) {
+      setWorkspaceUpdating({ warning: error?.message || "Refresh failed; showing last good content." });
+      return;
+    }
     document.body.classList.remove("dashboard-incident-mode");
     document.body.classList.remove("dashboard-main-only");
+    document.body.classList.remove("workflow-layout");
+    document.body.classList.remove("operational-layout");
+    delete document.body.dataset.workspaceLayoutMode;
     contextHost.hidden = false;
     const routePath = String(route.path || "");
     const isCapitalRoute = routePath === "/capital" || routePath.startsWith("/capital/");
@@ -448,7 +809,12 @@ async function renderRoute() {
     }
     contextHost.innerHTML = "";
   } finally {
+    if (source === "refresh") {
+      markBootEvent("REFRESH_END", { route_id: route.id });
+    }
     logTiming("workspace render complete", startedAt, { route_id: route.id });
+    updateBootDiagnostic("duplicate_fetch_count", typeof window !== "undefined" ? Number(window.__AEGIS_DUPLICATE_FETCH_COUNT || 0) : 0);
+    state.routeRenderInProgress = Math.max(0, state.routeRenderInProgress - 1);
   }
 }
 
@@ -460,18 +826,56 @@ async function navigateTo(path) {
   const normalizedPath = normalizePath(rawPath);
   const shouldPreserveDynamicWorkOrderPath = rawPath.startsWith("/reliability/work-orders/") && rawPath !== "/reliability/work-orders";
   const finalPath = shouldPreserveDynamicWorkOrderPath ? rawPath : normalizedPath;
-  const finalTarget = `${rawQuery ? `${finalPath}?${rawQuery}` : finalPath}${hashPart ? `#${hashPart}` : ""}`;
+  const targetQuery = new URLSearchParams(rawQuery || "");
+  const currentQuery = new URLSearchParams(window.location.search || "");
+  ["day", "operational_day"].forEach((key) => {
+    if (!targetQuery.has(key) && currentQuery.has(key) && routeShouldPreserveDayQuery(finalPath)) {
+      targetQuery.set(key, currentQuery.get(key));
+    }
+  });
+  const queryText = targetQuery.toString();
+  const finalTarget = `${queryText ? `${finalPath}?${queryText}` : finalPath}${hashPart ? `#${hashPart}` : ""}`;
+  if (activeNavSelectionForPath(finalPath).workspace_id !== "engineering") {
+    state.engineeringDrawerOpen = false;
+  }
   if (finalTarget !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
     window.history.pushState({}, "", finalTarget);
   }
   togglePalette(false);
   await renderRoute();
   if (hashPart) {
-    const anchor = document.getElementById(hashPart);
-    if (anchor) {
-      anchor.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    revealCurrentHashTarget(hashPart);
   }
+}
+
+function revealChangeControlRecordTarget(targetId = "") {
+  const normalizedTargetId = String(targetId || "").replace(/^#/, "").trim();
+  if (!normalizedTargetId || !normalizedTargetId.startsWith("change-control-item-")) return false;
+  const target = document.getElementById(normalizedTargetId);
+  if (!target) return false;
+  if (target.tagName === "DETAILS") {
+    target.open = true;
+  }
+  target.closest("details")?.setAttribute("open", "");
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  target.focus?.({ preventScroll: true });
+  target.classList.remove("change-control-record-highlight");
+  void target.offsetWidth;
+  target.classList.add("change-control-record-highlight");
+  window.setTimeout(() => target.classList.remove("change-control-record-highlight"), 2200);
+  return true;
+}
+
+function revealCurrentHashTarget(forcedHash = "") {
+  const hash = String(forcedHash || window.location.hash || "").replace(/^#/, "").trim();
+  if (!hash) return false;
+  if (revealChangeControlRecordTarget(hash)) return true;
+  const anchor = document.getElementById(hash);
+  if (anchor) {
+    anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+    return true;
+  }
+  return false;
 }
 
 function revealHypothesisSummaryTarget({ sectionTargetId = "", cardTargetId = "" } = {}) {
@@ -517,6 +921,98 @@ function resetDrawer() {
   document.getElementById("drawerTitle").textContent = "Select evidence";
   document.getElementById("drawerMeta").textContent = "Artifact content and provenance appear here.";
   document.getElementById("drawerContent").textContent = "";
+}
+
+function parseEvidencePayload(node) {
+  const encoded = String(node?.getAttribute("data-evidence-payload") || "").trim();
+  if (!encoded) {
+    return {
+      title: String(node?.getAttribute("data-evidence-title") || "Evidence"),
+      explanation: String(node?.getAttribute("data-evidence-summary") || "Evidence is available for this item."),
+      artifact_path: String(node?.getAttribute("data-artifact-path") || ""),
+      artifact_hash: String(node?.getAttribute("data-artifact-hash") || ""),
+    };
+  }
+  try {
+    const payload = JSON.parse(decodeURIComponent(encoded));
+    return payload && typeof payload === "object" ? payload : {};
+  } catch {
+    return { title: "Evidence", explanation: "Evidence payload could not be decoded." };
+  }
+}
+
+function evidenceValue(value, fallback = "not reported") {
+  if (Array.isArray(value)) return value.length ? value.join(", ") : fallback;
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function evidenceRowsHtml(rows) {
+  return `<div class="evidence-drawer-definition-list">${rows.map((row) => `
+    <div class="evidence-drawer-definition-row">
+      <span>${escapeHtml(row.label || "Field")}</span>
+      <strong>${escapeHtml(evidenceValue(row.value))}</strong>
+    </div>
+  `).join("")}</div>`;
+}
+
+function linkedLifecycleEventsHtml(events = []) {
+  const rows = Array.isArray(events) ? events.slice(0, 12) : [];
+  if (!rows.length) return `<div class="empty-state">No linked lifecycle events were provided for this evidence item.</div>`;
+  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Event</th><th>Time</th><th>Source</th></tr></thead><tbody>${rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.event_type || row.type || "event")}</td>
+      <td>${escapeHtml(row.event_time || row.timestamp || row.generated_at_utc || "not reported")}</td>
+      <td>${escapeHtml(row.source_artifact || row.artifact_path || row.path || "content-addressed projection")}</td>
+    </tr>
+  `).join("")}</tbody></table></div>`;
+}
+
+function openEvidenceDrawer(payload = {}) {
+  const dialog = document.getElementById("evidenceDrawer");
+  const titleNode = document.getElementById("evidenceDrawerTitle");
+  const summaryNode = document.getElementById("evidenceDrawerSummary");
+  const bodyNode = document.getElementById("evidenceDrawerBody");
+  if (!dialog || !titleNode || !summaryNode || !bodyNode) return;
+  const title = evidenceValue(payload.title || payload.statement || payload.metric || "Evidence", "Evidence");
+  const explanation = evidenceValue(payload.explanation || payload.human_readable_explanation || payload.statement, "Technical provenance and audit details for this item.");
+  const artifactPath = evidenceValue(payload.artifact_path || payload.supporting_artifact_path, "");
+  const artifactHash = evidenceValue(payload.artifact_hash || payload.supporting_artifact_hash || payload.content_hash, "");
+  const replayHash = evidenceValue(payload.replay_hash || payload.evaluation_hash || payload.artifact_content_hash, "");
+  titleNode.textContent = title;
+  summaryNode.textContent = explanation;
+  bodyNode.innerHTML = `
+    ${evidenceRowsHtml([
+      { label: "Supporting metric", value: payload.supporting_metric || payload.metric || payload.raw_metric_key },
+      { label: "Artifact family", value: payload.artifact_family || payload.sourceKey || payload.source_key },
+      { label: "Artifact path", value: artifactPath },
+      { label: "Artifact hash", value: artifactHash },
+      { label: "Replay / evaluation hash", value: replayHash },
+      { label: "Source timestamp", value: payload.source_timestamp || payload.generated_at_utc || payload.timestamp },
+      { label: "Raw metric key", value: payload.raw_metric_key || payload.supporting_metric },
+      { label: "Evidence status", value: payload.evidence_status },
+      { label: "Confidence", value: payload.confidence },
+    ])}
+    <div class="evidence-drawer-actions">
+      <button class="ghost-button" type="button" data-copy-text="${escapeHtml(artifactPath)}" ${artifactPath ? "" : "disabled"}>Copy path</button>
+      <button class="ghost-button" type="button" data-copy-text="${escapeHtml(artifactHash || replayHash)}" ${artifactHash || replayHash ? "" : "disabled"}>Copy hash</button>
+    </div>
+    <section class="evidence-drawer-events">
+      <h4>Linked lifecycle events</h4>
+      ${linkedLifecycleEventsHtml(payload.linked_lifecycle_events || payload.lifecycle_events)}
+    </section>
+  `;
+  if (dialog.showModal && !dialog.open) {
+    try {
+      dialog.showModal();
+    } catch {
+      dialog.hidden = false;
+      dialog.setAttribute("open", "");
+    }
+  } else if (!dialog.open) {
+    dialog.hidden = false;
+    dialog.setAttribute("open", "");
+  }
 }
 
 function parseExceptionPayload(node) {
@@ -668,7 +1164,7 @@ function parseCommandPayload(rawValue) {
 }
 
 function commandStatusTargets(commandElement) {
-  const local = commandElement.closest("[data-command-surface], [data-domain-repair-card], [data-hypothesis-card], [data-domain-card]");
+  const local = commandElement.closest(".candidate-action-toolbar, [data-command-surface], [data-domain-repair-card], [data-hypothesis-card], [data-domain-card]");
   const targetId = String(commandElement.getAttribute("data-aegis-command-target-id") || "").trim();
   const targetType = String(commandElement.getAttribute("data-aegis-command-target-type") || "").trim();
   const nodes = [];
@@ -695,6 +1191,124 @@ function setCommandStatus(commandElement, message, tone = "") {
     node.textContent = message;
     if (tone) node.dataset.tone = tone;
   });
+}
+
+function setPaperPromotionStatus(actionElement, message, tone = "") {
+  const card = actionElement.closest?.("[data-testid=\"paper-promotion-recommendation-item\"]");
+  const status = card?.querySelector?.("[data-paper-promotion-status]");
+  if (status) {
+    status.hidden = false;
+    status.textContent = message;
+    if (tone) status.dataset.tone = tone;
+  }
+}
+
+function paperPromotionSuccessMessage(action = "") {
+  const normalized = String(action || "").trim().toUpperCase();
+  if (normalized === "APPROVE_PAPER_TEST" || normalized === "APPROVED") return "Approved for paper research tracking.";
+  if (normalized === "REJECT" || normalized === "REJECTED") return "Paper promotion rejected.";
+  if (normalized === "DEFER" || normalized === "DEFERRED") return "Paper promotion deferred.";
+  return "Paper promotion action recorded.";
+}
+
+function setOperatorActionStatus(actionElement, message, tone = "") {
+  const card = actionElement.closest?.("[data-testid=\"canonical-action-card\"]");
+  const status = card?.querySelector?.("[data-operator-action-status]");
+  if (status) {
+    status.hidden = false;
+    status.textContent = message;
+    if (tone) status.dataset.tone = tone;
+  }
+}
+
+async function runCanonicalOperatorActionElement(actionElement) {
+  const actionId = String(actionElement.getAttribute("data-action-id") || "").trim();
+  const hypothesisId = String(actionElement.getAttribute("data-hypothesis-id") || "").trim();
+  const actionType = String(actionElement.getAttribute("data-action-type") || "").trim();
+  const buttonClicked = String(actionElement.getAttribute("data-button-clicked") || "").trim();
+  const sourceStateHash = String(actionElement.getAttribute("data-source-state-hash") || "").trim();
+  const routeDay = new URLSearchParams(window.location.search || "").get("day") || new URLSearchParams(window.location.search || "").get("operational_day") || "";
+  if (!actionId || !hypothesisId || !actionType || !buttonClicked) {
+    setOperatorActionStatus(actionElement, "Action failed: missing action metadata", "error");
+    return;
+  }
+  const card = actionElement.closest?.("[data-testid=\"canonical-action-card\"]");
+  const buttons = card ? Array.from(card.querySelectorAll("[data-operator-action-event]")) : [actionElement];
+  buttons.forEach((button) => { button.disabled = true; });
+  setOperatorActionStatus(actionElement, "Recording operator action event...", "loading");
+  try {
+    const result = await appendOperatorActionEvent({
+      day_utc: routeDay,
+      action_id: actionId,
+      hypothesis_id: hypothesisId,
+      action_type: actionType,
+      button_clicked: buttonClicked,
+      prior_state: actionType,
+      new_state: buttonClicked,
+      source_state_hash: sourceStateHash,
+      actor: "David / operator",
+    });
+    if (!result?.ok) throw new Error(result?.message || result?.error_message || "operator action endpoint returned ok=false");
+    setOperatorActionStatus(actionElement, `${buttonClicked} recorded.`, "ready");
+    state.operatorActionEvent = { lastActionId: actionId, lastButton: buttonClicked, lastResult: result, lastError: null };
+    await renderRoute({ source: "operator-action-event" });
+  } catch (error) {
+    const reason = error?.payload?.message || error?.payload?.error_message || error?.message || "unknown error";
+    setOperatorActionStatus(actionElement, `Action failed: ${reason}`, "error");
+    state.operatorActionEvent = { lastActionId: actionId, lastButton: buttonClicked, lastResult: null, lastError: reason };
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function runPaperPromotionActionElement(actionElement) {
+  const action = String(actionElement.getAttribute("data-paper-promotion-action") || "").trim().toUpperCase();
+  const hypothesisId = String(actionElement.getAttribute("data-hypothesis-id") || "").trim();
+  const routeDay = new URLSearchParams(window.location.search || "").get("day") || new URLSearchParams(window.location.search || "").get("operational_day") || "";
+  if (!action || !hypothesisId) {
+    setPaperPromotionStatus(actionElement, "Approval failed: missing action or hypothesis id", "error");
+    return;
+  }
+  const card = actionElement.closest?.("[data-testid=\"paper-promotion-recommendation-item\"]");
+  const buttons = card ? Array.from(card.querySelectorAll("[data-paper-promotion-action]")) : [actionElement];
+  buttons.forEach((button) => { button.disabled = true; });
+  setPaperPromotionStatus(actionElement, "Recording paper promotion approval...", "loading");
+  try {
+    const result = await executePaperPromotionAction({
+      day_utc: routeDay,
+      hypothesis_id: hypothesisId,
+      action,
+      actor: "David / operator",
+      reason: "Research UI paper promotion action.",
+    });
+    if (!result?.ok) {
+      throw new Error(result?.message || result?.error_message || "approval endpoint returned ok=false");
+    }
+    setPaperPromotionStatus(actionElement, paperPromotionSuccessMessage(action), "ready");
+    state.paperPromotionAction = {
+      lastAction: action,
+      lastHypothesisId: hypothesisId,
+      lastResult: result,
+      lastError: null,
+    };
+    await renderRoute({ source: "paper-promotion-action" });
+    const refreshed = document.querySelector(`[data-testid="paper-promotion-recommendation-item"][data-hypothesis-id="${window.CSS?.escape ? CSS.escape(hypothesisId) : hypothesisId}"]`);
+    const refreshedStatus = refreshed?.querySelector?.("[data-paper-promotion-status]");
+    if (refreshedStatus && (action === "APPROVE_PAPER_TEST" || action === "APPROVED")) {
+      refreshedStatus.hidden = false;
+      refreshedStatus.textContent = "Approved for paper research tracking.";
+      refreshedStatus.dataset.tone = "ready";
+    }
+  } catch (error) {
+    const reason = error?.payload?.message || error?.payload?.error_message || error?.message || "unknown error";
+    setPaperPromotionStatus(actionElement, `Approval failed: ${reason}`, "error");
+    state.paperPromotionAction = {
+      lastAction: action,
+      lastHypothesisId: hypothesisId,
+      lastResult: null,
+      lastError: reason,
+    };
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 function ensureDomainCommandResultSink(targetId, fallbackLabel = "") {
@@ -769,6 +1383,62 @@ function showCommandResultPanel(commandElement, result = {}) {
     panel?.classList.add("command-result-panel-flash");
   });
 }
+function renderAskAegisGroundedResponse(payload = {}) {
+  const response = payload.latest_response && typeof payload.latest_response === "object" ? payload.latest_response : payload;
+  const sources = Array.isArray(response.source_artifacts) ? response.source_artifacts : [];
+  const selected = Array.isArray(response.selected_evidence) ? response.selected_evidence : [];
+  const unsupported = Array.isArray(response.unsupported_claims) ? response.unsupported_claims : [];
+  const sourceRows = sources.map((source) => `<li><strong>${escapeHtml(source.source_id || source.artifact_family || "source")}</strong>: ${escapeHtml(source.status || "UNKNOWN")}<div class="muted-mini">${escapeHtml(source.path || "")}</div></li>`).join("");
+  const evidenceRows = selected.slice(0, 6).map((item) => `<li><strong>${escapeHtml(item.title || item.evidence_id || "Evidence")}</strong>: ${escapeHtml(item.summary || "")}</li>`).join("");
+  return `
+    <div class="stack-card-title">${escapeHtml(response.question || "Ask Aegis")}</div>
+    <p class="support-note">${escapeHtml(response.answer || "No grounded answer was returned.")}</p>
+    <div class="metric-grid compact">
+      <article class="metric-card"><span>Confidence</span><strong>${escapeHtml(response.confidence || "UNKNOWN")}</strong></article>
+      <article class="metric-card"><span>Intent</span><strong>${escapeHtml(response.intent || "UNKNOWN")}</strong></article>
+      <article class="metric-card"><span>Source Evidence</span><strong>${escapeHtml(String(sources.length))}</strong></article>
+      <article class="metric-card"><span>Unsupported Claims</span><strong>${escapeHtml(String(unsupported.length))}</strong></article>
+    </div>
+    ${unsupported.length ? `<div class="status-banner warning">${escapeHtml(unsupported.join(" "))}</div>` : ""}
+    <details class="operator-disclosure ask-aegis-evidence"><summary>Sources Used</summary><ul>${sourceRows || "<li>No source artifacts were returned.</li>"}</ul></details>
+    <details class="operator-disclosure ask-aegis-evidence"><summary>Selected Evidence</summary><ul>${evidenceRows || "<li>No selected evidence was returned.</li>"}</ul></details>
+    <p class="muted-mini">context_hash: ${escapeHtml(response.context_hash || "missing")} · generated_at: ${escapeHtml(response.generated_at || "unknown")}</p>
+  `;
+}
+
+async function submitAskAegisForm(form) {
+  const output = form.closest("#ask-aegis")?.querySelector("[data-ask-aegis-response]");
+  const formData = new FormData(form);
+  const question = String(formData.get("question") || "").trim();
+  const routeDay = new URLSearchParams(window.location.search || "").get("day") || "";
+  const dayUtc = String(formData.get("day_utc") || routeDay || "").trim();
+  if (!question) {
+    if (output) output.innerHTML = `<div class="stack-card-title">Question required</div><p class="support-note">Enter an operational question before asking Aegis.</p>`;
+    return;
+  }
+  const submitter = form.querySelector('button[type="submit"]');
+  if (submitter) {
+    submitter.disabled = true;
+    submitter.setAttribute("aria-busy", "true");
+  }
+  if (output) {
+    output.innerHTML = `<div class="stack-card-title">Assembling evidence...</div><p class="support-note">Building deterministic context from Aegis operational artifacts.</p>`;
+  }
+  try {
+    const result = await askAegisAiOperations({ question, day_utc: dayUtc });
+    if (output) output.innerHTML = renderAskAegisGroundedResponse(result.latest_response || result);
+  } catch (error) {
+    if (output) {
+      output.innerHTML = `<div class="stack-card-title">Ask Aegis failed</div><p class="support-note">${escapeHtml(error?.message || "AI operations assistant request failed.")}</p><p class="muted-mini">Endpoint: /api/aegis/ai-operations/ask</p>`;
+    }
+  } finally {
+    if (submitter) {
+      submitter.disabled = false;
+      submitter.removeAttribute("aria-busy");
+    }
+  }
+}
+
 
 function openCommandDetail(commandElement) {
   const panelId = String(commandElement.getAttribute("data-command-detail-target") || commandElement.getAttribute("data-hypothesis-detail-target") || "").trim();
@@ -778,12 +1448,11 @@ function openCommandDetail(commandElement) {
     setCommandStatus(commandElement, "Detail panel is not available for this action.", "error");
     return;
   }
-  if (panel.showModal) {
-    panel.showModal();
-  } else {
-    panel.hidden = false;
-  }
+  showCommandDetailPanel(panel);
+  rememberOpenCommandDetail(commandElement, panelId);
+  wireCommandDetailClose(panel);
   panel.dataset.openedBy = String(commandElement.textContent || commandElement.getAttribute("data-aegis-command-id") || "View details").trim();
+  panel.dataset.commandDetailOpenCommand = String(commandElement.getAttribute("data-aegis-command-id") || "").trim();
   document.body.dataset.hypothesisLastFocusToken = String(Date.now());
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   panel.focus?.({ preventScroll: true });
@@ -793,6 +1462,248 @@ function openCommandDetail(commandElement) {
     card.classList.add("hypothesis-card-highlight");
     window.setTimeout(() => card.classList.remove("hypothesis-card-highlight"), 2400);
   }
+}
+
+function verifiedRuntimeActionValue(actionElement, attrName, sourceAttrName, fallback = "") {
+  const sourceId = String(actionElement.getAttribute(sourceAttrName) || "").trim();
+  if (sourceId) {
+    const sourceNode = document.getElementById(sourceId);
+    if (sourceNode) {
+      const value = "value" in sourceNode ? String(sourceNode.value || "") : String(sourceNode.textContent || "");
+      if (value.trim()) return value.trim();
+    }
+  }
+  return String(actionElement.getAttribute(attrName) || fallback || "").trim();
+}
+
+async function runVerifiedRuntimeActionElement(actionElement) {
+  const actionId = String(actionElement.getAttribute("data-aegis-verified-runtime-action") || "").trim();
+  if (!actionId) return;
+  const output = document.querySelector("[data-aegis-verified-runtime-output]");
+  actionElement.disabled = true;
+  if (output) output.textContent = `Running ${actionId}...`;
+  try {
+    const requestedDay = String(actionElement.getAttribute("data-requested-day") || actionElement.getAttribute("data-day") || "").trim();
+    const args = {
+      from_day: verifiedRuntimeActionValue(actionElement, "data-from-day", "data-from-day-source"),
+      to_day: verifiedRuntimeActionValue(actionElement, "data-to-day", "data-to-day-source"),
+      claim: verifiedRuntimeActionValue(actionElement, "data-claim", "data-claim-source"),
+    };
+    const result = await executeAegisVerifiedRuntimeAction({
+      action_id: actionId,
+      requested_day: requestedDay,
+      args,
+      operator_context: {
+        source: "schmidtvault_portal",
+        route: window.location?.pathname || "",
+      },
+    });
+    if (output) {
+      const command = Array.isArray(result.command_argv) ? result.command_argv.join(" ") : "";
+      const renderedResult = [
+        result.user_message || "Action completed.",
+        `status: ${result.status || result.result_status || "UNKNOWN"}`,
+        result.run_id ? `run_id: ${result.run_id}` : "",
+        Number.isFinite(Number(result.exit_code)) ? `exit_code: ${result.exit_code}` : "",
+        command ? `command: ${command}` : "",
+        result.stdout_excerpt || result.stdout_tail || "",
+        (result.stderr_excerpt || result.stderr_tail) ? `stderr:\n${result.stderr_excerpt || result.stderr_tail}` : "",
+      ].filter(Boolean).join("\n\n");
+      output.textContent = renderedResult;
+      const latestCopy = document.getElementById("aegisVerifiedRuntimeLatestActionResultCopy");
+      if (latestCopy) latestCopy.value = JSON.stringify(result, null, 2);
+      const latestCopyButton = document.querySelector('[data-copy-source="aegisVerifiedRuntimeLatestActionResultCopy"]');
+      if (latestCopyButton) latestCopyButton.disabled = false;
+    }
+  } catch (error) {
+    if (output) output.textContent = error?.message || "Verified runtime action failed.";
+  } finally {
+    actionElement.disabled = false;
+  }
+}
+
+function updateLastPaperTradeActionDiagnostic(detail = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    ...detail,
+  };
+  state.lastPaperTradeAction = payload;
+  window.__AEGIS_LAST_PAPER_ENTRY_ACTION = payload;
+  const rendered = JSON.stringify(payload, null, 2);
+  document.querySelectorAll("[data-last-paper-entry-action]").forEach((node) => {
+    node.textContent = rendered;
+  });
+}
+
+function paperEntryCommandPayloadForDiagnostics(commandElement, parsedPayload = {}) {
+  return {
+    candidate_id: parsedPayload.candidate_id || commandElement.getAttribute("data-aegis-command-target-id") || "",
+    candidate_contract_id: parsedPayload.candidate_contract_id || "",
+    paper_session_id: parsedPayload.paper_session_id || commandElement.getAttribute("data-paper-session-id") || "",
+    day_utc: parsedPayload.day_utc || parsedPayload.operational_day || "",
+    action: parsedPayload.action || "",
+    paper_entry_price: parsedPayload.paper_entry_price || parsedPayload.entry_price || "",
+    paper_stop_price: parsedPayload.paper_stop_price || parsedPayload.stop_price || "",
+    quantity: parsedPayload.quantity || "",
+    notional: parsedPayload.notional || "",
+  };
+}
+
+
+
+function workflowCommandLabel(commandType = "") {
+  const normalized = String(commandType || "").toUpperCase();
+  const labels = {
+    APPROVE_CANDIDATE: "Approve",
+    REJECT_CANDIDATE: "Reject",
+    CONFIRM_CANDIDATE_CAPTURED: "Confirm Captured",
+    MARK_CANDIDATE_NOT_CAPTURED: "Mark Not Captured",
+    DEFER_CANDIDATE: "Defer",
+    CORRECT_CANDIDATE_CAPTURE: "Correct Capture",
+    RECORD_PAPER_ENTRY: "Record Entry",
+    RECORD_PAPER_EXIT: "Record Exit",
+    REVOKE_APPROVAL: "Reject Approval",
+  };
+  return labels[normalized] || "Workflow";
+}
+
+function updateOperatorWorkflowRowDebug(commandElement, detail = {}) {
+  const region = commandElement.closest?.("[data-row-command-region], .candidate-action-toolbar");
+  if (!region) return;
+  const setField = (name, value) => {
+    if (value === undefined || value === null) return;
+    region.querySelectorAll(`[data-command-debug-field="${name}"]`).forEach((node) => {
+      node.textContent = String(value || "-");
+    });
+  };
+  setField("click_received_at", detail.click_received_at);
+  setField("command_id", detail.command_id);
+  setField("command_status", detail.command_status);
+  setField("endpoint_status", detail.endpoint_status);
+  setField("last_error", detail.last_error);
+}
+
+function operatorWorkflowCommandRecordPayload(commandElement, payload = {}) {
+  const candidateId = String(payload.candidate_id || commandElement.getAttribute("data-aegis-command-target-id") || "").trim();
+  const commandType = String(payload.command_type || commandElement.getAttribute("data-aegis-command-id") || "").trim();
+  return {
+    command_type: commandType,
+    created_by: "operator",
+    source_ui: String(payload.source_ui || "positions_today_candidates"),
+    paper_session_id: String(payload.paper_session_id || commandElement.getAttribute("data-paper-session-id") || ""),
+    candidate_id: candidateId,
+    candidate_contract_id: String(payload.candidate_contract_id || candidateId),
+    day_utc: String(payload.day_utc || payload.operational_day || ""),
+    payload: { ...payload, command_type: commandType },
+  };
+}
+
+function commandResultFromDurableStatus(statusPayload = {}) {
+  const result = statusPayload.result && typeof statusPayload.result === "object" ? statusPayload.result : {};
+  const command = statusPayload.command && typeof statusPayload.command === "object" ? statusPayload.command : {};
+  const status = String(result.status || statusPayload.status || command.status || "RECEIVED");
+  const ok = status === "EXECUTED" || status === "RECEIVED" || status === "VALIDATED";
+  return {
+    ok,
+    result_status: status,
+    user_message: result.message || `Command ${status}`,
+    command_id: statusPayload.command_id || command.command_id || result.command_id || "",
+    command_result: {
+      status_label: status,
+      result_status: status,
+      plain_english_result: result.message || `Command ${status}`,
+      next_required_step: statusPayload.terminal ? "Refresh projection and review row state." : "Waiting for command processor.",
+      expected_source_path: "",
+      audit_id: "",
+      failure_reason: result.error_code || "",
+      timestamp: result.processed_at || command.created_at || new Date().toISOString(),
+    },
+  };
+}
+
+async function pollPaperTradeCommandStatus(commandElement, commandId, dayUtc, targetId, payload) {
+  const endpoint = "/api/aegis/commands/status";
+  const label = workflowCommandLabel(commandElement.getAttribute("data-aegis-command-id") || payload?.command_type || "");
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 600 : 1200));
+    const statusPayload = await fetchAegisCommandStatus({ command_id: commandId, day: dayUtc });
+    const result = statusPayload.result && typeof statusPayload.result === "object" ? statusPayload.result : {};
+    const status = String(statusPayload.status || result.status || "RECEIVED");
+    setCommandStatus(commandElement, `${label} submitted (${status})`, status === "FAILED" || status === "REJECTED" ? "error" : "loading");
+    updateOperatorWorkflowRowDebug(commandElement, { command_id: commandId, command_status: status, endpoint_status: "200", last_error: status === "FAILED" || status === "REJECTED" ? (result.message || result.error_code || status) : "-" });
+    updateLastPaperTradeActionDiagnostic({
+      phase: statusPayload.terminal ? "terminal status received" : "status polled",
+      last_clicked_candidate: targetId,
+      command_id: commandId,
+      endpoint,
+      payload: paperEntryCommandPayloadForDiagnostics(commandElement, payload),
+      http_status: 200,
+      response_summary: result.message || status,
+      receipt_id: result.receipt_id || "",
+      receipt_path: result.receipt_path || "",
+      ok: status === "EXECUTED",
+    });
+    if (statusPayload.terminal) {
+      const panelResult = commandResultFromDurableStatus(statusPayload);
+      setCommandStatus(commandElement, `${label} ${status}${result.message ? ` - ${result.message}` : ""}`, panelResult.ok ? "ready" : "error");
+      updateOperatorWorkflowRowDebug(commandElement, { command_id: commandId, command_status: status, endpoint_status: "200", last_error: panelResult.ok ? "-" : (result.message || result.error_code || status) });
+      showCommandResultPanel(commandElement, panelResult);
+      window.setTimeout(() => renderRoute(), 250);
+      return statusPayload;
+    }
+  }
+  return null;
+}
+
+async function submitOperatorWorkflowCommand(commandElement, payload, targetId) {
+  const endpoint = "/api/aegis/commands";
+  const recordPayload = operatorWorkflowCommandRecordPayload(commandElement, payload);
+  const label = workflowCommandLabel(recordPayload.command_type);
+  const clickedAt = new Date().toISOString();
+  setCommandStatus(commandElement, `${label} command submitted`, "loading");
+  updateOperatorWorkflowRowDebug(commandElement, { click_received_at: clickedAt, command_status: "SUBMITTING", endpoint_status: "POST /api/aegis/commands", last_error: "-" });
+  updateLastPaperTradeActionDiagnostic({
+    phase: "click received",
+    last_clicked_candidate: targetId,
+    endpoint,
+    payload: paperEntryCommandPayloadForDiagnostics(commandElement, payload),
+    response_summary: `${label} command submitted`,
+  });
+  const recorded = await recordAegisCommand(recordPayload);
+  if (!recorded.ok || !recorded.command_id) {
+    updateOperatorWorkflowRowDebug(commandElement, { command_status: "RECORD_FAILED", endpoint_status: "ERROR", last_error: recorded.message || "Command could not be recorded." });
+    throw Object.assign(new Error(recorded.message || "Command could not be recorded."), { payload: recorded, operatorSafe: { statusCode: 400 } });
+  }
+  setCommandStatus(commandElement, `${label} command submitted`, "loading");
+  updateOperatorWorkflowRowDebug(commandElement, { command_id: recorded.command_id, command_status: "RECEIVED", endpoint_status: "202", last_error: "-" });
+  updateLastPaperTradeActionDiagnostic({
+    phase: "command received",
+    last_clicked_candidate: targetId,
+    command_id: recorded.command_id,
+    endpoint,
+    payload: paperEntryCommandPayloadForDiagnostics(commandElement, payload),
+    http_status: 202,
+    response_summary: recorded.message || "Command received",
+    inbox_path: recorded.inbox_path || "",
+    ok: true,
+  });
+  showCommandResultPanel(commandElement, {
+    ok: true,
+    result_status: "RECEIVED",
+    user_message: `${label} command received.`,
+    command_id: recorded.command_id,
+    command_result: {
+      status_label: "RECEIVED",
+      result_status: "RECEIVED",
+      plain_english_result: `${label} command received.`,
+      next_required_step: "Waiting for command processor.",
+      expected_source_path: "",
+      audit_id: "",
+      timestamp: recorded.command?.created_at || new Date().toISOString(),
+    },
+  });
+  await pollPaperTradeCommandStatus(commandElement, recorded.command_id, recordPayload.day_utc, targetId, payload);
+  return recorded;
 }
 
 async function runAegisCommandElement(commandElement) {
@@ -829,17 +1740,60 @@ async function runAegisCommandElement(commandElement) {
     return;
   }
   const payload = parseCommandPayload(commandElement.getAttribute("data-aegis-command-payload"));
+  const endpoint = "/api/aegis/commands/execute";
+  const workflowCommandIds = new Set(["APPROVE_CANDIDATE", "REJECT_CANDIDATE", "CONFIRM_CANDIDATE_CAPTURED", "MARK_CANDIDATE_NOT_CAPTURED", "DEFER_CANDIDATE", "CORRECT_CANDIDATE_CAPTURE", "RECORD_PAPER_ENTRY", "RECORD_PAPER_EXIT", "REVOKE_APPROVAL"]);
+  const isOperatorWorkflowCommand = workflowCommandIds.has(commandId);
   commandElement.disabled = true;
+  if (isOperatorWorkflowCommand) {
+    try {
+      await submitOperatorWorkflowCommand(commandElement, { ...payload, command_type: commandId }, targetId);
+    } catch (error) {
+      const responseBody = error?.payload ? JSON.stringify(error.payload) : "";
+      const failureResult = {
+        ok: false,
+        result_status: "FAILED",
+        error_message: error?.message || "Command failed.",
+        command_result: {
+          status_label: "FAILED",
+          result_status: "FAILED",
+          plain_english_result: error?.message || "Command failed.",
+          next_required_step: "Review the command recording error and try again after the underlying issue is resolved.",
+          failure_reason: responseBody || error?.message || "Command failed.",
+          timestamp: new Date().toLocaleString(),
+        },
+      };
+      setCommandStatus(commandElement, failureResult.error_message, "error");
+      updateOperatorWorkflowRowDebug(commandElement, { command_status: "FAILED", endpoint_status: error?.operatorSafe?.statusCode || "ERROR", last_error: failureResult.error_message });
+      updateLastPaperTradeActionDiagnostic({
+        phase: "command recording error",
+        last_clicked_candidate: targetId,
+        endpoint: "/api/aegis/commands",
+        payload: paperEntryCommandPayloadForDiagnostics(commandElement, payload),
+        http_status: error?.operatorSafe?.statusCode || null,
+        response_summary: failureResult.error_message,
+        response_body: responseBody,
+        ok: false,
+      });
+      showCommandResultPanel(commandElement, failureResult);
+    } finally {
+      commandElement.disabled = false;
+    }
+    return;
+  }
   setCommandStatus(commandElement, "Running command…", "loading");
   try {
-    const result = await executeAegisCommand({
+    const requestEnvelope = {
       command_id: commandId,
       target_type: targetType,
       target_id: targetId,
       operational_day: payload.operational_day || payload.day_utc || "",
       payload,
-    });
+    };
+    const result = await executeAegisCommand(requestEnvelope);
     const message = result.user_message || result.message || (result.ok ? "Command completed." : "Command failed.");
+    const statusLabel = result.command_result?.status_label || "";
+    const receiptTimestamp = result.receipt?.timestamp_utc || result.receipt?.timestamp || "";
+    const receiptId = result.receipt?.receipt_id || result.receipt?.paper_entry_receipt_id || (targetId && receiptTimestamp ? `paper-review:${targetId}:${receiptTimestamp}` : "");
     setCommandStatus(commandElement, message, result.ok ? "ready" : "error");
     showCommandResultPanel(commandElement, result);
     const card = commandElement.closest("[data-hypothesis-card]");
@@ -850,6 +1804,7 @@ async function runAegisCommandElement(commandElement) {
       card.classList.add("hypothesis-card-highlight");
     }
   } catch (error) {
+    const responseBody = error?.payload ? JSON.stringify(error.payload) : "";
     const failureResult = {
       ok: false,
       result_status: "FAILED",
@@ -859,7 +1814,7 @@ async function runAegisCommandElement(commandElement) {
         result_status: "FAILED",
         plain_english_result: error?.message || "Command failed.",
         next_required_step: "Review the error and try again after the underlying issue is resolved.",
-        failure_reason: error?.message || "Command failed.",
+        failure_reason: responseBody || error?.message || "Command failed.",
         timestamp: new Date().toLocaleString(),
       },
     };
@@ -871,6 +1826,33 @@ async function runAegisCommandElement(commandElement) {
 }
 
 async function handleClick(event) {
+  if (event.defaultPrevented) return;
+
+  const askAegisPrompt = event.target.closest("[data-ask-aegis-prompt]");
+  if (askAegisPrompt) {
+    event.preventDefault();
+    const form = askAegisPrompt.closest("[data-ask-aegis-form]") || document.querySelector("[data-ask-aegis-form]");
+    const input = form?.querySelector?.("[data-ask-aegis-question]");
+    if (input) {
+      input.value = String(askAegisPrompt.getAttribute("data-ask-aegis-prompt") || "");
+      input.focus();
+    }
+    if (form) await submitAskAegisForm(form);
+    return;
+  }
+  const paperEntryCancel = event.target.closest?.("[data-paper-entry-cancel]");
+  if (paperEntryCancel) {
+    event.preventDefault();
+    closePaperTradeDialog(paperEntryCancel.closest("dialog[data-paper-entry-dialog]"));
+    return;
+  }
+  if (event.target?.matches?.("dialog[data-paper-entry-dialog]")) {
+    const dialog = event.target;
+    if (dialog.dataset.paperSubmitting === "true") return;
+    event.preventDefault();
+    closePaperTradeDialog(dialog);
+    return;
+  }
   const researchQuickFilter = event.target.closest("[data-research-quick-filter]");
   if (researchQuickFilter) {
     event.preventDefault();
@@ -900,6 +1882,27 @@ async function handleClick(event) {
     const form = modal?.querySelector?.(".manual-capture-record-form");
     const success = form?.querySelector?.("[data-manual-capture-success]");
     closeManualCaptureDialog(modal, { force: Boolean(success && !success.hidden) });
+    return;
+  }
+
+  const verifiedRuntimeAction = event.target.closest("[data-aegis-verified-runtime-action]");
+  if (verifiedRuntimeAction) {
+    event.preventDefault();
+    await runVerifiedRuntimeActionElement(verifiedRuntimeAction);
+    return;
+  }
+
+  const canonicalOperatorAction = event.target.closest("[data-operator-action-event]");
+  if (canonicalOperatorAction) {
+    event.preventDefault();
+    await runCanonicalOperatorActionElement(canonicalOperatorAction);
+    return;
+  }
+
+  const paperPromotionAction = event.target.closest("[data-paper-promotion-action]");
+  if (paperPromotionAction) {
+    event.preventDefault();
+    await runPaperPromotionActionElement(paperPromotionAction);
     return;
   }
 
@@ -986,15 +1989,15 @@ async function handleClick(event) {
           document.execCommand("copy");
           temp.remove();
         }
-        const original = copyButton.dataset.originalLabel || copyButton.textContent || "Copy";
-        copyButton.dataset.originalLabel = original;
-        copyButton.textContent = "Copied";
-        window.setTimeout(() => {
-          copyButton.textContent = copyButton.dataset.originalLabel || original;
-        }, 1400);
       } catch {
         // Keep UI fail-closed; no throwing on clipboard failures.
       }
+      const original = copyButton.dataset.originalLabel || copyButton.textContent || "Copy";
+      copyButton.dataset.originalLabel = original;
+      copyButton.textContent = "Copied";
+      window.setTimeout(() => {
+        copyButton.textContent = copyButton.dataset.originalLabel || original;
+      }, 1400);
     }
     return;
   }
@@ -1081,6 +2084,38 @@ async function handleClick(event) {
     return;
   }
 
+  const engineeringDrawerToggle = event.target.closest("[data-engineering-drawer-toggle]");
+  if (engineeringDrawerToggle) {
+    event.preventDefault();
+    const targetRoute = String(engineeringDrawerToggle.getAttribute("data-route") || "/aegis-opportunities").trim();
+    const activeSelection = activeNavSelectionForPath(window.location.pathname);
+    const alreadyInEngineering = activeSelection.workspace_id === "engineering";
+    if (!alreadyInEngineering && targetRoute) {
+      state.engineeringDrawerOpen = true;
+      await navigateTo(targetRoute);
+    } else {
+      state.engineeringDrawerOpen = !state.engineeringDrawerOpen;
+      renderNav();
+    }
+    return;
+  }
+
+  const engineeringDrawerClose = event.target.closest("[data-engineering-drawer-close]");
+  if (engineeringDrawerClose) {
+    event.preventDefault();
+    state.engineeringDrawerOpen = false;
+    renderNav();
+    return;
+  }
+
+
+  const changeControlRecordLink = event.target.closest("[data-change-control-record-link]");
+  if (changeControlRecordLink) {
+    event.preventDefault();
+    await navigateTo(changeControlRecordLink.getAttribute("href") || "/aegis-change-control");
+    return;
+  }
+
   const routeLink = event.target.closest("[data-route]");
   if (routeLink) {
     event.preventDefault();
@@ -1105,8 +2140,10 @@ async function handleClick(event) {
   const groupToggle = event.target.closest("[data-nav-group-toggle]");
   if (groupToggle) {
     event.preventDefault();
-    if (state.sidebarMode === "collapsed") {
-      const route = normalizePath(groupToggle.getAttribute("data-route") || "/aegis-opportunities");
+    const controlsId = String(groupToggle.getAttribute("aria-controls") || "").trim();
+    const childrenHost = controlsId ? document.getElementById(controlsId) : null;
+    if (state.sidebarMode === "collapsed" || !childrenHost) {
+      const route = normalizePath(groupToggle.getAttribute("data-route") || "/aegis-command-center");
       history.pushState({}, "", route);
       await renderRoute();
       renderNav();
@@ -1184,7 +2221,14 @@ async function handleClick(event) {
   const refreshRouteButton = event.target.closest("[data-refresh-route]");
   if (refreshRouteButton) {
     event.preventDefault();
-    await renderRoute();
+    await renderRoute({ backgroundRefresh: true, source: "refresh" });
+    return;
+  }
+
+  const evidenceButton = event.target.closest("[data-evidence-payload]");
+  if (evidenceButton) {
+    event.preventDefault();
+    openEvidenceDrawer(parseEvidencePayload(evidenceButton));
     return;
   }
 
@@ -1429,6 +2473,11 @@ function handleReset(event) {
 }
 
 function handleCancel(event) {
+  const paperEntryDialog = event.target.closest?.("dialog[data-paper-entry-dialog]");
+  if (paperEntryDialog) {
+    resetPaperTradeDialog(paperEntryDialog);
+    return;
+  }
   const modal = event.target.closest?.("[data-manual-capture-dialog]");
   if (!modal) {
     return;
@@ -1441,6 +2490,153 @@ function handleCancel(event) {
 }
 
 async function handleSubmit(event) {
+
+
+  const changeControlDecisionForm = event.target.closest(".change-control-decision-form");
+  if (changeControlDecisionForm) {
+    event.preventDefault();
+    const formData = new FormData(changeControlDecisionForm);
+    const statusNode = changeControlDecisionForm.querySelector("[data-change-control-decision-status]");
+    const submitter = event.submitter || changeControlDecisionForm.querySelector('button[type="submit"]');
+    const payload = Object.fromEntries(formData.entries());
+    if (statusNode) {
+      statusNode.textContent = "Recording decision...";
+      statusNode.dataset.tone = "loading";
+    }
+    if (submitter) {
+      submitter.disabled = true;
+      submitter.setAttribute("aria-busy", "true");
+    }
+    try {
+      const result = await recordAegisChangeControlDecision(payload);
+      if (statusNode) {
+        statusNode.textContent = result?.decision_record?.id ? `Decision recorded: ${result.decision_record.id}` : "Decision recorded.";
+        statusNode.dataset.tone = "ready";
+      }
+      await renderRoute({ backgroundRefresh: false, source: "change-control-decision" });
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.payload?.message || error?.message || "Decision action failed.";
+        statusNode.dataset.tone = "error";
+      }
+    } finally {
+      if (submitter) {
+        submitter.disabled = false;
+        submitter.removeAttribute("aria-busy");
+      }
+    }
+    return;
+  }
+
+  const askAegisForm = event.target.closest("[data-ask-aegis-form]");
+  if (askAegisForm) {
+    event.preventDefault();
+    await submitAskAegisForm(askAegisForm);
+    return;
+  }
+
+  const paperCandidateForm = event.target.closest(".paper-candidate-action-form");
+  if (paperCandidateForm) {
+    event.preventDefault();
+    const formData = new FormData(paperCandidateForm);
+    const commandId = String(formData.get("command_type") || formData.get("command_id") || "").trim();
+    const candidateId = String(formData.get("candidate_id") || "").trim();
+    const statusNode = paperCandidateForm.querySelector("[data-paper-candidate-status]");
+    const submitter = event.submitter || paperCandidateForm.querySelector('button[type="submit"]');
+    const dialog = paperCandidateForm.closest("dialog");
+    if (statusNode) {
+      statusNode.hidden = false;
+      statusNode.textContent = "Recording simulated paper workflow...";
+      statusNode.dataset.tone = "loading";
+    }
+    if (submitter) {
+      submitter.dataset.originalLabel = submitter.dataset.originalLabel || String(submitter.textContent || "Record").trim();
+      submitter.disabled = true;
+      submitter.setAttribute("aria-busy", "true");
+      submitter.innerHTML = `<span class="button-spinner" aria-hidden="true"></span>${escapeHtml(submitter.dataset.originalLabel)}`;
+    }
+    paperCandidateForm.dataset.paperSubmitting = "true";
+    if (dialog?.matches?.("[data-paper-entry-dialog]")) dialog.dataset.paperSubmitting = "true";
+    try {
+      const payload = Object.fromEntries(formData.entries());
+      let result;
+      if (["APPROVE_CANDIDATE", "REJECT_CANDIDATE", "CONFIRM_CANDIDATE_CAPTURED", "MARK_CANDIDATE_NOT_CAPTURED", "DEFER_CANDIDATE", "CORRECT_CANDIDATE_CAPTURE", "RECORD_PAPER_ENTRY", "RECORD_PAPER_EXIT", "REVOKE_APPROVAL"].includes(commandId)) {
+        result = await submitOperatorWorkflowCommand(submitter || paperCandidateForm, { ...payload, command_type: commandId }, candidateId);
+        if (statusNode) {
+          statusNode.textContent = `Command ${result?.command_id || ""}: RECEIVED`;
+          statusNode.dataset.tone = result?.ok ? "ready" : "error";
+        }
+      } else {
+        result = await executeAegisCommand({
+          command_id: commandId,
+          target_type: "paper_review_candidate",
+          target_id: candidateId,
+          operational_day: String(payload.day_utc || ""),
+          payload,
+        });
+        if (statusNode) {
+          statusNode.textContent = result?.user_message || result?.message || "Paper workflow updated.";
+          statusNode.dataset.tone = result?.ok ? "ready" : "error";
+        }
+        showCommandResultPanel(submitter || paperCandidateForm, result);
+      }
+      if (result?.ok && dialog?.close) dialog.close();
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.payload?.user_message || error?.payload?.error_message || error?.message || "Paper workflow action failed.";
+        statusNode.dataset.tone = "error";
+      }
+    } finally {
+      paperCandidateForm.dataset.paperSubmitting = "false";
+      if (dialog?.matches?.("[data-paper-entry-dialog]")) dialog.dataset.paperSubmitting = "false";
+      if (submitter) {
+        submitter.disabled = false;
+        submitter.removeAttribute("aria-busy");
+        if (submitter.dataset.originalLabel) submitter.textContent = submitter.dataset.originalLabel;
+      }
+    }
+    return;
+  }
+
+  const advisorBenchmarkForm = event.target.closest(".advisor-benchmark-form");
+  if (advisorBenchmarkForm) {
+    event.preventDefault();
+    const formData = new FormData(advisorBenchmarkForm);
+    const payload = Object.fromEntries(formData.entries());
+    const statusNode = advisorBenchmarkForm.querySelector("[data-advisor-benchmark-status]");
+    const submitter = event.submitter || advisorBenchmarkForm.querySelector('button[type="submit"]');
+    if (statusNode) {
+      statusNode.hidden = false;
+      statusNode.textContent = "Saving advisor benchmark...";
+      statusNode.dataset.tone = "loading";
+    }
+    if (submitter) {
+      submitter.disabled = true;
+      submitter.setAttribute("aria-busy", "true");
+    }
+    try {
+      const result = await saveAegisAdvisorBenchmark(payload);
+      if (statusNode) {
+        statusNode.textContent = result?.snapshot?.as_of_date ? `Saved advisor benchmark: ${result.snapshot.period_type} ${result.snapshot.return_pct}% as of ${result.snapshot.as_of_date}` : "Saved advisor benchmark.";
+        statusNode.dataset.tone = "ready";
+      }
+      await renderRoute({ backgroundRefresh: true, source: "advisor-benchmark-save" });
+    } catch (error) {
+      const fieldErrors = error?.payload?.field_errors || {};
+      const firstError = Object.values(fieldErrors)[0];
+      if (statusNode) {
+        statusNode.textContent = firstError || error?.payload?.message || error?.message || "Advisor benchmark save failed.";
+        statusNode.dataset.tone = "error";
+      }
+    } finally {
+      if (submitter) {
+        submitter.disabled = false;
+        submitter.removeAttribute("aria-busy");
+      }
+    }
+    return;
+  }
+
   const candidateActionForm = event.target.closest(".candidate-action-form");
   if (candidateActionForm) {
     event.preventDefault();
@@ -1470,6 +2666,42 @@ async function handleSubmit(event) {
     return;
   }
 
+
+  const manualReceiptForm = event.target.closest(".manual-receipt-form");
+  if (manualReceiptForm) {
+    event.preventDefault();
+    const formData = new FormData(manualReceiptForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.operator_attestation = formData.get("operator_attestation") === "true";
+    const statusNode = manualReceiptForm.querySelector("[data-manual-receipt-status]");
+    if (statusNode) {
+      statusNode.hidden = false;
+      statusNode.textContent = "Recording manual receipt...";
+      statusNode.dataset.tone = "loading";
+    }
+    try {
+      const result = await executeAegisCommand({
+        command_id: "ADD_MANUAL_RECEIPT",
+        target_type: "paper_trade",
+        target_id: String(payload.target_id || payload.trade_id || ""),
+        operational_day: String(payload.operational_day || ""),
+        payload,
+      });
+      if (statusNode) {
+        statusNode.textContent = result?.user_message || "Manual receipt recorded.";
+        statusNode.dataset.tone = "ready";
+      }
+      showCommandResultPanel(manualReceiptForm.querySelector('button[type="submit"]') || manualReceiptForm, result);
+      await renderRoute();
+    } catch (error) {
+      const message = error?.payload?.user_message || error?.payload?.error_message || error?.message || "Manual receipt failed.";
+      if (statusNode) {
+        statusNode.textContent = message;
+        statusNode.dataset.tone = "error";
+      }
+    }
+    return;
+  }
 
   const manualCaptureRecordForm = event.target.closest(".manual-capture-record-form");
   if (manualCaptureRecordForm) {
@@ -1697,27 +2929,39 @@ async function handleSubmit(event) {
 
 export async function bootOperatorShell() {
   const startedAt = performance.now();
+  state.bootDiagnostics.bootStart = startedAt;
+  markBootEvent("BOOT_START", { path: window.location.pathname });
   renderBrand();
   renderNav();
   renderTopBar();
-  document.getElementById("workspaceContent").innerHTML = `<div class="page-loading">Loading workspace…</div>`;
+  document.getElementById("workspaceContent").innerHTML = `<div class="page-loading">Loading workspace...</div>`;
   document.getElementById("contextRailContent").innerHTML = `<div class="empty-state">Evidence loads after the workspace summary is available.</div>`;
   logTiming("initial shell render", startedAt);
-  loadSharedShellState({ summaryOnly: true }).then(() => {
-    renderRoute();
-    return loadSharedShellState({ summaryOnly: false });
-  }).then(() => {
-    renderRoute();
-  }).catch((error) => {
+  markBootEvent("EVIDENCE_DRAWER_INIT", { mode: "idle" });
+  if (document.body.dataset.aegisClickWired !== "true") {
+    document.body.dataset.aegisClickWired = "true";
+    document.body.addEventListener("click", (event) => {
+      handleClick(event);
+    });
+  }
+  try {
+    markBootEvent("STATE_FETCH_START", { source: "shared_shell" });
+    const sharedStateLoad = loadSharedShellState({ summaryOnly: false }).then(() => {
+      updateBootDiagnostic("data_ready_ms", Math.round((performance.now() - startedAt) * 10) / 10);
+      markBootEvent("STATE_FETCH_END", { source: "shared_shell" });
+    });
+    const routeRender = renderRoute({ source: "boot" });
+    await Promise.all([sharedStateLoad, routeRender]);
+  } catch (error) {
     console.error("[aegis-ui] shared shell load failed", error);
-  });
-  await renderRoute();
+  }
+  updateBootDiagnostic("boot_time_ms", Math.round((performance.now() - startedAt) * 10) / 10);
 
-  document.getElementById("refreshButton").addEventListener("click", async () => {
+  document.getElementById("refreshButton")?.addEventListener("click", async () => {
     await loadSharedShellState({ summaryOnly: false });
-    await renderRoute();
+    await renderRoute({ backgroundRefresh: true, source: "refresh" });
   });
-  document.getElementById("commandPaletteButton").addEventListener("click", () => {
+  document.getElementById("commandPaletteButton")?.addEventListener("click", () => {
     togglePalette(true);
   });
   document.getElementById("commandPaletteInput").addEventListener("input", () => {
@@ -1730,7 +2974,7 @@ export async function bootOperatorShell() {
     resetDrawer();
   });
   window.addEventListener("popstate", () => {
-    renderRoute();
+    renderRoute({ source: "popstate" });
   });
   window.addEventListener("resize", () => {
     renderNav();
@@ -1744,14 +2988,12 @@ export async function bootOperatorShell() {
   });
   window.setInterval(() => {
     if (currentRoute().id === "aegis_runtime" && state.connection?.state && state.connection.state !== "CONNECTED") {
-      renderRoute();
+      renderRoute({ backgroundRefresh: true, source: "refresh" });
     }
   }, 5000);
+  markBootEvent("REFRESH_TIMERS_ARMED", { runtime_retry_ms: 5000 });
   window.addEventListener("keydown", (event) => {
     handleKeydown(event);
-  });
-  document.body.addEventListener("click", (event) => {
-    handleClick(event);
   });
   document.body.addEventListener("input", (event) => {
     handleInput(event);

@@ -1,0 +1,6 @@
+id: FAIL_0004
+what_we_expected: Architecture maturity would imply comparable evidence maturity.
+what_failed: Evidence maturity lagged architecture readiness across outcomes, sleeves, and factory claims.
+why_failed: Verified architecture and diagnostic surfaces were easier to mature than empirical validation.
+what_to_try_next: Split broad architecture-versus-evidence claims into narrower evidence checks.
+status: OPEN

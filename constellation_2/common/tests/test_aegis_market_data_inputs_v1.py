@@ -9,6 +9,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ops.aegis import data_registry_v1
+from ops.aegis.market_data_coverage_v1 import build_market_data_coverage_v1
+from ops.aegis.market_data_demand_v1 import build_market_data_demand_v1, write_market_data_demand_v1
 from ops.aegis import market_data_inputs_v1 as mdi
 from ops.aegis.market_data.market_data_provider_v1 import ProviderResult
 from ops.aegis.market_data import market_data_provider_v1 as mdp
@@ -40,6 +42,34 @@ def _contracts(root: Path) -> None:
                     "required_inputs": [{"data_item_id": "market.volatility.VIX", "required": True}],
                     "optional_inputs": [],
                 },
+            ],
+        },
+    )
+
+
+
+
+def _dynamic_universe_contracts(root: Path) -> None:
+    _write(
+        root / "reports/aegis_sleeve_input_contracts_v1" / DAY / "sleeve_input_contracts.v1.json",
+        {
+            "schema_id": "aegis_sleeve_input_contracts",
+            "day_utc": DAY,
+            "contracts": [
+                {
+                    "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+                    "contract_status": "OK",
+                    "symbol_universe_hash": "u" * 64,
+                    "symbol_resolution": {
+                        "source": "governed_dynamic_universe",
+                        "source_path": "/truth/universe.json",
+                    },
+                    "required_inputs": [
+                        {"data_item_id": "market.price.AAPL", "required": True},
+                        {"data_item_id": "market.price.MSFT", "required": True},
+                    ],
+                    "optional_inputs": [{"data_item_id": "market.volatility.VIX", "required": False}],
+                }
             ],
         },
     )
@@ -190,6 +220,60 @@ def test_data_registry_consumes_canonical_market_data_inputs(tmp_path: Path) -> 
     assert spy["status"] == "CURRENT"
     assert spy["value"] == 100.25
     assert spy["raw_source_hash"] == "a" * 64
+
+
+def test_data_registry_prefers_current_canonical_market_data_over_stale_input(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "reports/market_data_inputs_v1" / DAY / "market_data_inputs.v1.json",
+        {
+            "schema_id": "market_data_inputs",
+            "schema_version": "v1",
+            "artifact_id": "market_data_inputs_v1",
+            "day_utc": DAY,
+            "input_records": [
+                {
+                    "data_item_id": "market.price.IONX",
+                    "symbol": "IONX",
+                    "field_type": "price",
+                    "value": 56.09,
+                    "source_vendor": "LOCAL_CACHE",
+                    "source_timestamp_utc": "2026-05-20T00:00:00Z",
+                    "day_utc": DAY,
+                    "raw_source_hash": "a" * 64,
+                    "transformed_value_hash": "b" * 64,
+                    "validation_status": "STALE",
+                    "reason": "SOURCE_SESSION_NOT_CURRENT:2026-05-20",
+                }
+            ],
+        },
+    )
+    _write(
+        tmp_path / "reports/aegis_market_data_v1" / DAY / "market_data.v1.json",
+        {
+            "schema_id": "aegis_market_data",
+            "day_utc": DAY,
+            "market_session_date": DAY,
+            "status": "CURRENT",
+            "requested_symbols": ["IONX"],
+            "symbols": {
+                "IONX": {
+                    "symbol": "IONX",
+                    "last_price": 70.25,
+                    "freshness_status": "CURRENT",
+                    "market_session_date": DAY,
+                    "data_timestamp_utc": f"{DAY}T20:15:00Z",
+                    "source": "YAHOO_CHART",
+                }
+            },
+        },
+    )
+
+    registry = data_registry_v1.build_data_registry_v1(truth_root=tmp_path, day_utc=DAY, symbols=["IONX"])
+
+    ionx = next(row for row in registry["data_items"] if row["data_item_id"] == "market.price.IONX")
+    assert ionx["status"] == "CURRENT"
+    assert ionx["provider"] == "YAHOO_CHART"
+    assert ionx["data_timestamp_utc"] == f"{DAY}T20:15:00Z"
 
 
 def test_valid_vix_clears_volatility_sleeve_readiness(tmp_path: Path, monkeypatch) -> None:
@@ -818,6 +902,7 @@ def test_partial_eod_artifact_fetches_only_missing_symbols(tmp_path: Path, monke
 
     _patch_eod_symbols(monkeypatch, ["SPY", "QQQ"])
     _write_canonical_eod_artifact(tmp_path / "truth", ["SPY"])
+    _write_dynamic_certification_queue(tmp_path / "truth", DAY, ["QQQ"])
     calls: list[tuple[str, ...]] = []
     _patch_provider_builder(monkeypatch, dsb, ["QQQ"], calls)
 
@@ -1388,7 +1473,212 @@ def test_run_sleeves_now_script_uses_intraday_operational_mode() -> None:
     assert "INTRADAY_OPERATIONAL" in source
     assert "YAHOO_CHART" in source
     assert "broker_execution_allowed" in source
+    assert "stage_timeout_seconds" in source
     assert "run_aegis_intraday_sleeves_now_v1.py" in package
+
+
+def test_run_sleeves_now_stage_timeout_returns_clear_failed_stage(monkeypatch) -> None:
+    from ops.tools import run_aegis_intraday_sleeves_now_v1 as runner
+
+    def _timeout(*args, **kwargs):
+        raise runner.subprocess.TimeoutExpired(cmd=kwargs.get("args") or args[0], timeout=2, output="partial stdout", stderr="partial stderr")
+
+    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+
+    result = runner._run([runner.PYTHON, "ops/tools/refresh_aegis_market_data_v1.py"], env={}, timeout_seconds=2)
+
+    assert result["returncode"] == 124
+    assert result["timed_out"] is True
+    assert result["failure_reason"] == "STAGE_TIMEOUT"
+    assert result["stage"] == "refresh_aegis_market_data_v1.py"
+    assert result["payload"]["failed_stage"] == "refresh_aegis_market_data_v1.py"
+    assert result["payload"]["timeout_seconds"] == 2
+    assert "exceeded 2s" in result["payload"]["message"]
+    assert result["stdout"] == "partial stdout"
+    assert result["stderr"] == "partial stderr"
+
+
+def test_yahoo_intraday_timeout_emits_precise_provider_attempt(tmp_path: Path, monkeypatch) -> None:
+    from dataclasses import replace
+
+    def _timeout(request, timeout=0):
+        raise TimeoutError("simulated yahoo timeout")
+
+    monkeypatch.setattr(mdp.urllib.request, "urlopen", _timeout)
+    config = replace(
+        _provider_config("DISABLED", mode="INTRADAY_OPERATIONAL"),
+        intraday_provider="YAHOO_CHART",
+        timeout_seconds=1,
+        per_symbol_timeout_seconds=1,
+        total_timeout_seconds=3,
+    )
+
+    result = mdp.fetch_market_data_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbols=["SPY"],
+        symbol_map={"symbols": {"SPY": {"providers": {"YAHOO_CHART": "SPY"}}}},
+        config_override=config,
+    )
+
+    assert result.request_status == "FAILED"
+    assert result.missing_symbols == ("SPY",)
+    assert any(row["provider"] == "YAHOO_CHART" and row["status"] == "TIMEOUT" for row in result.provider_attempts)
+
+
+def test_stooq_intraday_fallback_gets_isolated_provider_budget(tmp_path: Path, monkeypatch) -> None:
+    from dataclasses import replace
+
+    captured: dict[str, float] = {}
+
+    def _fake_fetch_provider(*, provider, truth_root, day_utc, symbols, symbol_map, config, deadline):
+        import time
+
+        captured[provider] = max(0.0, deadline - time.monotonic())
+        return mdp.ProviderResult(
+            provider=provider,
+            request_status="FAILED",
+            timestamp_utc=f"{DAY}T14:50:00Z",
+            returned_data_date="",
+            symbols={},
+            breadth={},
+            failure_reason="MARKET_DATA_FETCH_FAILED",
+            requested_symbols=tuple(symbols),
+            missing_symbols=tuple(symbols),
+            provider_failed_symbols=tuple(symbols),
+            normalized_records=(),
+            provider_attempts=(),
+        )
+
+    monkeypatch.setenv("AEGIS_MARKET_DATA_INTRADAY_FALLBACK_TIMEOUT_SECONDS", "3")
+    monkeypatch.setattr(mdp, "_fetch_provider", _fake_fetch_provider)
+    config = replace(_provider_config("STOOQ", mode="INTRADAY_OPERATIONAL"), total_timeout_seconds=180)
+
+    mdp.fetch_market_data_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbols=["SPY"],
+        symbol_map={"symbols": {"SPY": {"providers": {"STOOQ": "SPY.US"}}}},
+        config_override=config,
+    )
+
+    assert 0 < captured["STOOQ"] <= 3.25
+
+
+def test_partial_intraday_timeout_refresh_artifact_is_precise(tmp_path: Path, monkeypatch) -> None:
+    from ops.tools import refresh_aegis_market_data_v1 as refresh
+
+    vix = _final_symbol_row("VIX", provider="YAHOO_CHART")
+    vix["data_finality"] = "PROVISIONAL_INTRADAY"
+    vix["market_data_mode"] = "PROVISIONAL_INTRADAY"
+    vix["candidate_generation_eligible"] = True
+
+    def _fetch(**kwargs):
+        return mdp.ProviderResult(
+            provider="YAHOO_CHART",
+            request_status="FAILED",
+            timestamp_utc=f"{DAY}T14:50:00Z",
+            returned_data_date=DAY,
+            symbols={"VIX": vix},
+            breadth={},
+            failure_reason="MARKET_DATA_REFRESH_TIMEOUT",
+            provider_results=({"provider": "YAHOO_CHART", "request_status": "TIMEOUT", "failure_reason": "MARKET_DATA_REFRESH_TIMEOUT", "missing_symbols": ["SPY"], "stale_symbols": []},),
+            requested_symbols=("SPY", "VIX"),
+            fetched_symbols=("VIX",),
+            missing_symbols=("SPY",),
+            provider_failed_symbols=("SPY",),
+            normalized_records=(),
+            provider_attempts=({"symbol": "SPY", "provider": "YAHOO_CHART", "status": "TIMEOUT"},),
+        )
+
+    monkeypatch.setattr(refresh, "fetch_market_data_v1", _fetch)
+    payload = refresh.build_market_data_report_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbol_map_override={"required_symbols": ["SPY", "VIX"], "symbols": {"SPY": {"providers": {"YAHOO_CHART": "SPY"}}, "VIX": {"providers": {"YAHOO_CHART": "^VIX"}}}},
+        market_data_mode="INTRADAY_OPERATIONAL",
+    )
+
+    assert payload["intraday_data_status"] == "INTRADAY_PROVIDER_TIMEOUT"
+    assert payload["operator_market_data_state"] == "INTRADAY_PROVIDER_TIMEOUT"
+    assert payload["intraday_timeout_symbols"] == ["SPY"]
+    assert payload["intraday_context_degraded"] is True
+
+
+def test_certified_eod_artifact_can_satisfy_intraday_when_provider_unavailable(tmp_path: Path, monkeypatch) -> None:
+    from dataclasses import replace
+
+    _write(
+        tmp_path / "reports/final_eod_market_data_v1" / DAY / "final_eod_market_data.v1.json",
+        {
+            "schema_id": "final_eod_market_data",
+            "status": "CURRENT",
+            "validation_status": "VALID",
+            "day_utc": DAY,
+            "requested_symbols": ["SPY"],
+            "final_eod_symbols": ["SPY"],
+            "symbols": {"SPY": _final_symbol_row("SPY", provider="TIINGO")},
+        },
+    )
+
+    def _timeout(request, timeout=0):
+        raise TimeoutError("simulated yahoo timeout")
+
+    monkeypatch.setattr(mdp.urllib.request, "urlopen", _timeout)
+    config = replace(
+        _provider_config("DISABLED", mode="INTRADAY_OPERATIONAL"),
+        intraday_provider="YAHOO_CHART",
+        timeout_seconds=1,
+        per_symbol_timeout_seconds=1,
+        total_timeout_seconds=3,
+    )
+
+    result = mdp.fetch_market_data_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbols=["SPY"],
+        symbol_map={"symbols": {"SPY": {"providers": {"YAHOO_CHART": "SPY"}}}},
+        config_override=config,
+    )
+
+    assert result.request_status == "SUCCESS"
+    assert result.symbols["SPY"]["provider"] == "FINAL_EOD_ARTIFACT"
+    assert result.symbols["SPY"]["market_data_mode"] == "FINAL_EOD_CERTIFIED"
+    assert result.symbols["SPY"]["usable_for"]["sleeve_intraday_generation"] is True
+    assert any(row["provider"] == "FINAL_EOD_ARTIFACT" and row["request_status"] == "SUCCESS" for row in result.provider_results)
+
+
+def test_intraday_required_input_fails_with_exact_provider_blocker(tmp_path: Path, monkeypatch) -> None:
+    _contracts(tmp_path)
+    monkeypatch.setenv("AEGIS_MARKET_DATA_MODE", "INTRADAY_OPERATIONAL")
+    monkeypatch.setattr(mdi, "build_symbol_map_v1", lambda **_: {"required_symbols": ["SPY", "VIX"], "symbols": {"SPY": {"providers": {"YAHOO_CHART": "SPY"}}, "VIX": {"providers": {"YAHOO_CHART": "^VIX"}}}})
+    monkeypatch.setattr(mdi, "write_symbol_map_v1", lambda truth_root, day_utc, payload: {"json": str(tmp_path / "symbol_map.json")})
+    _write(tmp_path / "symbol_map.json", {"required_symbols": ["SPY", "VIX"]})
+
+    def _fetch(**kwargs):
+        return mdp.ProviderResult(
+            provider="YAHOO_CHART",
+            request_status="FAILED",
+            timestamp_utc=f"{DAY}T14:50:00Z",
+            returned_data_date="",
+            symbols={},
+            breadth={},
+            failure_reason="INTRADAY_PROVIDER_TIMEOUT",
+            provider_results=({"provider": "YAHOO_CHART", "request_status": "TIMEOUT", "failure_reason": "INTRADAY_PROVIDER_TIMEOUT", "missing_symbols": ["SPY", "VIX"], "stale_symbols": []},),
+            requested_symbols=("SPY", "VIX"),
+            missing_symbols=("SPY", "VIX"),
+            provider_failed_symbols=("SPY", "VIX"),
+            normalized_records=(),
+        )
+
+    monkeypatch.setattr(mdi, "fetch_market_data_v1", _fetch)
+    payload = mdi.build_market_data_inputs_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T15:00:00Z")
+
+    assert payload["status"] == "BLOCKED"
+    assert sorted(payload["missing_input_ids"]) == ["market.price.SPY", "market.volatility.VIX"]
+    reasons = {row["data_item_id"]: row["reason"] for row in payload["input_records"]}
+    assert reasons["market.price.SPY"] == "INTRADAY_PROVIDER_TIMEOUT"
+    assert reasons["market.volatility.VIX"] == "INTRADAY_PROVIDER_TIMEOUT"
 
 
 def test_cboe_unavailable_fails_closed_for_vix_without_certification(tmp_path: Path, monkeypatch) -> None:
@@ -1430,3 +1720,509 @@ def test_final_eod_service_resolves_weekend_to_latest_equities_trading_day() -> 
     assert latest_us_equities_trading_day_on_or_before_v1("2026-05-23") == "2026-05-22"
     service = Path("ops/systemd/user/aegis-market-data-final-eod-v1.service").read_text(encoding="utf-8")
     assert "--use-latest-trading-day-on-or-before" in service
+
+
+def _write_canonical_universe_authority(root: Path, day: str, symbols: list[str]) -> None:
+    _write(
+        root / "reports" / "canonical_universe_authority_v1" / day / "canonical_universe_authority.v1.json",
+        {
+            "schema_id": "canonical_universe_authority",
+            "day_utc": day,
+            "source_day": day,
+            "authority_status": "PASS",
+            "canonical_universe_authority_id": f"cua-{day}",
+            "universe_symbol_count": len(symbols),
+            "universe_symbols": symbols,
+            "writer_process": "ranked_symbol_universe_v1",
+            "generation_pipeline": "ranked_symbol_universe_v1",
+            "immutable_hash": f"hash-{len(symbols)}",
+            "generated_at": f"{day}T21:00:00Z",
+        },
+    )
+
+
+def _write_stable_final_eod_universe(root: Path, day: str, symbols: list[str]) -> None:
+    _write(
+        root / "reports" / "final_eod_market_data_v1" / day / "final_eod_market_data.v1.json",
+        {
+            "schema_id": "final_eod_market_data_v1",
+            "schema_version": "v1",
+            "day_utc": day,
+            "status": "CURRENT",
+            "validation_status": "VALID",
+            "final_eod_certification_status": "VALID",
+            "requested_symbols": symbols,
+            "final_eod_symbols": symbols,
+            "symbols": {symbol: {"symbol": symbol, "canonical_symbol": symbol} for symbol in symbols},
+        },
+    )
+
+
+def _write_dynamic_certification_queue(root: Path, day: str, symbols: list[str]) -> None:
+    _write(
+        root / "reports" / "dynamic_certification_queue_v1" / day / "dynamic_certification_queue.v1.json",
+        {
+            "schema_id": "dynamic_certification_queue",
+            "schema_version": "v1",
+            "artifact_id": "dynamic_certification_queue_v1",
+            "operational_day": day,
+            "requested_symbols": symbols,
+            "requested_symbol_count": len(symbols),
+            "certification_status": "PENDING" if symbols else "EMPTY",
+            "content_hash": f"queue-{len(symbols)}",
+        },
+    )
+
+
+def test_required_eod_universe_uses_stable_certified_plus_dynamic_queue_not_broad_authority(tmp_path: Path, monkeypatch) -> None:
+    from ops.tools import manage_us_equities_eod_source_v1 as eod_source
+
+    _write_stable_final_eod_universe(tmp_path, DAY, ["SPY", "QQQ"])
+    _write_canonical_universe_authority(tmp_path, DAY, ["SPY", "QQQ", "IWM", "DIA"])
+    monkeypatch.setattr(eod_source, "build_symbol_map_v1", lambda **_: {"required_symbols": ["SPY"]})
+
+    stable_only = eod_source.write_required_universe_v1(truth_root=tmp_path, day_utc=DAY)
+    _write_dynamic_certification_queue(tmp_path, DAY, ["IWM"])
+    expanded = eod_source.write_required_universe_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert stable_only["source"] == "stable_certified_universe"
+    assert stable_only["symbols"] == ["SPY", "QQQ"]
+    assert expanded["source"] == "stable_certified_universe+dynamic_certification_queue_v1"
+    assert expanded["symbols"] == ["SPY", "QQQ", "IWM"]
+    assert expanded["dynamic_requested_symbols"] == ["IWM"]
+
+
+def test_required_eod_universe_count_changes_with_dynamic_queue_artifact(tmp_path: Path) -> None:
+    from ops.tools import manage_us_equities_eod_source_v1 as eod_source
+
+    _write_stable_final_eod_universe(tmp_path, DAY, ["SPY", "QQQ"])
+    first = eod_source.write_required_universe_v1(truth_root=tmp_path, day_utc=DAY)
+    _write_dynamic_certification_queue(tmp_path, DAY, ["IWM", "DIA"])
+    second = eod_source.write_required_universe_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert first["count"] == 2
+    assert second["count"] == 4
+    assert second["symbols"] == ["SPY", "QQQ", "IWM", "DIA"]
+
+
+def test_dynamic_queue_extends_symbol_map_baseline_when_same_day_final_eod_is_absent(tmp_path: Path, monkeypatch) -> None:
+    from ops.tools import manage_us_equities_eod_source_v1 as eod_source
+
+    monkeypatch.setattr(eod_source, "build_symbol_map_v1", lambda **_: {"required_symbols": ["SPY", "QQQ"]})
+    _write_dynamic_certification_queue(tmp_path, DAY, ["IWM"])
+
+    universe = eod_source.write_required_universe_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert universe["source"] == "symbol_map_required_symbols+dynamic_certification_queue_v1"
+    assert universe["symbols"] == ["SPY", "QQQ", "IWM"]
+    assert universe["dynamic_requested_symbols"] == ["IWM"]
+
+
+def test_no_fixed_symbol_count_universe_assumption_in_authority_paths() -> None:
+    source = (REPO_ROOT / "ops/aegis/universe/canonical_symbol_universe_resolver_v1.py").read_text(encoding="utf-8")
+    eod_source = (REPO_ROOT / "ops/tools/manage_us_equities_eod_source_v1.py").read_text(encoding="utf-8")
+    domain_source = (REPO_ROOT / "ops/aegis/domain_source_builders_v1.py").read_text(encoding="utf-8")
+    queue_source = (REPO_ROOT / "ops/aegis/dynamic_certification_queue_v1.py").read_text(encoding="utf-8")
+
+    combined = "\n".join([source, eod_source, domain_source, queue_source])
+    legacy_fixed_reason = "fixed_etf_core_" + "universe_count"
+    legacy_fixed_counts = "{10, 12, 41, " + str(40 + 3) + "}"
+    assert legacy_fixed_reason not in combined
+    assert legacy_fixed_counts not in combined
+    assert "broad_universe_membership_alone_queues_symbol" in combined
+    assert "dynamic_certification_queue_v1" in combined
+
+def test_dynamic_universe_symbols_become_market_data_demand(tmp_path: Path) -> None:
+    _dynamic_universe_contracts(tmp_path)
+    _write(
+        tmp_path / "reports/aegis_candidate_contracts_v1" / DAY / "candidate_contracts.v1.json",
+        {"candidate_contracts": [{"symbol": "QQQ"}]},
+    )
+    symbol_map = {"raw_signal_symbols": ["SPY"], "required_symbols": ["DIA"]}
+
+    payload = build_market_data_demand_v1(repo_root=REPO_ROOT, truth_root=tmp_path, day_utc=DAY, symbol_map_payload=symbol_map)
+
+    assert payload["broker_execution_allowed"] is False
+    assert payload["autonomous_execution_allowed"] is False
+    assert payload["trade_advice_allowed"] is False
+    assert set(payload["requested_symbols"]) >= {"AAPL", "MSFT", "QQQ", "SPY", "DIA", "VIX"}
+    assert set(payload["required_symbols"]) >= {"AAPL", "MSFT", "QQQ"}
+    aapl = next(row for row in payload["demand_rows"] if row["symbol"] == "AAPL")
+    assert aapl["required"] is True
+    assert aapl["required_data_item"] == "market.price.AAPL"
+    assert aapl["consumer_sleeves"] == ["C2_TREND_EQ_PRIMARY_V1"]
+    assert aapl["symbol_universe_hash"] == "u" * 64
+
+
+def test_market_data_refresh_requests_all_demanded_symbols(tmp_path: Path, monkeypatch) -> None:
+    from ops.tools import refresh_aegis_market_data_v1 as refresh
+
+    _dynamic_universe_contracts(tmp_path)
+    captured: dict[str, list[str]] = {}
+
+    def _fetch(**kwargs):
+        captured["symbols"] = list(kwargs["symbols"])
+        symbols = {
+            symbol: {
+                "symbol": symbol,
+                "canonical_symbol": symbol,
+                "provider": "LOCAL_CACHE",
+                "last_price": 100.0,
+                "data_timestamp_utc": f"{DAY}T15:00:00Z",
+                "market_session_date": DAY,
+                "source": "LOCAL_CACHE",
+                "source_hash": "a" * 64,
+                "freshness_status": "CURRENT",
+            }
+            for symbol in kwargs["symbols"]
+        }
+        return ProviderResult(
+            provider="LOCAL_CACHE",
+            request_status="SUCCESS",
+            timestamp_utc=f"{DAY}T15:00:00Z",
+            returned_data_date=DAY,
+            symbols=symbols,
+            breadth={},
+            requested_symbols=tuple(kwargs["symbols"]),
+            fetched_symbols=tuple(kwargs["symbols"]),
+            provider_attempts=tuple({"symbol": symbol, "provider": "LOCAL_CACHE", "status": "ACCEPTED"} for symbol in kwargs["symbols"]),
+            normalized_records=(),
+        )
+
+    monkeypatch.setattr(refresh, "build_symbol_map_v1", lambda **_: {"raw_signal_symbols": ["SPY"], "required_symbols": ["DIA"]})
+    monkeypatch.setattr(refresh, "fetch_market_data_v1", _fetch)
+
+    payload = refresh.build_market_data_report_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert set(captured["symbols"]) >= {"AAPL", "MSFT", "SPY", "DIA", "VIX"}
+    assert payload["requested_symbols_source"] == "aegis_market_data_demand_v1"
+    assert payload["total_requested_symbol_count"] == len(captured["symbols"])
+
+
+def test_market_data_coverage_blocks_partial_provider_coverage(tmp_path: Path) -> None:
+    _dynamic_universe_contracts(tmp_path)
+    demand = build_market_data_demand_v1(
+        repo_root=REPO_ROOT,
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbol_map_payload={"raw_signal_symbols": [], "required_symbols": []},
+    )
+    write_market_data_demand_v1(truth_root=tmp_path, day_utc=DAY, payload=demand)
+    _write(
+        tmp_path / "reports/aegis_market_data_v1" / DAY / "market_data.v1.json",
+        {
+            "schema_id": "aegis_market_data",
+            "day_utc": DAY,
+            "symbols": {
+                "AAPL": {
+                    "symbol": "AAPL",
+                    "freshness_status": "CURRENT",
+                    "market_session_date": DAY,
+                    "data_timestamp_utc": f"{DAY}T15:00:00Z",
+                },
+                "MSFT": {
+                    "symbol": "MSFT",
+                    "freshness_status": "STALE",
+                    "market_session_date": "2026-05-19",
+                    "data_timestamp_utc": "2026-05-19T20:00:00Z",
+                    "freshness_reason": "prior_session_cache",
+                },
+            },
+            "provider_attempts": [
+                {"symbol": "AAPL", "provider": "LOCAL_CACHE", "status": "ACCEPTED"},
+                {"symbol": "MSFT", "provider": "STOOQ", "status": "REJECTED", "rejected_reason": "PRIOR_SESSION"},
+            ],
+        },
+    )
+    _write(
+        tmp_path / "reports/market_data_inputs_v1" / DAY / "market_data_inputs.v1.json",
+        {
+            "input_records": [
+                {"data_item_id": "market.price.AAPL", "validation_status": "VALID", "market_session_date": DAY},
+                {"data_item_id": "market.price.MSFT", "validation_status": "STALE", "market_session_date": "2026-05-19", "reason": "prior_session_cache"},
+            ]
+        },
+    )
+    _write(
+        tmp_path / "reports/aegis_data_registry_v1" / DAY / "data_registry.v1.json",
+        {
+            "data_items": [
+                {"data_item_id": "market.price.AAPL", "status": "CURRENT", "market_session_date": DAY},
+                {"data_item_id": "market.price.MSFT", "status": "STALE", "market_session_date": "2026-05-19"},
+            ]
+        },
+    )
+
+    coverage = build_market_data_coverage_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert coverage["status"] == "BLOCKED"
+    assert coverage["certified_symbol_count"] == 1
+    assert coverage["stale_symbols"] == ["MSFT"]
+    assert coverage["blocking_consumers"] == ["C2_TREND_EQ_PRIMARY_V1"]
+    msft = next(row for row in coverage["coverage_rows"] if row["symbol"] == "MSFT")
+    assert msft["provider_attempted"] is True
+    assert "provider_rejected_reason=PRIOR_SESSION" in msft["stale_reason"]
+    assert coverage["broker_execution_allowed"] is False
+    assert coverage["autonomous_execution_allowed"] is False
+    assert coverage["trade_advice_allowed"] is False
+
+
+def test_market_data_coverage_allows_complete_current_session_coverage(tmp_path: Path) -> None:
+    _dynamic_universe_contracts(tmp_path)
+    demand = build_market_data_demand_v1(
+        repo_root=REPO_ROOT,
+        truth_root=tmp_path,
+        day_utc=DAY,
+        symbol_map_payload={"raw_signal_symbols": [], "required_symbols": []},
+    )
+    demand["required_symbols"] = ["AAPL", "MSFT"]
+    demand["demand_rows"] = [row for row in demand["demand_rows"] if row["symbol"] in {"AAPL", "MSFT"}]
+    write_market_data_demand_v1(truth_root=tmp_path, day_utc=DAY, payload=demand)
+    _write(
+        tmp_path / "reports/aegis_market_data_v1" / DAY / "market_data.v1.json",
+        {
+            "symbols": {
+                symbol: {"symbol": symbol, "freshness_status": "CURRENT", "market_session_date": DAY, "data_timestamp_utc": f"{DAY}T15:00:00Z"}
+                for symbol in ("AAPL", "MSFT")
+            },
+            "provider_attempts": [{"symbol": symbol, "provider": "LOCAL_CACHE", "status": "ACCEPTED"} for symbol in ("AAPL", "MSFT")],
+        },
+    )
+    _write(
+        tmp_path / "reports/market_data_inputs_v1" / DAY / "market_data_inputs.v1.json",
+        {"input_records": [{"data_item_id": f"market.price.{symbol}", "validation_status": "VALID", "market_session_date": DAY} for symbol in ("AAPL", "MSFT")]},
+    )
+    _write(
+        tmp_path / "reports/aegis_data_registry_v1" / DAY / "data_registry.v1.json",
+        {"data_items": [{"data_item_id": f"market.price.{symbol}", "status": "CURRENT", "market_session_date": DAY} for symbol in ("AAPL", "MSFT")]},
+    )
+
+    coverage = build_market_data_coverage_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert coverage["status"] == "READY"
+    assert coverage["required_symbol_count"] == 2
+    assert coverage["certified_symbol_count"] == 2
+    assert coverage["stale_symbol_count"] == 0
+    assert coverage["blocking_consumers"] == []
+
+def _provider_config_for_dynamic_tests(*, primary: str = "LOCAL_CACHE", fallback: str = "STOOQ", intraday_provider: str = "") -> mdp.ProviderConfig:
+    return mdp.ProviderConfig(
+        primary=primary,
+        fallback=fallback,
+        allow_delayed=True,
+        require_current_session=True,
+        require_breadth=False,
+        timeout_seconds=1,
+        cache_ttl_seconds=900,
+        per_symbol_timeout_seconds=1,
+        total_timeout_seconds=10,
+        stooq_retries=1,
+        stooq_backoff_seconds=0,
+        stooq_chunk_size=2,
+        market_data_mode="INTRADAY_OPERATIONAL",
+        intraday_provider=intraday_provider,
+    )
+
+
+def test_local_cache_stale_current_session_demand_is_rejected_with_cache_stale(tmp_path: Path) -> None:
+    cache = tmp_path / "market_data_snapshot_v1" / "MSFT" / f"{DAY[:4]}.jsonl"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"symbol": "MSFT", "timestamp_utc": "2026-05-19T20:00:00Z", "open": 1, "high": 1, "low": 1, "close": 1}) + "\n", encoding="utf-8")
+    config = _provider_config_for_dynamic_tests()
+    symbol_map = {"symbols": {"MSFT": {"providers": {"LOCAL_CACHE": "MSFT"}}}}
+
+    result = mdp._fetch_local_cache(provider="LOCAL_CACHE", truth_root=tmp_path, day_utc=DAY, symbols=["MSFT"], symbol_map=symbol_map, config=config)
+
+    assert result.request_status == "STALE"
+    assert result.stale_symbols == ("MSFT",)
+    assert result.provider_attempts[0]["status"] == "CACHE_STALE"
+    assert result.provider_attempts[0]["normalized_status"] == "CACHE_STALE"
+
+
+def test_intraday_provider_chain_adds_yahoo_chart_fallback() -> None:
+    config = _provider_config_for_dynamic_tests(primary="LOCAL_CACHE", fallback="STOOQ", intraday_provider="")
+
+    chain = mdp._provider_chain_for_mode(config)
+
+    assert chain[:3] == ["LOCAL_CACHE", "YAHOO_CHART", "STOOQ"]
+
+
+def test_per_symbol_fallback_certifies_after_stale_cache_and_provider_no_data(tmp_path: Path, monkeypatch) -> None:
+    config = _provider_config_for_dynamic_tests(primary="LOCAL_CACHE", fallback="STOOQ", intraday_provider="")
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_fetch_provider(**kwargs):
+        provider = kwargs["provider"]
+        symbols = kwargs["symbols"]
+        calls.append((provider, list(symbols)))
+        if provider == "LOCAL_CACHE":
+            row = mdp._record(symbol="MSFT", provider=provider, provider_symbol="MSFT", data_type="EQUITY", session_date="2026-05-19", timestamp_utc="2026-05-19T20:00:00Z", open_=1, high=1, low=1, close=1, last=1, volume=1, source="cache", config=config, day_utc=DAY)
+            attempt = mdp._attempt_finish(mdp._attempt_start("MSFT", provider, "MSFT"), status="CACHE_STALE", rejected_reason="SOURCE_SESSION_NOT_CURRENT:2026-05-19")
+            return mdp._provider_result(provider=provider, requested=symbols, records=[row], breadth={}, reason="", config=config, provider_attempts=[attempt])
+        if provider == "STOOQ":
+            attempt = mdp._attempt_finish(mdp._attempt_start("MSFT", provider, "MSFT"), status="SOURCE_UNAVAILABLE", rejected_reason="provider no data")
+            return mdp._provider_result(provider=provider, requested=symbols, records=[], breadth={}, reason="MARKET_DATA_FETCH_FAILED", config=config, provider_attempts=[attempt])
+        row = mdp._record(symbol="MSFT", provider=provider, provider_symbol="MSFT", data_type="EQUITY", session_date=DAY, timestamp_utc=f"{DAY}T17:00:00Z", open_=2, high=2, low=2, close=2, last=2, volume=1, source="yahoo", config=config, day_utc=DAY)
+        attempt = mdp._attempt_finish(mdp._attempt_start("MSFT", provider, "MSFT"), status="SUCCESS", accepted_reason="current-session snapshot")
+        return mdp._provider_result(provider=provider, requested=symbols, records=[row], breadth={}, reason="", config=config, provider_attempts=[attempt])
+
+    monkeypatch.setattr(mdp, "_fetch_provider", fake_fetch_provider)
+    symbol_map = {"symbols": {"MSFT": {"providers": {"LOCAL_CACHE": "MSFT", "STOOQ": "MSFT.US", "YAHOO_CHART": "MSFT"}}}}
+
+    result = mdp.fetch_market_data_v1(truth_root=tmp_path, day_utc=DAY, symbols=["MSFT"], symbol_map=symbol_map, config_override=config)
+
+    assert result.request_status == "SUCCESS"
+    assert result.symbols["MSFT"]["provider"] == "YAHOO_CHART"
+    assert [provider for provider, _symbols in calls] == ["LOCAL_CACHE", "YAHOO_CHART"]
+
+
+def test_market_data_coverage_groups_timeout_and_cache_stale_causes(tmp_path: Path) -> None:
+    _dynamic_universe_contracts(tmp_path)
+    demand = build_market_data_demand_v1(repo_root=REPO_ROOT, truth_root=tmp_path, day_utc=DAY, symbol_map_payload={"raw_signal_symbols": [], "required_symbols": []})
+    demand["required_symbols"] = ["AAPL", "MSFT"]
+    demand["demand_rows"] = [row for row in demand["demand_rows"] if row["symbol"] in {"AAPL", "MSFT"}]
+    write_market_data_demand_v1(truth_root=tmp_path, day_utc=DAY, payload=demand)
+    _write(
+        tmp_path / "reports/aegis_market_data_v1" / DAY / "market_data.v1.json",
+        {
+            "symbols": {
+                "AAPL": {"symbol": "AAPL", "freshness_status": "STALE", "market_session_date": "2026-05-19", "data_timestamp_utc": "2026-05-19T20:00:00Z"},
+                "MSFT": {"symbol": "MSFT", "freshness_status": "MISSING"},
+            },
+            "provider_attempts": [
+                {"symbol": "AAPL", "provider": "LOCAL_CACHE", "status": "CACHE_STALE", "normalized_status": "CACHE_STALE"},
+                {"symbol": "MSFT", "provider": "STOOQ", "status": "TIMEOUT", "normalized_status": "PROVIDER_TIMEOUT"},
+            ],
+        },
+    )
+    _write(tmp_path / "reports/market_data_inputs_v1" / DAY / "market_data_inputs.v1.json", {"input_records": [{"data_item_id": "market.price.AAPL", "validation_status": "STALE", "market_session_date": "2026-05-19"}]})
+    _write(tmp_path / "reports/aegis_data_registry_v1" / DAY / "data_registry.v1.json", {"data_items": [{"data_item_id": "market.price.AAPL", "status": "STALE", "market_session_date": "2026-05-19"}]})
+
+    coverage = build_market_data_coverage_v1(truth_root=tmp_path, day_utc=DAY)
+
+    groups = {(row["cause"], row["provider"]): row["symbols"] for row in coverage["issue_groups"]}
+    assert groups[("CACHE_STALE", "LOCAL_CACHE")] == ["AAPL"]
+    assert groups[("PROVIDER_TIMEOUT", "STOOQ")] == ["MSFT"]
+
+
+def test_provider_coverage_plan_marks_unsupported_symbol() -> None:
+    config = _provider_config_for_dynamic_tests(primary="CBOE", fallback="", intraday_provider="")
+    symbol_map = {"symbols": {"SPY": {"providers": {"CBOE": "SPY"}}}}
+
+    plan = mdp.provider_coverage_plan_v1(config=config, symbols=["SPY"], symbol_map=symbol_map, providers=["CBOE"])
+
+    assert plan["status"] == "PROVIDER_COVERAGE_INCOMPLETE"
+    assert plan["unsupported_symbols"] == ["SPY"]
+
+
+
+
+def _write_yahoo_chart_raw(path: Path, *, symbol: str, timestamp: int = 1779303000, close: float = 188.04) -> None:
+    _write(
+        path,
+        {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {"symbol": symbol, "exchangeTimezoneName": "America/New_York", "regularMarketVolume": 1000},
+                        "timestamp": [timestamp],
+                        "indicators": {"quote": [{"open": [close - 1], "high": [close + 1], "low": [close - 2], "close": [close], "volume": [1000]}]},
+                    }
+                ],
+                "error": None,
+            }
+        },
+    )
+
+
+def test_market_data_inputs_bind_current_session_candidate_symbols_from_yahoo_raw(tmp_path: Path, monkeypatch) -> None:
+    _contracts(tmp_path)
+    _write(
+        tmp_path / "reports/aegis_candidate_lifecycle_projection_v1" / DAY / "candidate_lifecycle_projection.v1.json",
+        {
+            "current_session_candidates": [
+                {"symbol": "SPY", "candidate_id": "candidate-spy"},
+                {"symbol": "AMT", "candidate_id": "candidate-amt"},
+            ]
+        },
+    )
+    _write_yahoo_chart_raw(tmp_path / "reports/aegis_market_data_v1" / DAY / "raw/YAHOO_CHART/AMT.json", symbol="AMT")
+    monkeypatch.setattr(mdi, "build_symbol_map_v1", lambda **_: {"required_symbols": ["SPY", "VIX", "AMT"], "symbols": {}})
+    monkeypatch.setattr(mdi, "write_symbol_map_v1", lambda truth_root, day_utc, payload: {"json": str(tmp_path / "symbol_map.json")})
+    _write(tmp_path / "symbol_map.json", {"required_symbols": ["SPY", "VIX", "AMT"]})
+    monkeypatch.setattr(mdi, "fetch_market_data_v1", lambda **_: _provider_result())
+
+    payload = mdi.build_market_data_inputs_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T15:00:00Z")
+
+    records = {row["data_item_id"]: row for row in payload["input_records"]}
+    assert "market.price.AMT" in payload["required_market_input_ids"]
+    assert records["market.price.AMT"]["validation_status"] == "VALID"
+    assert records["market.price.AMT"]["source_vendor"] == "YAHOO_CHART"
+    assert records["market.price.AMT"]["source_path"].endswith("raw/YAHOO_CHART/AMT.json")
+    diagnostics = payload["candidate_market_data_binding"]
+    assert diagnostics["candidate_symbol_count"] == 2
+    assert diagnostics["market_data_bound_count"] == 2
+    assert diagnostics["missing_from_market_data_inputs"] == []
+    assert diagnostics["provider_fetch_available_but_unbound"] == []
+    assert diagnostics["provider_fetch_available_bound_from_raw"] == ["AMT"]
+
+
+def test_market_data_inputs_reports_current_session_candidate_missing_binding(tmp_path: Path, monkeypatch) -> None:
+    _contracts(tmp_path)
+    _write(
+        tmp_path / "reports/aegis_candidate_lifecycle_projection_v1" / DAY / "candidate_lifecycle_projection.v1.json",
+        {"current_session_candidates": [{"symbol": "BDX", "candidate_id": "candidate-bdx"}]},
+    )
+    monkeypatch.setattr(mdi, "build_symbol_map_v1", lambda **_: {"required_symbols": ["SPY", "VIX", "BDX"], "symbols": {}})
+    monkeypatch.setattr(mdi, "write_symbol_map_v1", lambda truth_root, day_utc, payload: {"json": str(tmp_path / "symbol_map.json")})
+    _write(tmp_path / "symbol_map.json", {"required_symbols": ["SPY", "VIX", "BDX"]})
+    monkeypatch.setattr(mdi, "fetch_market_data_v1", lambda **_: _provider_result())
+
+    payload = mdi.build_market_data_inputs_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=f"{DAY}T15:00:00Z")
+
+    records = {row["data_item_id"]: row for row in payload["input_records"]}
+    assert "market.price.BDX" in payload["required_market_input_ids"]
+    assert records["market.price.BDX"]["validation_status"] == "MISSING"
+    diagnostics = payload["candidate_market_data_binding"]
+    assert diagnostics["candidate_symbol_count"] == 1
+    assert diagnostics["market_data_bound_count"] == 0
+    assert diagnostics["missing_from_market_data_inputs"] == ["BDX"]
+    assert diagnostics["provider_fetch_available_but_unbound"] == []
+
+
+def test_market_data_demand_includes_open_position_symbols(tmp_path: Path) -> None:
+    _contracts(tmp_path)
+    _write(
+        tmp_path / "reports" / "aegis_paper_position_ledger_v1" / DAY / "paper_position_ledger.v1.json",
+        {"schema_id": "aegis_paper_position_ledger", "open_positions": [{"position_id": "pos-bac", "symbol": "BAC"}]},
+    )
+
+    payload = build_market_data_demand_v1(repo_root=REPO_ROOT, truth_root=tmp_path, day_utc=DAY, symbol_map_payload={"required_symbols": ["SPY"]})
+
+    assert "BAC" in payload["required_symbols"]
+    row = next(row for row in payload["demand_rows"] if row["symbol"] == "BAC")
+    assert row["required"] is True
+    assert "open_paper_position_symbols" in row["demand_sources"]
+    assert "paper_position_marks" in row["consumer_sleeves"]
+
+
+def test_market_data_coverage_reports_open_position_mark_gaps(tmp_path: Path) -> None:
+    _contracts(tmp_path)
+    demand = build_market_data_demand_v1(repo_root=REPO_ROOT, truth_root=tmp_path, day_utc=DAY, symbol_map_payload={"required_symbols": ["AAA", "BBB"]})
+    write_market_data_demand_v1(truth_root=tmp_path, day_utc=DAY, payload=demand)
+    _write(tmp_path / "reports" / "aegis_market_data_v1" / DAY / "market_data.v1.json", {"schema_id": "aegis_market_data", "day_utc": DAY, "symbols": {"AAA": {"symbol": "AAA", "last_price": "11", "freshness_status": "CURRENT", "market_session_date": DAY}}})
+    _write(tmp_path / "reports" / "aegis_data_registry_v1" / DAY / "data_registry.v1.json", {"schema_id": "aegis_data_registry", "data_items": []})
+    _write(tmp_path / "reports" / "market_data_inputs_v1" / DAY / "market_data_inputs.v1.json", {"schema_id": "market_data_inputs", "input_records": [{"data_item_id": "market.price.AAA", "symbol": "AAA", "validation_status": "VALID"}]})
+    _write(tmp_path / "reports" / "aegis_paper_position_ledger_v1" / DAY / "paper_position_ledger.v1.json", {"schema_id": "aegis_paper_position_ledger", "open_positions": [{"position_id": "pos-a", "symbol": "AAA", "quantity": "1", "entry_price": "10"}, {"position_id": "pos-b", "symbol": "BBB", "quantity": "1", "entry_price": "30"}]})
+    raw = tmp_path / "reports" / "aegis_market_data_v1" / DAY / "raw" / "YAHOO_CHART" / "BBB.json"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text("{}", encoding="utf-8")
+
+    payload = build_market_data_coverage_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert payload["open_position_count"] == 2
+    assert payload["marked_position_count"] == 1
+    assert payload["missing_mark_position_count"] == 1
+    assert payload["raw_available_but_not_canonical"] == ["BBB"]
+    assert payload["missing_reason_by_symbol"]["BBB"] == "RAW_AVAILABLE_BUT_NOT_CANONICAL"
+    assert payload["mark_coverage_by_entry_notional_pct"] == 25.0

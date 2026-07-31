@@ -1,0 +1,6 @@
+id: OBS_0001
+date: 2026-06-03
+observation: Only a minority of active sleeves generated candidates during recent sleeve throughput review.
+why_interesting: Research throughput appears concentrated in fewer sleeves than the active architecture implies.
+source: AEGIS sleeve throughput review
+status: OPEN

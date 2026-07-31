@@ -151,6 +151,8 @@ def build_event_market_snapshot_v1(
         spy_realized_vol=volatility.get("spy_realized_vol"),
         volatility_expansion_ratio=volatility.get("volatility_expansion_ratio"),
     )
+    if str(vix.get("source_label") or "") in {"VIX_EOD_REFERENCE", "PRIOR_CERTIFIED_EOD_VIX"}:
+        volatility_label = "REFERENCE_BASED"
     breadth_label = classify_breadth_v1(
         advancing_issues=breadth.get("advancing_issues"),
         declining_issues=breadth.get("declining_issues"),
@@ -164,7 +166,7 @@ def build_event_market_snapshot_v1(
         trend_metrics={**trend, "spy_return_pct": spy.get("return_pct")},
         macro_context=macro,
     )
-    missing = _missing_inputs(spy=spy, qqq=qqq, vix=vix, breadth=breadth, volatility=volatility, trend=trend)
+    missing = _missing_inputs(spy=spy, qqq=qqq, vix=vix, breadth=breadth, volatility=volatility, trend=trend, data=data)
     stale_status, stale_reasons = _stale_status(data=data, generated_at_utc=generated_at_utc, missing=missing)
     inputs = _event_inputs(
         data=data,
@@ -193,6 +195,7 @@ def build_event_market_snapshot_v1(
         "breadth_classification": breadth_label,
         "volatility_metrics": volatility,
         "volatility_classification": volatility_label,
+        "volatility_reference_mode": "REFERENCE_BASED" if str(vix.get("source_label") or "") in {"VIX_EOD_REFERENCE", "PRIOR_CERTIFIED_EOD_VIX"} else "CURRENT_SESSION",
         "trend_metrics": trend,
         "macro_event_today": bool(macro["macro_event_today"]),
         "macro_event_type": str(macro["macro_event_type"]),
@@ -215,6 +218,11 @@ def build_event_market_snapshot_v1(
         "usable_for_candidate_generation": bool(data.get("usable_for_candidate_generation", False)),
         "source_hashes": data.get("source_hashes") if isinstance(data.get("source_hashes"), dict) else {},
         "provider_statuses": data.get("provider_statuses") if isinstance(data.get("provider_statuses"), list) else [],
+        "market_context_demand_path": str(data.get("market_context_demand_path") or ""),
+        "market_context_items": data.get("market_context_items") if isinstance(data.get("market_context_items"), list) else [],
+        "market_context_status_counts": data.get("market_context_status_counts") if isinstance(data.get("market_context_status_counts"), dict) else {},
+        "market_context_blockers": data.get("market_context_blockers") if isinstance(data.get("market_context_blockers"), list) else [],
+        "market_context_overall_status": str(data.get("market_context_overall_status") or "UNKNOWN"),
         "global_context_status": data.get("global_context_status") if isinstance(data.get("global_context_status"), dict) else {},
         "per_symbol_status": data.get("per_symbol_status") if isinstance(data.get("per_symbol_status"), dict) else _per_symbol_status(data),
         "breadth_status": data.get("breadth_status") if isinstance(data.get("breadth_status"), dict) else {"freshness_status": str((data.get("breadth") if isinstance(data.get("breadth"), dict) else {}).get("freshness_status") or "UNKNOWN")},
@@ -223,6 +231,7 @@ def build_event_market_snapshot_v1(
         "canonical_eod_state_mutated": False,
         "canonical_json_hash": None,
     }
+    payload = _canonical_safe(payload)
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
 
@@ -292,6 +301,10 @@ def _instrument(symbol: str, data: dict[str, Any]) -> dict[str, str]:
         "price": _fmt(price),
         "prev_close": _fmt(prev_close),
         "return_pct": _fmt(return_pct),
+        "source_label": str(nested.get("source_label") or data.get(f"{prefix}_source_label") or ""),
+        "session_date": str(nested.get("session_date") or data.get(f"{prefix}_session_date") or ""),
+        "policy_mode": str(nested.get("policy_mode") or data.get(f"{prefix}_policy_mode") or ""),
+        "same_day_required_now": _bool_value(_first(nested.get("same_day_required_now"), data.get(f"{prefix}_same_day_required_now"))),
     }
 
 
@@ -349,6 +362,10 @@ def _volatility_metrics(data: dict[str, Any], *, vix: dict[str, str]) -> dict[st
     return {
         "vix_level": _fmt(_first(vol.get("vix_level"), vix.get("price"), data.get("vix_level"))),
         "vix_change_pct": _fmt(_first(vol.get("vix_change_pct"), vix.get("return_pct"), data.get("vix_change_pct"))),
+        "vix_source_label": str(_first(vol.get("vix_source_label"), vix.get("source_label"), data.get("vix_source_label"))),
+        "vix_session_date": str(_first(vol.get("vix_session_date"), vix.get("session_date"), data.get("vix_session_date"))),
+        "vix_policy_mode": str(_first(vol.get("vix_policy_mode"), vix.get("policy_mode"), data.get("vix_policy_mode"))),
+        "vix_same_day_required_now": _bool_value(_first(vol.get("vix_same_day_required_now"), vix.get("same_day_required_now"), data.get("vix_same_day_required_now"))),
         "spy_realized_vol": _fmt(realized),
         "spy_realized_vol_prev": _fmt(realized_prev),
         "realized_vol_change_pct": _fmt(realized_change),
@@ -404,7 +421,14 @@ def _event_inputs(*, data: dict[str, Any], spy: dict[str, str], qqq: dict[str, s
     return {key: value for key, value in sorted(inputs.items()) if value != "" and value is not None}
 
 
-def _missing_inputs(*, spy: dict[str, str], qqq: dict[str, str], vix: dict[str, str], breadth: dict[str, str], volatility: dict[str, str], trend: dict[str, Any]) -> list[str]:
+def _missing_inputs(*, spy: dict[str, str], qqq: dict[str, str], vix: dict[str, str], breadth: dict[str, str], volatility: dict[str, str], trend: dict[str, Any], data: dict[str, Any]) -> list[str]:
+    context_items = data.get("market_context_items") if isinstance(data.get("market_context_items"), list) else []
+    if context_items:
+        return sorted(
+            str(row.get("context_item_id") or "")
+            for row in context_items
+            if isinstance(row, dict) and _context_item_blocks_snapshot_v1(row) and str(row.get("context_item_id") or "")
+        )
     required = {
         "spy_price": spy.get("price"),
         "spy_return_pct": spy.get("return_pct"),
@@ -420,12 +444,19 @@ def _missing_inputs(*, spy: dict[str, str], qqq: dict[str, str], vix: dict[str, 
 
 def _stale_status(*, data: dict[str, Any], generated_at_utc: str, missing: list[str]) -> tuple[str, list[str]]:
     source_ts = str(data.get("source_timestamp_utc") or data.get("latest_source_timestamp_utc") or generated_at_utc or "")
-    if missing:
+    context_items = data.get("market_context_items") if isinstance(data.get("market_context_items"), list) else []
+    context_reasons = _market_context_reason_codes(context_items)
+    if context_items and not any(_context_item_blocks_snapshot_v1(row) for row in context_items if isinstance(row, dict)):
+        return "FRESH", context_reasons
+    if context_items and any(str(row.get("fulfillment_status") or "") == "CONTEXT_STALE" for row in context_items if isinstance(row, dict) and _context_item_is_blocking_by_profile_v1(row)) and not any(str(row.get("fulfillment_status") or "") not in {"CONTEXT_CERTIFIED", "CONTEXT_STALE"} for row in context_items if isinstance(row, dict) and _context_item_is_blocking_by_profile_v1(row)):
+        base = "STALE"
+        reasons = context_reasons or ["MARKET_CONTEXT_SOURCE_STALE"]
+    elif missing:
         base = "MISSING_INPUT"
-        reasons = ["MARKET_CONTEXT_INPUTS_MISSING"]
+        reasons = ["MARKET_CONTEXT_INPUTS_MISSING", *context_reasons]
     else:
         base = "FRESH"
-        reasons = []
+        reasons = context_reasons
     parsed_source = _parse_utc(source_ts)
     parsed_generated = _parse_utc(generated_at_utc)
     if parsed_source is None or parsed_generated is None:
@@ -439,6 +470,47 @@ def _stale_status(*, data: dict[str, Any], generated_at_utc: str, missing: list[
     if age_minutes > SNAPSHOT_STALE_AFTER_MINUTES:
         return "STALE", sorted(set([*reasons, "MARKET_CONTEXT_SOURCE_STALE"]))
     return base, sorted(set(reasons))
+
+
+def _market_context_reason_codes(rows: list[dict[str, Any]]) -> list[str]:
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("fulfillment_status") or "").strip().upper()
+        item = str(row.get("context_item_id") or "").strip()
+        if status and item and _context_item_blocks_snapshot_v1(row):
+            out.append(f"{status}:{item}")
+    return sorted(set(out))
+
+
+def _context_item_is_certified_v1(row: dict[str, Any] | None) -> bool:
+    if not isinstance(row, dict):
+        return False
+    return str(row.get("fulfillment_status") or "").strip().upper() == "CONTEXT_CERTIFIED" and str(row.get("certification_status") or "").strip().upper() in {"CERTIFIED", "CERTIFIED_REFERENCE"}
+
+
+def _context_item_is_blocking_by_profile_v1(row: dict[str, Any] | None) -> bool:
+    if not isinstance(row, dict):
+        return False
+    severity = str(row.get("blocker_severity") or ((row.get("context_requirement") or {}) if isinstance(row.get("context_requirement"), dict) else {}).get("blocker_severity") or "BLOCKING").strip().upper()
+    return severity in {"BLOCKING", "BLOCKING_AFTER_CUTOFF"}
+
+
+def _context_item_blocks_snapshot_v1(row: dict[str, Any] | None) -> bool:
+    return bool(row) and not _context_item_is_certified_v1(row) and _context_item_is_blocking_by_profile_v1(row)
+
+
+def _canonical_safe(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, float):
+        return _fmt(value)
+    if isinstance(value, dict):
+        return {key: _canonical_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_canonical_safe(item) for item in value]
+    return value
 
 
 def _macro_rows(value: Any) -> list[dict[str, Any]]:

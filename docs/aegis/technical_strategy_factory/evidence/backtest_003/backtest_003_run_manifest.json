@@ -1,0 +1,108 @@
+{
+  "adjustment_policy": "local CSV adjusted OHLC columns used for signal, returns, and next-open execution",
+  "auto_adjust_setting": null,
+  "backtest_id": "BACKTEST_003",
+  "cash_return_policy": "0%",
+  "claim_id": "CLAIM_001",
+  "code_version_or_git_sha_if_available": "4b0e435a9",
+  "cost_model": "version_1_10_bps_round_trip_5_bps_entry_5_bps_exit",
+  "data_csv_path": "/home/node/constellation/data/cache/SPY_tiingo_adjusted_daily.csv",
+  "data_csv_sha256": "947bebaec55b769e96591d305ef5d60ba2a4ac96c8dd346a19f52513cb70a489",
+  "data_metadata": {
+    "adjustment_policy": "local CSV adjusted OHLC columns used for signal, returns, and next-open execution",
+    "auto_adjust_setting": null,
+    "data_csv_path": "/home/node/constellation/data/cache/SPY_tiingo_adjusted_daily.csv",
+    "data_csv_sha256": "947bebaec55b769e96591d305ef5d60ba2a4ac96c8dd346a19f52513cb70a489",
+    "data_frequency": "daily",
+    "data_source_type": "tiingo_cache",
+    "data_vendor": "Tiingo cached local CSV",
+    "dataset": "SPY_tiingo_adjusted_daily.csv",
+    "date_range_loaded": {
+      "end_date": "2026-06-02",
+      "start_date": "2000-01-03"
+    },
+    "download_timestamp": null,
+    "end_date": "2026-06-02",
+    "execution_open_proxy": "adjOpen",
+    "local_cache_path": "/home/node/constellation/data/cache/SPY_tiingo_adjusted_daily.csv",
+    "local_cache_sha256": "947bebaec55b769e96591d305ef5d60ba2a4ac96c8dd346a19f52513cb70a489",
+    "missing_data_policy": {
+      "date_range_loaded": {
+        "end_date": "2026-06-02",
+        "start_date": "2000-01-03"
+      },
+      "duplicate_trading_dates": 0,
+      "missing_value_counts": {
+        "Close": 0,
+        "High": 0,
+        "Low": 0,
+        "Open": 0,
+        "Volume": 0
+      },
+      "row_count": 6643,
+      "rows_before_first_possible_signal": 200,
+      "silent_interpolation": false
+    },
+    "price_fields_used": {
+      "Close": "adjClose",
+      "High": "adjHigh",
+      "Low": "adjLow",
+      "Open": "adjOpen"
+    },
+    "requested_start_date": "2000-01-01",
+    "run_classification": "PRIMARY_ADJUSTED_OHLC",
+    "run_quality": "PRIMARY_ADJUSTED_OHLC",
+    "start_date": "2000-01-03",
+    "ticker": "SPY",
+    "tiingo_adjustment_fields_used": {
+      "execution": "adjOpen",
+      "returns": "adjClose/adj_close",
+      "signal": "adjClose/adj_close"
+    },
+    "tiingo_endpoint": "https://api.tiingo.com/tiingo/daily/SPY/prices",
+    "tiingo_request_timestamp": null
+  },
+  "data_source_type": "tiingo_cache",
+  "data_vendor": "Tiingo cached local CSV",
+  "dataset": "SPY_tiingo_adjusted_daily.csv",
+  "date_range_loaded": {
+    "end_date": "2026-06-02",
+    "start_date": "2000-01-03"
+  },
+  "download_timestamp": null,
+  "end_date": "2026-06-02",
+  "execution_policy": "signal_after_close_execute_next_market_open_no_same_day_execution",
+  "implementation_id": "IMP_003",
+  "local_cache_path": "/home/node/constellation/data/cache/SPY_tiingo_adjusted_daily.csv",
+  "local_cache_sha256": "947bebaec55b769e96591d305ef5d60ba2a4ac96c8dd346a19f52513cb70a489",
+  "price_fields_used": {
+    "Close": "adjClose",
+    "High": "adjHigh",
+    "Low": "adjLow",
+    "Open": "adjOpen"
+  },
+  "random_seed": 20260603,
+  "random_simulation_count": 1000,
+  "result_artifact_paths": {
+    "evidence_report": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_evidence_report.md",
+    "metrics": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_metrics.json",
+    "random_baseline": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_random_baseline.json",
+    "run_manifest": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_run_manifest.json",
+    "stress_tests": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_stress_tests.json",
+    "subperiods": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_subperiods.json",
+    "summary": "/home/node/constellation/docs/aegis/technical_strategy_factory/evidence/backtest_003/backtest_003_summary.json"
+  },
+  "run_quality": "PRIMARY_ADJUSTED_OHLC",
+  "run_timestamp": "2026-06-03T17:20:05Z",
+  "script_path": "ops/tools/run_backtest_003_imp_003.py",
+  "start_date": "2000-01-03",
+  "test_plan_id": "TEST_PLAN_003",
+  "ticker": "SPY",
+  "tiingo_adjustment_fields_used": {
+    "execution": "adjOpen",
+    "returns": "adjClose/adj_close",
+    "signal": "adjClose/adj_close"
+  },
+  "tiingo_endpoint": "https://api.tiingo.com/tiingo/daily/SPY/prices",
+  "tiingo_request_timestamp": null
+}

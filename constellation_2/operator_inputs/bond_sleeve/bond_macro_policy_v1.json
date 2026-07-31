@@ -1,0 +1,12 @@
+{
+  "advisory_only": true,
+  "execution_mode": "MANUAL",
+  "macro_review_status": "NEEDS_REVIEW",
+  "manual_execution_only": true,
+  "notes": [
+    "Advisor holdings classification loaded; macro/duration posture remains advisory only."
+  ],
+  "schema_id": "BOND_MACRO_POLICY_V1",
+  "schema_version": "v1",
+  "sleeve_id": "BOND"
+}

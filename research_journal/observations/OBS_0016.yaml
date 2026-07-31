@@ -1,0 +1,6 @@
+id: OBS_0016
+date: 2026-06-03
+observation: Candidate diagnostics showed non-certified candidate snapshots could block otherwise scored raw signals.
+why_interesting: Certification status mattered more than raw signal presence.
+source: AEGIS candidate generation diagnostics review
+status: OPEN

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_transcript_intake.v1.schema.json",
+  "title": "Atlas V2 Transcript Intake V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/TranscriptIntakeRequest"},
+    {"$ref": "#/$defs/TranscriptSegment"},
+    {"$ref": "#/$defs/TranscriptClaimCandidate"}
+  ],
+  "$defs": {
+    "RequestStatus": {"enum": ["RECEIVED", "PARSED", "FAILED"]},
+    "SegmentType": {"enum": ["ENTRY_RULE", "EXIT_RULE", "FILTER_RULE", "RISK_RULE", "MARKET_CONTEXT", "PERFORMANCE_CLAIM", "OTHER"]},
+    "CandidateStatus": {"enum": ["READY_FOR_EXTRACTION", "INSUFFICIENT_DETAIL", "DUPLICATE_SEGMENT"]},
+    "Transition": {
+      "type": "object",
+      "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"],
+      "properties": {
+        "transitioned_at": {"type": "string", "format": "date-time"},
+        "from_status": {"type": "string"},
+        "to_status": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1},
+        "triggering_object": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": ["object_type", "created_at", "transition_history"],
+      "properties": {
+        "object_type": {"type": "string"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}
+      }
+    },
+    "TranscriptIntakeRequest": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["request_id", "source_title", "transcript_text", "transcript_hash", "status"],
+          "properties": {
+            "object_type": {"const": "TranscriptIntakeRequest"},
+            "request_id": {"type": "string", "minLength": 1},
+            "source_title": {"type": "string", "minLength": 1},
+            "source_url": {"type": "string"},
+            "source_channel": {"type": "string"},
+            "transcript_text": {"type": "string", "minLength": 1},
+            "transcript_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "status": {"$ref": "#/$defs/RequestStatus"}
+          }
+        }
+      ]
+    },
+    "TranscriptSegment": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["segment_id", "request_id", "start_offset", "end_offset", "segment_text", "segment_type"],
+          "properties": {
+            "object_type": {"const": "TranscriptSegment"},
+            "segment_id": {"type": "string", "minLength": 1},
+            "request_id": {"type": "string", "minLength": 1},
+            "start_offset": {"type": "integer", "minimum": 0},
+            "end_offset": {"type": "integer", "minimum": 1},
+            "segment_text": {"type": "string", "minLength": 1},
+            "segment_type": {"$ref": "#/$defs/SegmentType"},
+            "status": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "TranscriptClaimCandidate": {
+      "allOf": [
+        {"$ref": "#/$defs/Base"},
+        {
+          "type": "object",
+          "required": ["candidate_id", "request_id", "segment_ids", "candidate_text", "confidence", "status"],
+          "properties": {
+            "object_type": {"const": "TranscriptClaimCandidate"},
+            "candidate_id": {"type": "string", "minLength": 1},
+            "request_id": {"type": "string", "minLength": 1},
+            "segment_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "candidate_text": {"type": "string", "minLength": 1},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "status": {"$ref": "#/$defs/CandidateStatus"}
+          }
+        }
+      ]
+    }
+  }
+}

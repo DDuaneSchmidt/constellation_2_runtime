@@ -1,0 +1,81 @@
+{
+  "module_id": "chatgpt_hydrate",
+  "display_name": "Aegis ChatGPT Hydrate Adapter",
+  "type": "ai_adapter",
+  "owner": "ops.aegis",
+  "capabilities": [
+    {
+      "capability_id": "chatgpt_hydrate_packet",
+      "display_name": "ChatGPT hydrate packet",
+      "required_evidence": ["runtime_truth_kernel", "chatgpt_control_packet"],
+      "allowed_actions": ["READ_ONLY", "HYDRATE"]
+    }
+  ],
+  "inputs": [
+    "verified_runtime_graph.v1.json"
+  ],
+  "outputs": [
+    "chatgpt_hydrate_packet.v1.md",
+    "reports/aegis_chatgpt_control_packet_v1/control_packet.md",
+    "reports/aegis_chatgpt_control_packet_v1/control_packet.json"
+  ],
+  "commands": [
+    {
+      "name": "aegis:chatgpt:hydrate",
+      "command": "npm run aegis:chatgpt:hydrate"
+    },
+    {
+      "name": "aegis:chatgpt:control-packet",
+      "command": "npm run aegis:chatgpt:control-packet"
+    },
+    {
+      "name": "aegis:chatgpt:control-show",
+      "command": "npm run aegis:chatgpt:control-show"
+    }
+  ],
+  "tests": [
+    {
+      "path": "constellation_2/common/tests/test_aegis_verified_runtime_graph_v1.py"
+    }
+  ],
+  "evidence_artifacts": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "artifact_type": "runtime_truth_kernel",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/runtime_truth_kernel.v1.json",
+      "producer": "ops.tools.run_aegis_runtime_truth_kernel_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "chatgpt_control_packet",
+      "artifact_type": "control_packet",
+      "path": "reports/aegis_chatgpt_control_packet_v1/control_packet.json",
+      "producer": "ops.tools.build_aegis_chatgpt_control_packet_v1",
+      "day_scoped": true
+    }
+  ],
+  "ui_surfaces": [
+    {
+      "surface_id": "chatgpt_hydrate_action",
+      "route": "/aegis-runtime-truth",
+      "capability_id": "chatgpt_hydrate_packet"
+    }
+  ],
+  "policies": [
+    "Hydrate packet is an adapter",
+    "Hydrate packet is not source of truth",
+    "Hydrate packet must refuse stale graph"
+  ],
+  "freshness_requirements": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "chatgpt_control_packet",
+      "max_age_days": 0,
+      "day_scoped": true
+    }
+  ]
+}

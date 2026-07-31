@@ -118,6 +118,7 @@ def intelligence_summaries_v1(truth_root: Path, day_utc: str) -> dict[str, Any]:
         "research_lab_execution_loop": ("aegis_research_lab_execution_loop_v1", "research_lab_execution_loop.v1.json"),
         "sleeve_challenger": ("aegis_sleeve_challenger_v1", "sleeve_challenger.v1.json"),
         "canonical_operator_state": ("aegis_canonical_operator_state_v1", "canonical_operator_state.v1.json"),
+        "aegis_candidate_state": ("aegis_candidate_state_v1", "candidate_state.v1.json"),
         "operator_brief": ("aegis_operator_brief_v1", "operator_brief.v1.json"),
         "operator_inbox": ("aegis_operator_inbox_v1", "operator_inbox.v1.json"),
         "risk_governance": ("aegis_risk_governance_v1", "risk_governance.v1.json"),

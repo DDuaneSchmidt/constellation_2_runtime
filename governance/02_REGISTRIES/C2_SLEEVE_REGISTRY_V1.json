@@ -21,8 +21,7 @@
         "GLD",
         "IWM",
         "QQQ",
-        "SPY"
-        ,
+        "SPY",
         "TLT"
       ],
       "truth_partition": "truth_sleeves/PRIMARY/PAPER",
@@ -39,6 +38,59 @@
         "symbols is a derived sleeve coverage view from ACTIVE engine symbol policy bound to this sleeve/account; it is not the submit-boundary trading-policy authority.",
         "For governed PAPER execution, host/port/client_id_orders/client_id_observer reflect the active live execution path already proven by readiness bootstrap, handshake, and orchestrator submit wiring.",
         "client_id_market_data remains topology metadata for market-data workflows and is not the Phase D submit-boundary execution-policy authority."
+      ]
+    },
+    {
+      "sleeve_id": "BOND",
+      "enabled": true,
+      "mode": "PAPER",
+      "execution_mode": "MANUAL",
+      "status": "MANUAL_PRODUCTION",
+      "asset_class": "FIXED_INCOME",
+      "sleeve_type": "BOND",
+      "display_name": "Bond Sleeve",
+      "ui_visible": true,
+      "allocator_visible": true,
+      "automated_execution_enabled": false,
+      "broker_execution_allowed": false,
+      "advisory_only": true,
+      "ib_account": "DUO847203",
+      "symbols": [
+        "AGG",
+        "BIL",
+        "BND",
+        "DFGBX",
+        "DFGFX",
+        "HYG",
+        "IEF",
+        "JMST",
+        "LQD",
+        "SHY",
+        "SUB",
+        "TIP",
+        "TLT",
+        "VGSH"
+      ],
+      "truth_partition": "truth_sleeves/BOND/PAPER",
+      "ib_gateway_profile": {
+        "host": "127.0.0.1",
+        "port": 4002,
+        "client_id_market_data": 1201,
+        "client_id_orders": 0,
+        "client_id_observer": 0
+      },
+      "notes": [
+        "Manual/advisory fixed-income sleeve for allocator and UI visibility.",
+        "execution_mode=MANUAL means this sleeve is excluded from automated PAPER orchestration and broker submission.",
+        "Bond recommendations are operator-reviewed only; no order routing or broker execution is authorized from this registry row."
+      ],
+      "excluded_or_watchlist_symbols": [
+        "CSPF"
+      ],
+      "classification_notes": [
+        "JMST, SUB, VGSH, DFGFX, and DFGBX are recognized current advisor BOND sleeve holdings.",
+        "CSPF is preferred/income hybrid watchlist exposure and is excluded from core BOND safety allocation without explicit approval.",
+        "BOND remains execution_mode=MANUAL, advisory_only=true, automated_execution_enabled=false, broker_execution_allowed=false."
       ]
     }
   ]

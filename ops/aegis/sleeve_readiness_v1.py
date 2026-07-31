@@ -226,9 +226,14 @@ def _input_status(input_row: dict[str, Any], data_by_id: dict[str, dict[str, Any
     data = data_by_id.get(data_item_id, {})
     status = str(data.get("status") or "MISSING").upper()
     freshness = str(input_row.get("freshness_requirement") or ("CURRENT" if required else "DELAYED_ALLOWED")).upper()
-    delayed_ok = freshness in {"DELAYED_ALLOWED", "PRIOR_CLOSE_ALLOWED"}
-    blocking = required and (status in BLOCKING_STATUSES or (status == "DELAYED_BUT_USABLE" and not delayed_ok))
-    warning = (not required) and status in BLOCKING_STATUSES
+    delayed_ok = freshness in {"DELAYED_ALLOWED", "PRIOR_CLOSE_ALLOWED", "PRIOR_EOD_REFERENCE_ALLOWED", "CURRENT_OR_PROXY", "CURRENT_OR_LATEST_REFERENCE"}
+    block_if_missing = bool(input_row.get("block_if_missing", required))
+    block_if_stale = bool(input_row.get("block_if_stale", required))
+    missing_block = status in {"MISSING", "UNKNOWN"} and block_if_missing
+    stale_block = status == "STALE" and block_if_stale and not delayed_ok
+    delayed_block = status == "DELAYED_BUT_USABLE" and not delayed_ok and block_if_stale
+    blocking = required and (missing_block or stale_block or delayed_block)
+    warning = (not blocking) and (status in BLOCKING_STATUSES or status == "DELAYED_BUT_USABLE") and bool(input_row.get("warn_if_missing", not required))
     return {
         "data_item_id": data_item_id,
         "required": required,
@@ -247,6 +252,8 @@ def _input_status(input_row: dict[str, Any], data_by_id: dict[str, dict[str, Any
         "value": data.get("value"),
         "unit": data.get("unit") or "",
         "data_timestamp_utc": data.get("data_timestamp_utc") or "",
+        "block_if_missing": block_if_missing,
+        "block_if_stale": block_if_stale,
         "blocking": blocking,
         "warning": warning,
         "reason": input_row.get("reason") or "",

@@ -1,0 +1,12 @@
+candidate_label,label_source,emitted_validation_regimes,candidate_regime_meaning,possible_mappings,confidence,ambiguity,output
+CHOP,candidate_regime,HIGH_VOLATILITY:698;LOW_VOLATILITY:2;RANGE_BOUND:396;TRENDING:2119;UNKNOWN:188,Non-trending or choppy candidate context; not emitted by the direct validation daily regime classifier,RANGE_BOUND;UNKNOWN;LOW_VOLATILITY,MEDIUM,HIGH,PARTIAL_MAPPING
+TRENDING,candidate_regime,HIGH_VOLATILITY:850;LOW_VOLATILITY:18;RANGE_BOUND:682;TRENDING:472;UNKNOWN:847,Trending candidate context; exact emitted validation label exists,TRENDING,HIGH,MEDIUM,EXACT_MAPPING
+TREND,requested_alias,HIGH_VOLATILITY:850;LOW_VOLATILITY:18;RANGE_BOUND:682;TRENDING:472;UNKNOWN:847,Plain-language alias for trending; not the literal candidate metadata value,TRENDING,MEDIUM,MEDIUM,PARTIAL_MAPPING
+BREAKOUT,mechanism_label,HIGH_VOLATILITY:444;LOW_VOLATILITY:2;RANGE_BOUND:347;TRENDING:1945;UNKNOWN:162,Mechanism label for price breaking prior range; not a regime label,NONE,HIGH,LOW,NO_MAPPING
+MEAN_REVERSION,mechanism_label,HIGH_VOLATILITY:393;LOW_VOLATILITY:18;RANGE_BOUND:563;TRENDING:182;UNKNOWN:727,Mechanism label for reversion setup; not a regime label,NONE,HIGH,LOW,NO_MAPPING
+REVERSAL,mechanism_label,HIGH_VOLATILITY:457;RANGE_BOUND:119;TRENDING:290;UNKNOWN:120,Mechanism label for reversal setup; not a regime label,NONE,HIGH,LOW,NO_MAPPING
+EVENT_REACTION,mechanism_label,HIGH_VOLATILITY:254;RANGE_BOUND:49;TRENDING:174;UNKNOWN:26,Mechanism label for event response; not a regime label,NONE,HIGH,LOW,NO_MAPPING
+HIGH_VOLATILITY,validation_regime_only,HIGH_VOLATILITY,Validation classifier output for elevated rolling volatility; not present as a candidate regime in this set,HIGH_VOLATILITY,LOW,MEDIUM,UNKNOWN
+RANGE_BOUND,validation_regime_only,RANGE_BOUND,Validation classifier output for close near 50-day average; possible daily proxy for CHOP,RANGE_BOUND,MEDIUM,MEDIUM,PARTIAL_MAPPING
+LOW_VOLATILITY,validation_regime_only,LOW_VOLATILITY,Validation classifier output for low rolling volatility; weak possible proxy for some quiet CHOP contexts,LOW_VOLATILITY,LOW,HIGH,PARTIAL_MAPPING
+UNKNOWN,validation_regime_only,UNKNOWN,Validation classifier fallback or unconstrained regime; not a candidate regime in this direct validation set,UNKNOWN,LOW,HIGH,UNKNOWN

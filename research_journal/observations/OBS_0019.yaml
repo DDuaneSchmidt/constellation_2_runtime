@@ -1,0 +1,6 @@
+id: OBS_0019
+date: 2026-06-03
+observation: Daily research integrity passed with warnings rather than a clean success state.
+why_interesting: Warnings can preserve useful research while preventing overconfidence.
+source: AEGIS daily research integrity audit review
+status: OPEN

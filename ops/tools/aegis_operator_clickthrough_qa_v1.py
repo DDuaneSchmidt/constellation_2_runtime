@@ -23,7 +23,11 @@ DEFAULT_ROUTES = [
     "/aegis-runtime-timeline",
     "/aegis-repair-center",
     "/aegis-candidates",
+    "/aegis-candidate-funnel",
+    "/aegis-exit-review",
+    "/aegis-performance",
     "/aegis-journal",
+    "/aegis-captured-trades",
 ]
 
 
@@ -57,6 +61,11 @@ SCRIPT = r"""
   });
   const workspaceRoot = document.getElementById('workspaceContent') || document;
   const getControls = () => Array.from(workspaceRoot.querySelectorAll('button, a[href], summary, [data-aegis-command-id]')).filter(visible);
+  for (let wait = 0; wait < 30; wait += 1) {
+    const text = workspaceRoot.innerText || '';
+    if (getControls().length > 0 || (!/Loading/.test(text) && text.trim().length > 0)) break;
+    await sleep(250);
+  }
   const initialCount = getControls().length;
   for (let i = 0; i < initialCount; i += 1) {
     const el = getControls()[i];

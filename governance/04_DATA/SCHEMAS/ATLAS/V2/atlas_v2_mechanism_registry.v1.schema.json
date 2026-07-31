@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_mechanism_registry.v1.schema.json",
+  "title": "Atlas V2 Mechanism Registry V1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/MechanismRegistryEntry"},
+    {"$ref": "#/$defs/MechanismCluster"},
+    {"$ref": "#/$defs/MechanismLineage"},
+    {"$ref": "#/$defs/MechanismMetrics"}
+  ],
+  "$defs": {
+    "MechanismFamily": {"enum": ["OPENING_RANGE", "BREAKOUT", "MEAN_REVERSION", "TREND_CONTINUATION", "LIQUIDITY_SWEEP", "VOLATILITY_EXPANSION", "PULLBACK", "MOMENTUM", "VWAP_OR_AVERAGE_RECLAIM", "ATR_FILTER", "SESSION_TIMING", "UNKNOWN"]},
+    "Transition": {"type": "object", "required": ["transitioned_at", "from_status", "to_status", "reason", "triggering_object"], "properties": {"transitioned_at": {"type": "string", "format": "date-time"}, "from_status": {"type": "string"}, "to_status": {"type": "string"}, "reason": {"type": "string", "minLength": 1}, "triggering_object": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "Base": {"type": "object", "required": ["object_type", "created_at", "transition_history"], "properties": {"object_type": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "transition_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Transition"}}}},
+    "MechanismRegistryEntry": {"allOf": [{"$ref": "#/$defs/Base"}, {"type": "object", "required": ["mechanism_id", "mechanism_family", "updated_at", "claim_count", "source_count", "contrarian_count", "cheap_experiment_eligibility_count", "learning_event_count", "status"], "properties": {"object_type": {"const": "MechanismRegistryEntry"}, "mechanism_id": {"type": "string", "minLength": 1}, "mechanism_family": {"$ref": "#/$defs/MechanismFamily"}, "updated_at": {"type": "string", "format": "date-time"}, "claim_count": {"type": "integer", "minimum": 0}, "source_count": {"type": "integer", "minimum": 0}, "contrarian_count": {"type": "integer", "minimum": 0}, "cheap_experiment_eligibility_count": {"type": "integer", "minimum": 0}, "learning_event_count": {"type": "integer", "minimum": 0}, "status": {"enum": ["ACTIVE_RESEARCH", "RETAINED_NOT_PROMOTED", "UNKNOWN_RETAINED"]}}}]},
+    "MechanismCluster": {"allOf": [{"$ref": "#/$defs/Base"}, {"type": "object", "required": ["cluster_id", "mechanism_family", "claim_ids", "claim_count", "source_diversity", "confidence", "status"], "properties": {"object_type": {"const": "MechanismCluster"}, "cluster_id": {"type": "string", "minLength": 1}, "mechanism_family": {"$ref": "#/$defs/MechanismFamily"}, "claim_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "claim_count": {"type": "integer", "minimum": 1}, "source_diversity": {"type": "integer", "minimum": 0}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "status": {"enum": ["CLUSTERED", "RETAINED_NOT_PROMOTED"]}}}]},
+    "MechanismLineage": {"allOf": [{"$ref": "#/$defs/Base"}, {"type": "object", "required": ["lineage_id", "mechanism_id", "variant_description", "lineage_reason", "status"], "properties": {"object_type": {"const": "MechanismLineage"}, "lineage_id": {"type": "string", "minLength": 1}, "mechanism_id": {"type": "string", "minLength": 1}, "parent_mechanism_id": {"type": "string", "minLength": 1}, "variant_description": {"type": "string", "minLength": 1}, "lineage_reason": {"type": "string", "minLength": 1}, "status": {"enum": ["ROOT_RECORDED", "UNKNOWN_RETAINED", "VARIANT_RECORDED"]}}}]},
+    "MechanismMetrics": {"allOf": [{"$ref": "#/$defs/Base"}, {"type": "object", "required": ["metrics_id", "mechanism_id", "claim_count", "duplicate_ratio", "contrarian_coverage", "cheap_experiment_coverage", "learning_event_count", "last_updated"], "properties": {"object_type": {"const": "MechanismMetrics"}, "metrics_id": {"type": "string", "minLength": 1}, "mechanism_id": {"type": "string", "minLength": 1}, "claim_count": {"type": "integer", "minimum": 0}, "duplicate_ratio": {"type": "number", "minimum": 0, "maximum": 1}, "contrarian_coverage": {"type": "number", "minimum": 0, "maximum": 1}, "cheap_experiment_coverage": {"type": "number", "minimum": 0, "maximum": 1}, "learning_event_count": {"type": "integer", "minimum": 0}, "last_updated": {"type": "string", "format": "date-time"}}}]}
+  }
+}

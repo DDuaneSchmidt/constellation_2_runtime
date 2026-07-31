@@ -1,0 +1,11 @@
+object_type: failure
+storage: yaml
+directory: failures
+filename_pattern: FAIL_XXXX.yaml
+required_fields:
+  - id
+  - what_we_expected
+  - what_failed
+  - why_failed
+  - what_to_try_next
+  - status

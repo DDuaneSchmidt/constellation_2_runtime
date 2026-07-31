@@ -1,0 +1,6 @@
+id: OBS_0011
+date: 2026-06-03
+observation: Candidate-to-paper lifecycle artifacts showed paper tracking could progress while live authority stayed disabled.
+why_interesting: Paper workflow progress should not be confused with live readiness.
+source: AEGIS candidate-to-paper lifecycle review
+status: OPEN

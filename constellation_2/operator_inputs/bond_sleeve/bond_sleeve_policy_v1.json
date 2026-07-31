@@ -1,0 +1,77 @@
+{
+  "advisory_only": true,
+  "automated_execution_allowed": false,
+  "broker_execution_allowed": false,
+  "core_symbols": [
+    "DFGBX",
+    "DFGFX",
+    "JMST",
+    "SUB",
+    "VGSH"
+  ],
+  "excluded_or_watchlist_symbols": [
+    "CSPF"
+  ],
+  "execution_mode": "MANUAL",
+  "manual_execution_only": true,
+  "review_policy": {
+    "do_not_hide_sleeve_on_missing_metadata": true,
+    "manual_approval_required_for_any_bond_action": true,
+    "missing_metadata_state": "NEEDS_REVIEW",
+    "missing_price_state": "NEEDS_REVIEW"
+  },
+  "schema_id": "BOND_SLEEVE_POLICY_V1",
+  "schema_version": "v1",
+  "sleeve_id": "BOND",
+  "symbol_classification": {
+    "CSPF": {
+      "asset_class": "INCOME_HYBRID",
+      "bond_type": "preferred_income",
+      "core_bond_exposure": false,
+      "duration_bucket": "not_core_bond",
+      "note": "Do not include in core BOND safety allocation without explicit approval.",
+      "sleeve": "INCOME_HYBRID",
+      "tax_treatment": "taxable"
+    },
+    "DFGBX": {
+      "asset_class": "FIXED_INCOME",
+      "bond_type": "global_fixed_income",
+      "core_bond_exposure": true,
+      "duration_bucket": "intermediate_short",
+      "sleeve": "BOND",
+      "tax_treatment": "taxable"
+    },
+    "DFGFX": {
+      "asset_class": "FIXED_INCOME",
+      "bond_type": "global_fixed_income",
+      "core_bond_exposure": true,
+      "duration_bucket": "short",
+      "sleeve": "BOND",
+      "tax_treatment": "taxable"
+    },
+    "JMST": {
+      "asset_class": "FIXED_INCOME",
+      "bond_type": "municipal",
+      "core_bond_exposure": true,
+      "duration_bucket": "ultra_short",
+      "sleeve": "BOND",
+      "tax_treatment": "tax_exempt_muni"
+    },
+    "SUB": {
+      "asset_class": "FIXED_INCOME",
+      "bond_type": "municipal",
+      "core_bond_exposure": true,
+      "duration_bucket": "short",
+      "sleeve": "BOND",
+      "tax_treatment": "tax_exempt_muni"
+    },
+    "VGSH": {
+      "asset_class": "FIXED_INCOME",
+      "bond_type": "treasury",
+      "core_bond_exposure": true,
+      "duration_bucket": "short",
+      "sleeve": "BOND",
+      "tax_treatment": "federal_taxable_state_exempt_interest"
+    }
+  }
+}

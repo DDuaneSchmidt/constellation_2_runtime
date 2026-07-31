@@ -1,0 +1,6 @@
+id: FAIL_0005
+what_we_expected: Paper workflow progress would indicate readiness progress.
+what_failed: Paper tracking progressed while runtime authority remained blocked.
+why_failed: Paper lifecycle artifacts and live readiness gates answer different questions.
+what_to_try_next: Keep paper progress and live readiness separate in reviews.
+status: OPEN

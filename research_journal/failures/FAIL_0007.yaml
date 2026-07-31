@@ -1,0 +1,6 @@
+id: FAIL_0007
+what_we_expected: Candidate volume would be a useful proxy for candidate quality.
+what_failed: Candidate and raw signal counts were limited by certification, portfolio gates, and evidence quality.
+why_failed: Volume ignored governance and validation blockers.
+what_to_try_next: Track quality evidence before treating volume as progress.
+status: OPEN

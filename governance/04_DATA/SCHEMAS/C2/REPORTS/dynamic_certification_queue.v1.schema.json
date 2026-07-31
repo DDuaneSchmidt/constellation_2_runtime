@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/dynamic_certification_queue.v1.schema.json",
+  "title": "dynamic_certification_queue.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "operational_day",
+    "candidate_symbols",
+    "requested_symbols",
+    "requested_symbol_count",
+    "queued_symbols",
+    "estimated_provider_load",
+    "certification_status",
+    "content_hash"
+  ],
+  "properties": {
+    "schema_id": {"const": "dynamic_certification_queue"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "dynamic_certification_queue_v1"},
+    "operational_day": {"type": "string", "minLength": 10},
+    "candidate_symbols": {"type": "array", "items": {"type": "string"}},
+    "requested_symbols": {"type": "array", "items": {"type": "string"}},
+    "requested_symbol_count": {"type": "integer", "minimum": 0},
+    "estimated_provider_load": {"type": "integer", "minimum": 0},
+    "certification_status": {"type": "string"},
+    "promoted_after_certification_count": {"type": "integer", "minimum": 0},
+    "queued_symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["symbol", "priority_score", "reason", "linked_candidates", "exclusion_history", "expected_provider_coverage", "certification_status"],
+        "properties": {
+          "symbol": {"type": "string"},
+          "priority_score": {"type": "number"},
+          "reason": {"type": "string"},
+          "linked_candidates": {"type": "array"},
+          "linked_intents": {"type": "array"},
+          "exclusion_history": {"type": "array"},
+          "expected_provider_coverage": {"type": "object"},
+          "certification_status": {"type": "string"}
+        }
+      }
+    },
+    "content_hash": {"type": "string", "minLength": 1}
+  }
+}

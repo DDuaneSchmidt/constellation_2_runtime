@@ -31,6 +31,7 @@ REPORT_FAMILY = "aegis_research_pipeline_v1"
 TRIAGE_FAMILY = "aegis_research_triage_v1"
 PLAN_FAMILY = "aegis_research_plan_v1"
 RESULT_FAMILY = "aegis_research_test_results_v1"
+ETF_DROP_MEAN_REVERSION_HYPOTHESIS_ID = "rh-process-test-etf-drop-mean-reversion-v1"
 REVIEW_FAMILY = "aegis_research_review_decisions_v1"
 
 PIPELINE_COLUMNS = [
@@ -288,6 +289,119 @@ def write_research_plan_v1(*, truth_root: Path, day_utc: str, payload: dict[str,
     return {"json": str(path)}
 
 
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_price(row: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = _float_or_none(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _is_etf_drop_mean_reversion_hypothesis(hypothesis_id: str, spec: dict[str, Any]) -> bool:
+    text = f"{hypothesis_id} {spec.get('test_question') or ''} {spec.get('test_type') or ''}".lower()
+    return hypothesis_id == ETF_DROP_MEAN_REVERSION_HYPOTHESIS_ID or ("mean reversion" in text or "mean-reversion" in text) and "1-day drop" in text
+
+
+def run_etf_drop_mean_reversion_study_v1(*, truth_root: Path, day_utc: str, hypothesis_id: str, spec: dict[str, Any], data_status: dict[str, Any]) -> dict[str, Any]:
+    """Run the governed Phase 1 ETF drop mean-reversion evidence pass.
+
+    Phase 1 deliberately does not fabricate historical forward returns. It checks
+    the current governed market rows for reproducible large-drop trigger inputs,
+    records the event/filter observations, and returns INCONCLUSIVE_SAMPLE_SIZE
+    until enough governed forward-return observations exist.
+    """
+    symbol_rows = data_status.get("market_data_availability", {}).get("symbol_rows")
+    symbol_rows = symbol_rows if isinstance(symbol_rows, dict) else {}
+    etf_symbols = [symbol for symbol in ["SPY", "QQQ", "IWM"] if isinstance(symbol_rows.get(symbol), dict)]
+    observations: list[dict[str, Any]] = []
+    event_rows: list[dict[str, Any]] = []
+    vix_row = symbol_rows.get("VIX") if isinstance(symbol_rows.get("VIX"), dict) else {}
+    vix_close = _row_price(vix_row, "close", "last", "last_price") if vix_row else None
+    vix_filter_pass = vix_close is not None and vix_close < 35.0
+    drop_threshold = -0.015
+    for symbol in etf_symbols:
+        row = symbol_rows.get(symbol) if isinstance(symbol_rows.get(symbol), dict) else {}
+        close = _row_price(row, "close", "last", "last_price")
+        previous = _row_price(row, "previous_close", "chart_previous_close", "chartPreviousClose", "prior_close")
+        if previous is None:
+            open_price = _row_price(row, "open")
+            previous = open_price
+        daily_return = None if close is None or previous in (None, 0) else (close - previous) / previous
+        event_detected = daily_return is not None and daily_return <= drop_threshold and vix_filter_pass
+        obs = {
+            "symbol": symbol,
+            "close": close,
+            "comparison_price": previous,
+            "daily_return": daily_return,
+            "large_drop_threshold": drop_threshold,
+            "large_drop_event": bool(event_detected),
+            "vix_close": vix_close,
+            "vix_filter_pass": bool(vix_filter_pass),
+            "source": row.get("availability_source") or "market_data_report",
+        }
+        observations.append(obs)
+        if event_detected:
+            event_rows.append(obs)
+    sample_size = len(event_rows)
+    minimum_sample_size = 20
+    metrics = {
+        "event_count": {"value": sample_size, "metric_status": "COMPUTED", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "forward_return_1d": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "forward_return_3d": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "win_rate_1d": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "win_rate_3d": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "expectancy": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+        "cost_adjusted_expectancy": {"value": None, "metric_status": "INSUFFICIENT_FORWARD_RETURN_SAMPLE", "sample_size": sample_size, "minimum_sample_size": minimum_sample_size},
+    }
+    return {
+        "schema_id": "aegis_research_test_result",
+        "schema_version": "v1",
+        "artifact_id": "aegis_research_test_result_v1",
+        "generated_at_utc": _now(),
+        "day_utc": day_utc,
+        "hypothesis_id": hypothesis_id,
+        "test_type": spec["test_type"],
+        "test_question": spec["test_question"],
+        "test_status": "INCONCLUSIVE_SAMPLE_SIZE",
+        "latest_result": "INCONCLUSIVE_SAMPLE_SIZE",
+        "result_summary": f"ETF drop mean-reversion runner executed against governed market rows. sample_size={sample_size}/{minimum_sample_size}; no paper validation until enough forward-return events exist.",
+        "blocker": "INSUFFICIENT_FORWARD_RETURN_SAMPLE",
+        "missing_runner": "",
+        "required_inputs": data_status["required_inputs"],
+        "next_engine_to_build": "historical_forward_return_observation_store_v1" if sample_size < minimum_sample_size else "",
+        "market_data_found": data_status["market_data_found"],
+        "market_data_paths": data_status["market_data_paths"],
+        "required_symbols": data_status.get("required_symbols") or [],
+        "market_data_availability": data_status.get("market_data_availability") or {},
+        "event_data_status": "ETF_DROP_EVENT_SCAN_EXECUTED",
+        "event_data_availability": {
+            "status": "AVAILABLE",
+            "event_rule": "daily_return <= -1.5% and VIX < 35",
+            "observed_rows": observations,
+            "event_rows": event_rows,
+        },
+        "minimum_sample_size": minimum_sample_size,
+        "sample_size": sample_size,
+        "metric_status": "COMPUTED_INCONCLUSIVE_SAMPLE_SIZE",
+        "fabricated_results": False,
+        "metrics": metrics,
+        "human_approval_required": False,
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "automatic_sleeve_mutation_allowed": False,
+        "trade_advice_allowed": False,
+    }
+
 def run_research_test_v1(*, truth_root: Path, day_utc: str, hypothesis_id: str) -> dict[str, Any]:
     if not hypothesis_id:
         raise ValueError("hypothesis_id is required")
@@ -298,6 +412,8 @@ def run_research_test_v1(*, truth_root: Path, day_utc: str, hypothesis_id: str) 
     if hypothesis_id == NVIDIA_HYPOTHESIS_ID:
         maybe_import_staged_event_data_v1(truth_root=root, day_utc=day_utc, hypothesis_id=hypothesis_id)
     data_status = _event_study_data_status(root, spec, day_utc=day_utc, hypothesis_id=hypothesis_id, write_missing=True)
+    if _is_etf_drop_mean_reversion_hypothesis(hypothesis_id, spec) and data_status.get("status") == "AVAILABLE":
+        return run_etf_drop_mean_reversion_study_v1(truth_root=root, day_utc=day_utc, hypothesis_id=hypothesis_id, spec=spec, data_status=data_status)
     if hypothesis_id == NVIDIA_HYPOTHESIS_ID and data_status.get("status") == "AVAILABLE":
         study = run_forward_return_event_study_v1(truth_root=root, day_utc=day_utc, hypothesis_id=hypothesis_id)
         if study.get("schema_id") == "forward_return_event_study_v1":
@@ -1148,8 +1264,8 @@ def _research_spec(hypothesis_id: str, item: dict[str, Any]) -> dict[str, Any]:
         return specs[hypothesis_id]
     title = str(item.get("title") or hypothesis_id)
     summary = str(item.get("short_summary") or item.get("hypothesis_summary") or "")
-    text = f"{title} {summary}".lower()
-    if (
+    text = f"{hypothesis_id} {title} {summary}".lower()
+    if hypothesis_id == ETF_DROP_MEAN_REVERSION_HYPOTHESIS_ID or (
         ("mean-reversion" in text or "mean reversion" in text)
         and ("etf" in text or "spy" in text or "qqq" in text or "iwm" in text)
         and ("sharp" in text or "large down" in text or "down day" in text or "1-day drop" in text)

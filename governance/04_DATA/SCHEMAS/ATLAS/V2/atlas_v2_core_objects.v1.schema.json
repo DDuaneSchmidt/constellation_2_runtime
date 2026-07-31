@@ -1,0 +1,664 @@
+{
+  "$defs": {
+    "AttentionDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "attention_cost": {
+              "type": "number"
+            },
+            "decision_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "decision_reason": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "decision_type": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_learning_value": {
+              "type": "number"
+            },
+            "expected_regret_if_ignored": {
+              "type": "number"
+            },
+            "importance_score": {
+              "type": "number"
+            },
+            "object_type": {
+              "const": "AttentionDecision"
+            },
+            "rejected_alternatives": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "selected_action": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "uncertainty_target": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision_id",
+            "decision_type",
+            "uncertainty_target",
+            "importance_score",
+            "expected_learning_value",
+            "expected_regret_if_ignored",
+            "attention_cost",
+            "selected_action",
+            "rejected_alternatives",
+            "decision_reason",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Base": {
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        },
+        "transition_history": {
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "object_type",
+        "created_at",
+        "transition_history"
+      ],
+      "type": "object"
+    },
+    "BehaviorChange": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "behavior_change_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "change_reason": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_future_impact": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "new_behavior": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "BehaviorChange"
+            },
+            "previous_behavior": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "triggering_calibration_id": {
+              "type": "string"
+            },
+            "triggering_regret_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "behavior_change_id",
+            "previous_behavior",
+            "new_behavior",
+            "change_reason",
+            "expected_future_impact",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BeliefUpdate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "belief_update_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "new_belief": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "BeliefUpdate"
+            },
+            "previous_belief": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "triggering_experience_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "update_reason": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "belief_update_id",
+            "triggering_experience_id",
+            "previous_belief",
+            "new_belief",
+            "update_reason",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CalibrationRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "actual_result": {
+              "type": "boolean"
+            },
+            "calibration_bucket": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "calibration_error": {
+              "type": "number"
+            },
+            "calibration_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "object_type": {
+              "const": "CalibrationRecord"
+            },
+            "prediction_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "calibration_id",
+            "prediction_id",
+            "confidence",
+            "actual_result",
+            "calibration_error",
+            "calibration_bucket"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExperienceEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "actual_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "actual_learning_value_post_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "behavior_change_id": {
+              "type": "string"
+            },
+            "calibration_id": {
+              "type": "string"
+            },
+            "experience_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "experience_quality_score": {
+              "type": "number"
+            },
+            "lesson": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "ExperienceEvent"
+            },
+            "outcome_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "prediction_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_id": {
+              "type": "string"
+            },
+            "source_decision_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "experience_id",
+            "source_decision_id",
+            "prediction_id",
+            "outcome_id",
+            "lesson",
+            "experience_quality_score"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoricalExperienceRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "actual_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "actual_learning_value_post_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "actual_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "calibration_error": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "conversion_reason": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "converted_experience_event_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "decision_summary": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "expected_learning_value_pre_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "expected_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "experience_quality_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "historical_date": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "HistoricalExperienceRecord"
+            },
+            "provenance_reference": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "record_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "source_artifact": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_type": {
+              "enum": [
+                "FAILURE",
+                "OBSERVATION",
+                "KNOWLEDGE",
+                "DECISION",
+                "CONTRADICTION",
+                "RESEARCH_OUTCOME"
+              ]
+            },
+            "status": {
+              "enum": [
+                "CONVERTED",
+                "INCOMPLETE_PROVENANCE",
+                "UNSUPPORTED_SOURCE",
+                "DUPLICATE_SOURCE",
+                "REJECTED_LOW_QUALITY"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "source_artifact",
+            "source_type",
+            "historical_date",
+            "decision_summary",
+            "expected_outcome",
+            "actual_outcome",
+            "confidence",
+            "regret_score",
+            "experience_quality_score",
+            "expected_learning_value_pre_outcome",
+            "actual_learning_value_post_outcome",
+            "expected_learning_source_fields",
+            "actual_learning_source_fields",
+            "conversion_reason",
+            "calibration_error",
+            "provenance_reference",
+            "converted_experience_event_id",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Outcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "evidence_reference": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "matched_expected_outcome": {
+              "type": "boolean"
+            },
+            "object_type": {
+              "const": "Outcome"
+            },
+            "observed_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "outcome_confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "outcome_date": {
+              "type": "string"
+            },
+            "outcome_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "prediction_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome_id",
+            "prediction_id",
+            "observed_outcome",
+            "outcome_date",
+            "matched_expected_outcome",
+            "outcome_confidence",
+            "evidence_reference"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Prediction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "belief_id": {
+              "type": "string"
+            },
+            "confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "decision_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "evaluation_date": {
+              "type": "string"
+            },
+            "expected_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "Prediction"
+            },
+            "prediction_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "prediction_statement": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "prediction_id",
+            "decision_id",
+            "prediction_statement",
+            "confidence",
+            "expected_outcome",
+            "evaluation_date",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Regret": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "decision_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "importance_weighted_regret": {
+              "type": "number"
+            },
+            "missed_alternative": {
+              "type": "string"
+            },
+            "object_type": {
+              "const": "Regret"
+            },
+            "outcome_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_reason": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_score": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "regret_id",
+            "decision_id",
+            "outcome_id",
+            "regret_score",
+            "missed_alternative",
+            "regret_reason",
+            "importance_weighted_regret"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "properties": {
+        "from_status": {
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "to_status": {
+          "type": "string"
+        },
+        "transitioned_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "triggering_object": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "transitioned_at",
+        "from_status",
+        "to_status",
+        "reason",
+        "triggering_object"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "atlas_v2_core_objects.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/AttentionDecision"
+    },
+    {
+      "$ref": "#/$defs/Prediction"
+    },
+    {
+      "$ref": "#/$defs/Outcome"
+    },
+    {
+      "$ref": "#/$defs/Regret"
+    },
+    {
+      "$ref": "#/$defs/CalibrationRecord"
+    },
+    {
+      "$ref": "#/$defs/BehaviorChange"
+    },
+    {
+      "$ref": "#/$defs/BeliefUpdate"
+    },
+    {
+      "$ref": "#/$defs/ExperienceEvent"
+    },
+    {
+      "$ref": "#/$defs/HistoricalExperienceRecord"
+    }
+  ],
+  "title": "Atlas V2 Core Objects",
+  "type": "object"
+}

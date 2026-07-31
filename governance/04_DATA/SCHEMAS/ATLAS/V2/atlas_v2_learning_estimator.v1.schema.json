@@ -1,0 +1,603 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas_v2_learning_estimator.v1.schema.json",
+  "title": "Atlas V2 Learning Value Estimator Objects",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/LearningEstimate"
+    },
+    {
+      "$ref": "#/$defs/LearningEstimateEvaluation"
+    },
+    {
+      "$ref": "#/$defs/AttentionSignal"
+    },
+    {
+      "$ref": "#/$defs/EstimatorPerformanceReport"
+    },
+    {
+      "$ref": "#/$defs/ThresholdExperimentReport"
+    },
+    {
+      "$ref": "#/$defs/ExperimentalRoutingDecision"
+    }
+  ],
+  "$defs": {
+    "Transition": {
+      "type": "object",
+      "required": [
+        "transitioned_at",
+        "from_status",
+        "to_status",
+        "reason",
+        "triggering_object"
+      ],
+      "properties": {
+        "transitioned_at": {
+          "type": "string"
+        },
+        "from_status": {
+          "type": "string"
+        },
+        "to_status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "triggering_object": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Base": {
+      "type": "object",
+      "required": [
+        "object_type",
+        "created_at",
+        "transition_history"
+      ],
+      "properties": {
+        "object_type": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "transition_history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Transition"
+          }
+        }
+      }
+    },
+    "SourceType": {
+      "enum": [
+        "CheapExperiment",
+        "ExperienceEvent",
+        "AttentionDecision",
+        "LearningVelocityMetric"
+      ]
+    },
+    "AllowedAttentionAction": {
+      "enum": [
+        "IGNORE",
+        "REJECT",
+        "WATCH",
+        "CHEAP_TEST",
+        "PROMOTE_TO_TIER_2",
+        "REQUIRES_GATE_REVIEW"
+      ]
+    },
+    "Score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "LearningEstimate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "estimate_id",
+            "estimator_run_id",
+            "source_object_id",
+            "source_object_type",
+            "expected_learning_value",
+            "importance_score",
+            "expected_regret_if_ignored",
+            "attention_cost_estimate",
+            "estimated_attention_priority",
+            "estimator_version",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "LearningEstimate"
+            },
+            "estimate_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "expected_learning_value": {
+              "$ref": "#/$defs/Score"
+            },
+            "importance_score": {
+              "$ref": "#/$defs/Score"
+            },
+            "expected_regret_if_ignored": {
+              "$ref": "#/$defs/Score"
+            },
+            "attention_cost_estimate": {
+              "$ref": "#/$defs/Score"
+            },
+            "estimated_attention_priority": {
+              "$ref": "#/$defs/Score"
+            },
+            "estimator_version": {
+              "const": "atlas_v2_learning_value_estimator_v1"
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "estimator_run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duplicate_of_run_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "LearningEstimateEvaluation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "evaluation_id",
+            "estimator_run_id",
+            "estimate_id",
+            "actual_learning_value",
+            "actual_regret",
+            "behavior_change_observed",
+            "calibration_error",
+            "learning_prediction_error",
+            "importance_weighted_learning_error",
+            "evaluation_reason",
+            "evaluated_at"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "LearningEstimateEvaluation"
+            },
+            "evaluation_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "estimate_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_id": {
+              "type": "string"
+            },
+            "source_object_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "expected_learning_value": {
+              "type": "number"
+            },
+            "importance_score": {
+              "type": "number"
+            },
+            "actual_learning_value": {
+              "type": "number"
+            },
+            "actual_regret": {
+              "type": "number"
+            },
+            "behavior_change_observed": {
+              "type": "boolean"
+            },
+            "calibration_error": {
+              "type": "number"
+            },
+            "learning_prediction_error": {
+              "type": "number"
+            },
+            "importance_weighted_learning_error": {
+              "type": "number"
+            },
+            "evaluation_reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evaluated_at": {
+              "type": "string"
+            },
+            "estimator_run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duplicate_of_run_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "AttentionSignal": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "signal_id",
+            "estimator_run_id",
+            "source_object_id",
+            "source_object_type",
+            "expected_learning_value",
+            "importance_score",
+            "attention_priority_score",
+            "recommended_attention_action"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "AttentionSignal"
+            },
+            "signal_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "expected_learning_value": {
+              "$ref": "#/$defs/Score"
+            },
+            "actual_learning_value": {
+              "type": "number"
+            },
+            "importance_score": {
+              "$ref": "#/$defs/Score"
+            },
+            "regret_score": {
+              "$ref": "#/$defs/Score"
+            },
+            "behavior_change_observed": {
+              "type": "boolean"
+            },
+            "attention_priority_score": {
+              "$ref": "#/$defs/Score"
+            },
+            "recommended_attention_action": {
+              "$ref": "#/$defs/AllowedAttentionAction"
+            },
+            "estimator_run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duplicate_of_run_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "EstimatorPerformanceReport": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "report_id",
+            "estimator_run_id",
+            "period_start",
+            "period_end",
+            "source_ledger_root",
+            "source_record_counts",
+            "input_fingerprint",
+            "estimator_version",
+            "estimate_count",
+            "evaluated_count",
+            "mean_learning_prediction_error",
+            "mean_importance_weighted_error",
+            "behavior_change_rate",
+            "regret_reduction_signal",
+            "summary"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "EstimatorPerformanceReport"
+            },
+            "report_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "period_start": {
+              "type": "string"
+            },
+            "period_end": {
+              "type": "string"
+            },
+            "estimator_version": {
+              "const": "atlas_v2_learning_value_estimator_v1"
+            },
+            "estimate_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "evaluated_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mean_learning_prediction_error": {
+              "type": "number"
+            },
+            "mean_importance_weighted_error": {
+              "type": "number"
+            },
+            "correlation_expected_actual": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1
+            },
+            "behavior_change_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "regret_reduction_signal": {
+              "$ref": "#/$defs/Score"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1
+            },
+            "estimator_run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duplicate_of_run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_ledger_root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_record_counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "input_fingerprint": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "ThresholdExperimentReport": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "report_id",
+            "source_ledger_root",
+            "threshold_profile_name",
+            "production_thresholds",
+            "experimental_thresholds",
+            "score_distribution",
+            "production_action_distribution",
+            "experimental_action_distribution",
+            "action_distribution_delta",
+            "estimated_top_tail_count",
+            "promote_to_tier_2_experiment_count",
+            "requires_gate_review_experiment_count",
+            "authority_boundary_acknowledged",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "ThresholdExperimentReport"
+            },
+            "report_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_ledger_root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "threshold_profile_name": {
+              "const": "quantile_fixture_v1"
+            },
+            "production_thresholds": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "experimental_thresholds": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "score_distribution": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "production_action_distribution": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "experimental_action_distribution": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "action_distribution_delta": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            },
+            "estimated_top_tail_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "promote_to_tier_2_experiment_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requires_gate_review_experiment_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "authority_boundary_acknowledged": {
+              "const": true
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "RoutedTier": {
+      "enum": [
+        "TIER_1_SANITY",
+        "TIER_2_LIGHTWEIGHT_VALIDATION"
+      ]
+    },
+    "ExperimentalRoutingDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "routing_id",
+            "source_threshold_report_id",
+            "source_attention_signal_id",
+            "source_object_id",
+            "source_object_type",
+            "threshold_profile_name",
+            "experimental_action",
+            "routed_to_tier",
+            "experiment_only",
+            "reason",
+            "authority_boundary_acknowledged",
+            "status"
+          ],
+          "properties": {
+            "object_type": {
+              "const": "ExperimentalRoutingDecision"
+            },
+            "routing_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_threshold_report_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_attention_signal_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object_type": {
+              "$ref": "#/$defs/SourceType"
+            },
+            "threshold_profile_name": {
+              "const": "quantile_fixture_v1"
+            },
+            "experimental_action": {
+              "enum": [
+                "CHEAP_TEST",
+                "PROMOTE_TO_TIER_2"
+              ]
+            },
+            "routed_to_tier": {
+              "enum": [
+                "TIER_1_SANITY",
+                "TIER_2_LIGHTWEIGHT_VALIDATION"
+              ]
+            },
+            "experiment_only": {
+              "const": true
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_boundary_acknowledged": {
+              "const": true
+            },
+            "status": {
+              "const": "routed_experiment_only"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

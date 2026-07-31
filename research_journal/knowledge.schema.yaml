@@ -1,0 +1,11 @@
+object_type: knowledge
+storage: yaml
+directory: knowledge
+filename_pattern: KNW_XXXX.yaml
+required_fields:
+  - id
+  - statement
+  - evidence
+  - limitations
+  - why_it_matters
+  - status

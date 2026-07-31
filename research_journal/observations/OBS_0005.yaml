@@ -1,0 +1,6 @@
+id: OBS_0005
+date: 2026-06-03
+observation: AEGIS architecture maturity exceeded evidence maturity in several areas.
+why_interesting: System design may be advancing faster than empirical support.
+source: AEGIS architecture and evidence maturity review
+status: OPEN

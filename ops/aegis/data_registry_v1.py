@@ -46,7 +46,7 @@ def build_data_registry_v1(*, truth_root: Path, day_utc: str, symbols: list[str]
         if isinstance(row, dict) and str(row.get("symbol") or "")
     ]
     universe_metadata = universe_metadata if isinstance(universe_metadata, dict) else {}
-    requested_symbols = canonicalize_symbol_list_v1([*(requested_from_inputs or requested_from_report or symbols or []), "SPY", "QQQ", "IWM", "DIA"])
+    requested_symbols = canonicalize_symbol_list_v1([*requested_from_inputs, *requested_from_report, *(symbols or []), "SPY", "QQQ", "IWM", "DIA"])
     data_items: list[dict[str, Any]] = []
     provider_status = market_payload.get("provider_results") if isinstance(market_payload.get("provider_results"), list) else []
     market_session_date = str(market_payload.get("market_session_date") or day_utc) if market_payload else day_utc
@@ -343,10 +343,29 @@ def _provider_health_status(market_payload: dict[str, Any]) -> str:
 
 def _price_item(*, root: Path, day_utc: str, symbol: str, market_payload: dict[str, Any], market_path: Path | None, market_inputs_payload: dict[str, Any] | None = None, market_inputs_path: Path | None = None, market_input_events: dict[str, str] | None = None) -> dict[str, Any]:
     symbol = normalize_market_symbol_v1(symbol)
+    row = _symbol_from_market_payload(market_payload, symbol)
+    if row:
+        session_date = str(row.get("market_session_date") or market_payload.get("market_session_date") or day_utc)
+        status = str(row.get("freshness_status") or ("CURRENT" if session_date == day_utc else "STALE")).upper()
+        if status == "CURRENT":
+            return _item(
+                f"market.price.{symbol}",
+                "PRICE",
+                symbol=symbol,
+                field="last_price",
+                status=status,
+                provider=str(row.get("source") or row.get("provider") or market_payload.get("source") or "aegis_market_data_v1"),
+                day_utc=day_utc,
+                market_session_date=session_date,
+                source_artifact_path=str(market_path or ""),
+                source_hash=_file_hash(market_path),
+                data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or row.get("source_timestamp_utc") or ""),
+                quality="HIGH",
+                notes=[],
+            )
     market_input = _market_input_record(market_inputs_payload or {}, f"market.price.{symbol}")
     if market_input:
         return _item_from_market_input(market_input, market_inputs_path=market_inputs_path, market_input_events=market_input_events)
-    row = _symbol_from_market_payload(market_payload, symbol)
     if row:
         session_date = str(row.get("market_session_date") or market_payload.get("market_session_date") or day_utc)
         status = str(row.get("freshness_status") or ("CURRENT" if session_date == day_utc else "STALE")).upper()
@@ -356,12 +375,12 @@ def _price_item(*, root: Path, day_utc: str, symbol: str, market_payload: dict[s
             symbol=symbol,
             field="last_price",
             status=status,
-            provider=str(row.get("source") or market_payload.get("source") or "aegis_market_data_v1"),
+            provider=str(row.get("source") or row.get("provider") or market_payload.get("source") or "aegis_market_data_v1"),
             day_utc=day_utc,
             market_session_date=session_date,
             source_artifact_path=str(market_path or ""),
             source_hash=_file_hash(market_path),
-            data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or ""),
+            data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or row.get("source_timestamp_utc") or ""),
             quality="HIGH" if status == "CURRENT" else "LOW",
             notes=[],
         )
@@ -400,14 +419,19 @@ def _price_item(*, root: Path, day_utc: str, symbol: str, market_payload: dict[s
 
 
 def _vix_item(*, root: Path, day_utc: str, market_payload: dict[str, Any], market_path: Path | None, market_inputs_payload: dict[str, Any] | None = None, market_inputs_path: Path | None = None, market_input_events: dict[str, str] | None = None) -> dict[str, Any]:
-    market_input = _market_input_record(market_inputs_payload or {}, "market.volatility.VIX")
-    if market_input:
-        return _item_from_market_input(market_input, market_inputs_path=market_inputs_path, market_input_events=market_input_events)
     row = _symbol_from_market_payload(market_payload, "VIX")
     if row:
         session_date = str(row.get("market_session_date") or market_payload.get("market_session_date") or day_utc)
         status = str(row.get("freshness_status") or ("CURRENT" if session_date == day_utc else "STALE")).upper()
-        return _item("market.volatility.VIX", "VOLATILITY", symbol="VIX", field="level", status=status, provider=str(row.get("source") or market_payload.get("source") or "aegis_market_data_v1"), day_utc=day_utc, market_session_date=session_date, source_artifact_path=str(market_path or ""), source_hash=_file_hash(market_path), data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or ""), quality="HIGH" if status == "CURRENT" else "LOW")
+        if status == "CURRENT":
+            return _item("market.volatility.VIX", "VOLATILITY", symbol="VIX", field="level", status=status, provider=str(row.get("source") or row.get("provider") or market_payload.get("source") or "aegis_market_data_v1"), day_utc=day_utc, market_session_date=session_date, source_artifact_path=str(market_path or ""), source_hash=_file_hash(market_path), data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or row.get("source_timestamp_utc") or ""), quality="HIGH")
+    market_input = _market_input_record(market_inputs_payload or {}, "market.volatility.VIX")
+    if market_input:
+        return _item_from_market_input(market_input, market_inputs_path=market_inputs_path, market_input_events=market_input_events)
+    if row:
+        session_date = str(row.get("market_session_date") or market_payload.get("market_session_date") or day_utc)
+        status = str(row.get("freshness_status") or ("CURRENT" if session_date == day_utc else "STALE")).upper()
+        return _item("market.volatility.VIX", "VOLATILITY", symbol="VIX", field="level", status=status, provider=str(row.get("source") or row.get("provider") or market_payload.get("source") or "aegis_market_data_v1"), day_utc=day_utc, market_session_date=session_date, source_artifact_path=str(market_path or ""), source_hash=_file_hash(market_path), data_timestamp_utc=str(row.get("data_timestamp_utc") or row.get("timestamp_utc") or row.get("source_timestamp_utc") or ""), quality="HIGH" if status == "CURRENT" else "LOW")
     if market_payload:
         failure = str(market_payload.get("failure_reason") or "")
         explanations = market_payload.get("missing_symbol_explanations") if isinstance(market_payload.get("missing_symbol_explanations"), dict) else {}

@@ -64,6 +64,102 @@
         },
         "structure_type": "EQUITY_SPOT"
       }
+    },
+    {
+      "engine_id": "C2_MEAN_REVERSION_EQ_V1",
+      "exposure_requirements": {
+        "allowed_risk_class": [
+          "MEAN_REVERSION"
+        ],
+        "exposure_type": "LONG_EQUITY",
+        "max_risk_pct_max": "0.02",
+        "required_engine_suite": "C2_HYBRID_V1"
+      },
+      "structure_template": {
+        "allowed_action": "BUY",
+        "order_intent_type": "EQUITY_BUY",
+        "order_terms": {
+          "order_type": "LIMIT",
+          "reference_price_source": "MARKET_OPEN_DATA_GATE",
+          "time_in_force": "DAY"
+        },
+        "safety": {
+          "execution_authority_granted": false,
+          "order_submission_attempted": false,
+          "requires_submit_boundary": true,
+          "trading_behavior_changed": false
+        },
+        "structure_type": "EQUITY_SPOT"
+      }
+    },
+    {
+      "engine_id": "C2_OIL_SHOCK_REVERSAL_V1",
+      "exposure_requirements": {
+        "allowed_risk_class": [
+          "OIL_SHOCK_REVERSAL"
+        ],
+        "allowed_symbols": [
+          "DBC",
+          "SPY",
+          "USO",
+          "XLE"
+        ],
+        "allowed_target_notional_pct": [
+          "0.05"
+        ],
+        "exposure_type": "LONG_EQUITY",
+        "max_risk_pct_max": "0.01",
+        "required_engine_suite": "C2_HYBRID_V1"
+      },
+      "structure_template": {
+        "allowed_action": "BUY",
+        "order_intent_type": "EQUITY_BUY",
+        "order_terms": {
+          "order_type": "LIMIT",
+          "reference_price_source": "MARKET_OPEN_DATA_GATE",
+          "time_in_force": "DAY"
+        },
+        "safety": {
+          "execution_authority_granted": false,
+          "order_submission_attempted": false,
+          "requires_submit_boundary": true,
+          "trading_behavior_changed": false
+        },
+        "structure_type": "EQUITY_SPOT"
+      }
+    },
+    {
+      "engine_id": "C2_EVENT_DISLOCATION_V1",
+      "exposure_requirements": {
+        "allowed_risk_class": [
+          "EVENT_DISLOCATION"
+        ],
+        "allowed_symbols": [
+          "GLD"
+        ],
+        "allowed_target_notional_pct": [
+          "0.05"
+        ],
+        "exposure_type": "LONG_EQUITY",
+        "max_risk_pct_max": "0.01",
+        "required_engine_suite": "C2_HYBRID_V1"
+      },
+      "structure_template": {
+        "allowed_action": "BUY",
+        "order_intent_type": "EQUITY_BUY",
+        "order_terms": {
+          "order_type": "LIMIT",
+          "reference_price_source": "MARKET_OPEN_DATA_GATE",
+          "time_in_force": "DAY"
+        },
+        "safety": {
+          "execution_authority_granted": false,
+          "order_submission_attempted": false,
+          "requires_submit_boundary": true,
+          "trading_behavior_changed": false
+        },
+        "structure_type": "EQUITY_SPOT"
+      }
     }
   ],
   "schema_id": "c2_equity_structure_policy",

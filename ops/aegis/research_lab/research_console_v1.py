@@ -55,7 +55,7 @@ SAFETY_LABELS = [
     "READ-ONLY GOVERNANCE",
     "NO BROKER EXECUTION",
     "NO LIVE TRADING",
-    "MANUAL REVIEW REQUIRED",
+    "RESEARCH ONLY",
 ]
 HYPOTHETICAL_EVIDENCE_LABEL = "Backtests and model outputs are hypothetical research evidence, not achieved portfolio performance."
 
@@ -217,8 +217,15 @@ def _normalize_aegis_hypothesis(item: dict[str, Any], *, generated_at: str = "")
         data_status = latest_result_status
     sample_size = latest_result.get("sample_size")
     minimum_sample_size = latest_result.get("minimum_sample_size")
+    next_sample_expected_at = ""
+    estimated_completion_date = ""
+    expected_trading_days_remaining = None
     if latest_result_status == "INCONCLUSIVE_SAMPLE_SIZE" and sample_size is not None and minimum_sample_size is not None:
-        next_action = f"Review inconclusive event-study result; sample size {sample_size}/{minimum_sample_size}."
+        missing_samples = max(0, int(minimum_sample_size or 0) - int(sample_size or 0))
+        next_sample_expected_at = "next market close"
+        estimated_completion_date = f"after {missing_samples} valid observations" if missing_samples else "complete after current observation set"
+        expected_trading_days_remaining = missing_samples
+        next_action = f"Collect forward-return observations; sample size {sample_size}/{minimum_sample_size}."
     normalized = {
         "hypothesis_id": str(item.get("hypothesis_id") or item.get("item_id") or ""),
         "title": str(item.get("title") or item.get("readable_title") or item.get("hypothesis_id") or "Research hypothesis"),
@@ -236,6 +243,9 @@ def _normalize_aegis_hypothesis(item: dict[str, Any], *, generated_at: str = "")
         "updated_at": str(item.get("updated_at") or item.get("generated_at_utc") or latest_result.get("generated_at_utc") or generated_at or ""),
         "sample_size": sample_size,
         "minimum_sample_size": minimum_sample_size,
+        "next_sample_expected_at": next_sample_expected_at,
+        "estimated_completion_date": estimated_completion_date,
+        "expected_trading_days_remaining": expected_trading_days_remaining,
         "test_status": latest_result_status,
         "latest_result": latest_result_status,
         "latest_result_summary": latest_result_summary,
@@ -249,6 +259,7 @@ def _normalize_aegis_hypothesis(item: dict[str, Any], *, generated_at: str = "")
 
 HYPOTHESIS_VIEW_SECTION_ORDER = [
     "recommendations_ready",
+    "collecting_evidence",
     "ready_to_start",
     "researching",
     "waiting",
@@ -257,6 +268,7 @@ HYPOTHESIS_VIEW_SECTION_ORDER = [
 ]
 HYPOTHESIS_VIEW_SECTION_LABELS = {
     "recommendations_ready": "Recommendations Ready",
+    "collecting_evidence": "Collecting Evidence",
     "ready_to_start": "Ready to Start",
     "researching": "Researching",
     "waiting": "Waiting",
@@ -272,6 +284,8 @@ def _safe_anchor_id(value: str) -> str:
 
 def _hypothesis_section_id(row: dict[str, Any]) -> str:
     status = str(row.get("user_facing_status") or "").strip()
+    if str(row.get("test_status") or row.get("latest_result") or "").upper() == "INCONCLUSIVE_SAMPLE_SIZE":
+        return "collecting_evidence"
     if status == "Recommendation Ready":
         return "recommendations_ready"
     if status == "Researching":
@@ -321,6 +335,8 @@ def _hypothesis_view_sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
 def _hypothesis_display_status(row: dict[str, Any], section_id: str) -> str:
     if section_id == "ready_to_start":
         return "Ready to Start"
+    if section_id == "collecting_evidence":
+        return "Collecting Evidence"
     return str(row.get("user_facing_status") or "Ready to Start")
 
 
@@ -335,6 +351,8 @@ def _hypothesis_primary_action_for_item(row: dict[str, Any], section_id: str) ->
         return {"label": "Start Research", "href": f"/research-lab/start?hypothesis_id={quote(hypothesis_id)}"}
     if section_id == "recommendations_ready":
         return {"label": "View Recommendation", "href": detail_href}
+    if section_id == "collecting_evidence":
+        return {"label": "View Progress", "href": detail_href}
     if section_id == "researching":
         return {"label": "View Progress", "href": detail_href}
     if section_id == "waiting":
@@ -369,8 +387,25 @@ def _hypothesis_view_item(row: dict[str, Any], section_id: str) -> dict[str, Any
         "primary_action_label": primary_action["label"],
         "primary_action_href": primary_action["href"],
         "primary_action": primary_action,
+        "primary_command": row.get("primary_command") if isinstance(row.get("primary_command"), dict) else {},
+        "secondary_commands": row.get("secondary_commands") if isinstance(row.get("secondary_commands"), list) else [],
+        "disabled_commands": row.get("disabled_commands") if isinstance(row.get("disabled_commands"), list) else [],
+        "blocker_reason": str(row.get("blocker_summary") or row.get("blocker_reason") or ""),
+        "sample_size": row.get("sample_size"),
+        "minimum_sample_size": row.get("minimum_sample_size"),
+        "required_samples": row.get("minimum_sample_size"),
+        "current_samples": row.get("sample_size"),
+        "missing_samples": max(0, int(row.get("minimum_sample_size") or 0) - int(row.get("sample_size") or 0)) if section_id == "collecting_evidence" else None,
+        "next_sample_expected_at": str(row.get("next_sample_expected_at") or ("next market close" if section_id == "collecting_evidence" else "")),
+        "estimated_completion_date": str(row.get("estimated_completion_date") or (f"after {max(0, int(row.get('minimum_sample_size') or 0) - int(row.get('sample_size') or 0))} valid observations" if section_id == "collecting_evidence" else "")),
+        "expected_trading_days_remaining": row.get("expected_trading_days_remaining") if row.get("expected_trading_days_remaining") is not None else (max(0, int(row.get("minimum_sample_size") or 0) - int(row.get("sample_size") or 0)) if section_id == "collecting_evidence" else None),
+        "test_status": str(row.get("test_status") or row.get("latest_result") or ""),
+        "latest_result": str(row.get("latest_result") or row.get("test_status") or ""),
+        "operator_action_required": False if section_id == "collecting_evidence" else bool(row.get("operator_action_required")),
+        "autonomous_engine_enabled": bool(row.get("autonomous_engine_enabled", True)),
+        "diagnostics_href": "/research-lab/blocked-work" if section_id == "blocked" else "/research-lab/hypotheses",
         "detail_href": f"/research-lab/hypotheses?dossier={quote(hypothesis_id)}" if hypothesis_id else "/research-lab/hypotheses",
-        "recommendation_summary": "Recommendation Ready" if section_id == "recommendations_ready" else "No recommendation yet",
+        "recommendation_summary": "Collecting evidence before paper validation" if section_id == "collecting_evidence" else ("Recommendation Ready" if section_id == "recommendations_ready" else "No recommendation yet"),
         "confidence_summary": str(row.get("confidence_summary") or row.get("tier") or "Not enough evidence yet"),
         "updated_at": str(row.get("updated_at") or ""),
         "created_at": str(row.get("created_at") or ""),
@@ -460,13 +495,16 @@ def _build_normalized_hypothesis_inventory(queue: dict[str, Any], aegis_pipeline
     for row in unique_rows:
         projection = research_run_projection_for_hypothesis_v1(row, research_runs)
         row["research_run_state"] = projection
-        row["user_facing_status"] = projection["user_facing_status"]
-        row["user_facing_explanation"] = projection["user_facing_explanation"]
+        collecting_evidence = str(row.get("test_status") or row.get("latest_result") or "").upper() == "INCONCLUSIVE_SAMPLE_SIZE"
+        row["user_facing_status"] = "Collecting Evidence" if collecting_evidence else projection["user_facing_status"]
+        row["user_facing_explanation"] = "Research is active. Aegis needs more forward-return observations before this hypothesis can qualify for paper validation." if collecting_evidence else projection["user_facing_explanation"]
+        if collecting_evidence:
+            row["operator_action_required"] = False
         row["last_research_run"] = projection["last_research_run"]
         row["trigger_source"] = projection["trigger_source"]
         row["started_by_user"] = projection["started_by_user"]
         row["primary_action_label"] = projection["primary_action_label"]
-        command = command_for_hypothesis_status_v1(projection["user_facing_status"])
+        command = command_for_hypothesis_status_v1(row["user_facing_status"])
         hypothesis_id = str(row.get("hypothesis_id") or row.get("hypothesis_proposal_id") or row.get("item_id") or "")
         row["primary_command"] = command_instance_v1(
             command["command_id"],
@@ -478,16 +516,16 @@ def _build_normalized_hypothesis_inventory(queue: dict[str, Any], aegis_pipeline
                 "title": row.get("title") or row.get("hypothesis_summary") or hypothesis_id,
                 "symbols": " ".join(str(symbol) for symbol in (row.get("symbols") or row.get("required_symbols") or row.get("related_symbols") or []) if str(symbol)),
             },
-            enabled=not (projection["user_facing_status"] == "Blocked" and command["command_id"] == "START_RESEARCH"),
-            disabled_reason="Resolve the blocker before starting research." if projection["user_facing_status"] == "Blocked" and command["command_id"] == "START_RESEARCH" else "",
+            enabled=not (row["user_facing_status"] == "Blocked" and command["command_id"] == "START_RESEARCH"),
+            disabled_reason="Resolve the blocker before starting research." if row["user_facing_status"] == "Blocked" and command["command_id"] == "START_RESEARCH" else "",
         )
         row["secondary_commands"] = []
         row["disabled_commands"] = []
         row["search_text"] = " ".join(
             [
                 row.get("search_text", ""),
-                projection["user_facing_status"],
-                projection["user_facing_explanation"],
+                row["user_facing_status"],
+                row["user_facing_explanation"],
                 projection["trigger_source"],
             ]
         ).lower()

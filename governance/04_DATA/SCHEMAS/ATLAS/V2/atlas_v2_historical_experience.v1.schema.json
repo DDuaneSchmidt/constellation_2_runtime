@@ -1,0 +1,322 @@
+{
+  "$defs": {
+    "AttentionDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "object_type": {
+              "const": "AttentionDecision"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "Base": {
+      "properties": {
+        "created_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        },
+        "transition_history": {
+          "items": {
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "object_type",
+        "created_at",
+        "transition_history"
+      ],
+      "type": "object"
+    },
+    "CalibrationRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "object_type": {
+              "const": "CalibrationRecord"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "ExperienceEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "actual_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "actual_learning_value_post_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "object_type": {
+              "const": "ExperienceEvent"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "HistoricalExperienceRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "allOf": [
+            {
+              "else": {
+                "properties": {
+                  "converted_experience_event_id": {
+                    "const": "NONE"
+                  }
+                }
+              },
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "CONVERTED"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "converted_experience_event_id": {
+                    "not": {
+                      "const": "NONE"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "actual_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "actual_learning_value_post_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "actual_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "calibration_error": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "conversion_reason": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "converted_experience_event_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "decision_summary": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_learning_source_fields": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "expected_learning_value_pre_outcome": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "expected_outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "experience_quality_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "historical_date": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_type": {
+              "const": "HistoricalExperienceRecord"
+            },
+            "provenance_reference": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "record_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "regret_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "source_artifact": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_type": {
+              "enum": [
+                "FAILURE",
+                "OBSERVATION",
+                "KNOWLEDGE",
+                "DECISION",
+                "CONTRADICTION",
+                "RESEARCH_OUTCOME"
+              ]
+            },
+            "status": {
+              "enum": [
+                "CONVERTED",
+                "INCOMPLETE_PROVENANCE",
+                "UNSUPPORTED_SOURCE",
+                "DUPLICATE_SOURCE",
+                "REJECTED_LOW_QUALITY"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "source_artifact",
+            "source_type",
+            "historical_date",
+            "decision_summary",
+            "expected_outcome",
+            "actual_outcome",
+            "confidence",
+            "regret_score",
+            "calibration_error",
+            "experience_quality_score",
+            "expected_learning_value_pre_outcome",
+            "actual_learning_value_post_outcome",
+            "expected_learning_source_fields",
+            "actual_learning_source_fields",
+            "conversion_reason",
+            "provenance_reference",
+            "converted_experience_event_id",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Outcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "object_type": {
+              "const": "Outcome"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "Prediction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "object_type": {
+              "const": "Prediction"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "Regret": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Base"
+        },
+        {
+          "properties": {
+            "object_type": {
+              "const": "Regret"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://constellation.local/schemas/atlas/v2/atlas_v2_historical_experience.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/HistoricalExperienceRecord"
+    },
+    {
+      "$ref": "#/$defs/AttentionDecision"
+    },
+    {
+      "$ref": "#/$defs/Prediction"
+    },
+    {
+      "$ref": "#/$defs/Outcome"
+    },
+    {
+      "$ref": "#/$defs/Regret"
+    },
+    {
+      "$ref": "#/$defs/CalibrationRecord"
+    },
+    {
+      "$ref": "#/$defs/ExperienceEvent"
+    }
+  ],
+  "title": "Atlas V2 Historical Experience Factory V1",
+  "type": "object"
+}

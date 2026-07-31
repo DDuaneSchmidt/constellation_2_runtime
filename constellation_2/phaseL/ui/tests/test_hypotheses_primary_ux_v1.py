@@ -27,7 +27,7 @@ def test_primary_nav_uses_hypotheses_as_research_concept() -> None:
     primary = nav.split("export function flattenNavigation", 1)[0]
     assert 'label: "Hypotheses"' in primary
     assert 'route: "/research-lab"' in primary
-    assert 'label: "Research"' not in primary
+    assert 'label: "Research"' in primary
     assert 'label: "Market Theses"' not in primary
 
 
@@ -50,7 +50,7 @@ def test_hypotheses_cards_answer_primary_workflow_questions() -> None:
     assert "data-aegis-command-id" in command_button
     assert "hypothesis-start-form" not in action_bar
     assert 'type="submit"' not in action_bar
-    for section in ["recommendations_ready", "ready_to_start", "researching", "waiting", "blocked", "completed"]:
+    for section in ["recommendations_ready", "collecting_evidence", "ready_to_start", "researching", "waiting", "blocked", "completed"]:
         assert section in source
     assert "top_item" in summary
     assert "visible_items" in source
@@ -66,7 +66,8 @@ def test_hypotheses_one_primary_action_and_more_menu_rules() -> None:
     section = _block(source, "function renderHypothesisSection", "function renderHypothesesDiagnosticsPanel")
 
     assert "row.primary_command" in primary
-    assert "Action unavailable" in primary
+    assert "No action required" not in primary
+    assert "Action unavailable" not in primary
     assert "safeList(row.secondary_commands)" in secondary
     command_button = _block(source, "function renderCommandButton", "function renderHypothesisActionBar")
     assert "data-aegis-command-id" in command_button
@@ -91,7 +92,7 @@ def test_hypothesis_statuses_are_simplified_for_primary_ux() -> None:
     source = pages_source_v1(ROOT)
     status_block = _block(source, "const HYPOTHESIS_USER_STATUSES", "function hypothesisRunState")
     status_function = _block(source, "function hypothesisUserStatus", "function hypothesisCurrentStage")
-    for status in ["Ready to Start", "Queued", "Scheduled", "Researching", "Waiting", "Complete", "Blocked", "Recommendation Ready"]:
+    for status in ["Ready to Start", "Queued", "Scheduled", "Researching", "Collecting Evidence", "Waiting", "Complete", "Blocked", "Recommendation Ready"]:
         assert status in status_block
     for internal in ["IDEA", "RESEARCHING", "VALIDATING", "PAPER_TRIAL", "READY", "ARCHIVED"]:
         assert internal not in status_block
@@ -199,7 +200,7 @@ def test_hypothesis_card_actions_open_inline_details_not_missing_routes() -> Non
     action_bar = _block(source, "function renderHypothesisActionBar", "function renderHypothesisCard")
     detail_panel = _block(source, "function renderHypothesisDetailPanel", "function renderHypothesisActionBar")
     command_button = _block(source, "function renderCommandButton", "function renderHypothesisActionBar")
-    handler = _block(main, "function openCommandDetail", "async function runAegisCommandElement")
+    handler = _block(main, "function showCommandDetailPanel", "async function runAegisCommandElement")
 
     commands = command_registry_v1()["commands_by_id"]
     assert commands["VIEW_WAITING_REASON"]["label"] == "View Waiting Reason"
@@ -265,10 +266,12 @@ def test_recommendation_workflow_is_visible_without_execution_language() -> None
     card = _block(source, "function renderHypothesisCard", "function emptyHypothesisViewSection")
     detail = _block(source, "function renderResearchDossierPanel", "function renderResearchPlansConsolePanel")
     assert "Recommendation Ready" in card
-    assert "Manual IB capture guidance" in card
+    assert "Review Brief Available" in card
+    assert "Collecting Evidence" in card
+    assert "Manual IB capture guidance" not in card
     assert "confidence" in detail.lower()
     assert "Related symbols" in detail
-    for forbidden in ["autonomous", "broker submit", "execution eligible", "order routing"]:
+    for forbidden in ["broker submit", "execution eligible", "order routing"]:
         assert forbidden not in (card + detail).lower()
 
 
@@ -287,7 +290,7 @@ def test_primary_workspaces_remove_right_side_rails() -> None:
 
 def test_hypotheses_layout_is_responsive_for_1600_by_900() -> None:
     css = _text(CSS)
-    assert ".dashboard-main-only .page-content > .hypotheses-workspace" in css
+    assert ".workflow-layout .page-content" in css
     assert ".hypothesis-card-grid" in css
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
     assert "@media (max-width: 1180px)" in css
@@ -295,3 +298,42 @@ def test_hypotheses_layout_is_responsive_for_1600_by_900() -> None:
     assert ".hypotheses-summary-counts" in css
     assert ".hypothesis-more-menu" in css
     assert ".hypothesis-section-collapsed" in css
+
+
+def test_hypotheses_render_as_single_column_full_width_list() -> None:
+    source = pages_source_v1(ROOT)
+    css = _text(CSS)
+    section = _block(source, "function renderHypothesisSection", "function renderHypothesesDiagnosticsPanel")
+    card = _block(source, "function renderHypothesisCard", "function emptyHypothesisViewSection")
+
+    assert 'class="hypothesis-card-grid"' in section
+    assert "grid-template-columns: minmax(0, 1fr);" in css
+    assert ".hypothesis-card {\n  width: 100%;" in css
+    assert "hypothesis-card-description" in card
+    assert "hypothesis-compact-fact-rows" in card
+    assert "hypothesis-fact-row" in card
+
+
+def test_hypothesis_cards_use_compact_rows_not_six_box_grid() -> None:
+    source = pages_source_v1(ROOT)
+    css = _text(CSS)
+    card = _block(source, "function renderHypothesisCard", "function emptyHypothesisViewSection")
+
+    for label in ["Status", "Symbols", "Last run", "Trigger source", "Recommendation"]:
+        assert label in card
+    assert "hypothesis-card-facts.hypothesis-compact-fact-rows" in css
+    assert "border: 0;" in css
+    assert "background: transparent;" in css
+    assert "grid-template-columns: 140px minmax(0, 1fr);" in css
+
+
+def test_long_hypothesis_titles_wrap_and_action_stays_visible() -> None:
+    source = pages_source_v1(ROOT)
+    css = _text(CSS)
+    action_bar = _block(source, "function renderHypothesisActionBar", "function renderHypothesisCard")
+
+    assert "overflow-wrap: anywhere;" in css
+    assert "hyphens: auto;" in css
+    assert "hypothesis-primary-action" in action_bar or "hypothesis-primary-action" in source
+    assert "justify-content: flex-start;" in css
+    assert "@media (max-width: 760px)" in css

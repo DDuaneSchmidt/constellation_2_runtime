@@ -1,0 +1,631 @@
+{
+  "module_id": "runtime_truth_kernel",
+  "display_name": "Aegis Runtime Truth Kernel",
+  "type": "truth_kernel",
+  "owner": "ops.aegis",
+  "capabilities": [
+    {
+      "capability_id": "runtime_truth_readiness",
+      "display_name": "Runtime truth readiness",
+      "required_evidence": [
+        "runtime_truth_kernel",
+        "runtime_evaluation",
+        "paper_candidates_ready",
+        "paper_trade_creation_allowed",
+        "paper_trade_ready"
+      ],
+      "allowed_actions": [
+        "READ_ONLY",
+        "AUDIT"
+      ]
+    },
+    {
+      "capability_id": "trend_eq_realized_vs_unrealized_diagnostic_v1",
+      "display_name": "Trend EQ Realized vs Unrealized Diagnostic V1",
+      "required_evidence": [
+        "aegis_paper_position_ledger_v1",
+        "aegis_sleeve_performance_truth_v1",
+        "aegis_sleeve_evidence_certification_v1"
+      ],
+      "allowed_actions": [
+        "READ_ONLY",
+        "AUDIT"
+      ],
+      "forbidden_actions": [
+        "TRADE",
+        "EXECUTE",
+        "BROKER_SUBMIT",
+        "BROKER_TRANSMIT",
+        "CHANGE_SIGNAL_LOGIC",
+        "CHANGE_SLEEVE_LOGIC",
+        "CHANGE_ENTRY_LOGIC",
+        "CHANGE_EXIT_LOGIC"
+      ]
+    },
+    {
+      "capability_id": "experience_loop_v1",
+      "display_name": "Experience Loop V1",
+      "required_evidence": [
+        "aegis_experience_loop_v1"
+      ],
+      "allowed_actions": [
+        "READ_ONLY",
+        "AUDIT"
+      ],
+      "forbidden_actions": [
+        "TRADE",
+        "EXECUTE",
+        "BROKER_SUBMIT",
+        "BROKER_TRANSMIT",
+        "ENABLE_TRADE_ADVICE",
+        "ENABLE_BROKER_EXECUTION",
+        "CREATE_CANDIDATE",
+        "MUTATE_ALLOCATION",
+        "MUTATE_SLEEVE",
+        "AUTONOMOUS_EXECUTION",
+        "CREATE_SLEEVE",
+        "CREATE_PAPER_POSITION",
+        "ALLOCATE_CAPITAL",
+        "VALIDATE_INVESTMENT_CLAIM",
+        "GENERATE_HYPOTHESIS",
+        "BROAD_DISCOVERY"
+      ]
+    }
+  ],
+  "inputs": [
+    "evidence_event_store_v1",
+    "runtime_policy_bundle_v1",
+    "context_requirement_profile.v1.json",
+    "provider_health.v1.json",
+    "market_context_demand.v1.json",
+    "input_contract_reconciliation.v1.json",
+    "market_data_demand.v1.json",
+    "market_data_coverage.v1.json",
+    "paper_position_ledger.v1.json",
+    "paper_position_events.v1.jsonl",
+    "exit_logic_review.v1.json",
+    "exit_recommendations.v1.json",
+    "reports/aegis_hash_lineage_v1/{day}/hash_lineage.v1.json",
+    "paper_operator_projection.v1.json",
+    "paper_open_authorization.v1.json",
+    "paper_session_ledger.v1.json"
+  ],
+  "outputs": [
+    "runtime_truth_kernel.v1.json",
+    "runtime_evaluation.v1.json",
+    "readiness_dependencies.v1.json",
+    "paper_position_ledger.v1.json",
+    "paper_position_events.v1.jsonl",
+    "exit_logic_review.v1.json",
+    "exit_recommendations.v1.json",
+    "reports/aegis_hash_lineage_v1/{day}/hash_lineage.v1.json",
+    "PAPER_CANDIDATES_READY",
+    "PAPER_TRADE_CREATION_ALLOWED",
+    "PAPER_TRADE_READY",
+    "paper_operator_projection.v1.json",
+    "paper_session_ledger.v1.json",
+    "reports/aegis_sleeve_evidence_certification_v1/{day}/sleeve_evidence_certification.v1.json",
+    "reports/aegis_outcome_flow_audit_v1/{day}/outcome_flow_audit.v1.json",
+    "reports/aegis_outcome_flow_audit_v1/{day}/outcome_flow_audit_summary.md",
+    "reports/aegis_experience_loop_v1/{day}/experience_loop_certification.v1.json"
+  ],
+  "commands": [
+    {
+      "name": "aegis:truth-kernel",
+      "command": "npm run aegis:truth-kernel"
+    },
+    {
+      "name": "aegis:paper:golden-path",
+      "command": "npm run aegis:paper:golden-path"
+    },
+    {
+      "name": "aegis:repair-runtime-readiness",
+      "command": "npm run aegis:repair-runtime-readiness"
+    },
+    {
+      "name": "aegis:market-context-provider-health",
+      "command": "npm run aegis:market-context-provider-health"
+    },
+    {
+      "name": "aegis:market-context-demand",
+      "command": "npm run aegis:market-context-demand"
+    },
+    {
+      "name": "aegis:validate-breadth-drop",
+      "command": "npm run aegis:validate-breadth-drop"
+    },
+    {
+      "name": "aegis:create-vix-template",
+      "command": "npm run aegis:create-vix-template"
+    },
+    {
+      "name": "aegis:validate-vix-drop",
+      "command": "npm run aegis:validate-vix-drop"
+    },
+    {
+      "name": "aegis:ingest-vix-drop",
+      "command": "npm run aegis:ingest-vix-drop"
+    },
+    {
+      "name": "aegis:verify-vix-source",
+      "command": "npm run aegis:verify-vix-source"
+    },
+    {
+      "name": "aegis:repair-context-readiness",
+      "command": "npm run aegis:repair-context-readiness"
+    },
+    {
+      "name": "aegis:create-breadth-template",
+      "command": "npm run aegis:create-breadth-template"
+    },
+    {
+      "name": "aegis:ingest-breadth-drop",
+      "command": "npm run aegis:ingest-breadth-drop"
+    },
+    {
+      "name": "aegis:paper:review-queue",
+      "command": "npm run aegis:paper:review-queue"
+    },
+    {
+      "name": "aegis:paper:review",
+      "command": "npm run aegis:paper:review"
+    },
+    {
+      "name": "aegis:paper:receipt",
+      "command": "npm run aegis:paper:receipt"
+    },
+    {
+      "name": "aegis:context-requirements",
+      "command": "npm run aegis:context-requirements"
+    },
+    {
+      "name": "aegis:input-contract-reconciliation",
+      "command": "npm run aegis:input-contract-reconciliation"
+    },
+    {
+      "name": "aegis:repair-input-contracts",
+      "command": "npm run aegis:repair-input-contracts"
+    },
+    {
+      "name": "aegis:market-data-demand",
+      "command": "npm run aegis:market-data-demand",
+      "policy_effect": "evidence_projection_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:market-data-coverage",
+      "command": "npm run aegis:market-data-coverage",
+      "policy_effect": "evidence_projection_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:paper-position-ledger",
+      "command": "npm run aegis:paper-position-ledger",
+      "policy_effect": "simulated_paper_position_ledger_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:exit-logic-review",
+      "command": "npm run aegis:exit-logic-review",
+      "policy_effect": "human_reviewed_paper_exit_review_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:exit-recommendations",
+      "command": "npm run aegis:exit-recommendations",
+      "policy_effect": "human_reviewed_paper_exit_recommendations_only_operator_confirmed_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:hash-lineage",
+      "command": "npm run aegis:hash-lineage",
+      "policy_effect": "hash_lineage_read_model_only_no_trading_gate_change"
+    },
+    {
+      "name": "aegis:paper:authorize-open",
+      "command": "npm run aegis:paper:authorize-open",
+      "policy_effect": "paper_only_operator_authorization_no_advisory_no_live_broker_no_autonomous_execution"
+    },
+    {
+      "name": "aegis:paper-status",
+      "command": "npm run aegis:paper-status",
+      "policy_effect": "canonical_paper_operator_projection_only_no_advisory_no_live_no_autonomous_execution"
+    },
+    {
+      "name": "aegis:paper-open",
+      "command": "npm run aegis:paper-open",
+      "policy_effect": "paper_only_open_authorization_and_construction_no_advisory_no_live_no_autonomous_execution"
+    },
+    {
+      "name": "aegis:doctor",
+      "command": "npm run aegis:doctor",
+      "policy_effect": "engineering_diagnostics_only_may_report_global_partial_context"
+    },
+    {
+      "name": "aegis:sleeve-evidence-certification",
+      "command": "npm run aegis:sleeve-evidence-certification",
+      "policy_effect": "read_only_sleeve_evidence_certification_no_advisory_no_live_no_autonomous_execution_no_sleeve_or_signal_logic_change"
+    },
+    {
+      "name": "aegis:outcome-flow-audit",
+      "command": "npm run aegis:outcome-flow-audit",
+      "description": "Builds a read-only outcome flow audit explaining whether paper sleeve outcomes are accumulating closed evidence samples.",
+      "policy_effect": "read_only_outcome_flow_audit_no_trade_advice_no_sleeve_or_signal_logic_change"
+    },
+    {
+      "name": "aegis:trend-eq-realized-vs-unrealized-diagnostic",
+      "command": "npm run aegis:trend-eq-realized-vs-unrealized-diagnostic",
+      "policy_effect": "diagnostic_read_model_only_no_strategy_or_ui_change"
+    },
+    {
+      "name": "aegis:experience-loop",
+      "command": "npm run aegis:experience-loop",
+      "policy_effect": "read_only_audit_only_experience_loop_certification_no_generation_discovery_trading_broker_sleeve_candidate_paper_position_validation_or_capital_allocation_authority"
+    }
+  ],
+  "tests": [
+    {
+      "path": "constellation_2/common/tests/test_aegis_runtime_truth_kernel_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_verified_runtime_graph_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_paper_trade_golden_path_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_context_operator_workflow_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_runtime_readiness_repair_v1.py"
+    },
+    {
+      "path": "constellation_2/phaseL/ui/tests/test_aegis_workflow_operator_ui_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_context_requirement_profile_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_market_data_inputs_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_human_reviewed_paper_mode_v1.py"
+    },
+    {
+      "path": "constellation_2/phaseL/ui/tests/test_aegis_candidate_ui_projection_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_input_contract_reconciliation_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_paper_trade_construction_invariants_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_paper_operator_projection_v1.py"
+    },
+    {
+      "path": "constellation_2/phaseL/ui/tests/test_aegis_paper_operator_projection_ui_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_paper_session_ledger_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_sleeve_evidence_certification_v1.py"
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_outcome_flow_audit_v1.py",
+      "purpose": "Verifies outcome flow status classification for early observation, missing/no exits, broken closure-to-evidence flow, and intentional long holding periods."
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_paper_outcome_auto_closure_v1.py",
+      "purpose": "Regression coverage for paper outcome auto-closure rows, including replaying already-ingested AUTO_CLOSED_PAPER_OUTCOME rows from ledger closure lineage so source closure evidence is not erased after positions leave the open set."
+    },
+    {
+      "path": "constellation_2/common/tests/test_aegis_paper_position_closure_ingestion_v1.py",
+      "purpose": "Regression coverage for ingesting valid paper outcome auto-closure rows into paper_position_ledger_v1, reporting unmatched or blocked closure rows, and proving closed samples flow into sleeve performance truth, sleeve evidence certification, and outcome flow audit without certifying positive evidence from unrealized P&L alone."
+    },
+    {
+      "name": "aegis_trend_eq_realized_vs_unrealized_diagnostic_v1",
+      "command": "pytest constellation_2/common/tests/test_aegis_trend_eq_realized_vs_unrealized_diagnostic_v1.py"
+    },
+    {
+      "path": "constellation_2/aegis_truth/tests/test_experience_loop_v1.py",
+      "purpose": "Verifies append-only Decision to Prediction to Outcome to Regret to CalibrationRecord to BehaviorChange to ExperienceEvent persistence and link auditing."
+    }
+  ],
+  "evidence_artifacts": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "artifact_type": "runtime_truth_kernel",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/runtime_truth_kernel.v1.json",
+      "producer": "ops.tools.run_aegis_runtime_truth_kernel_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "runtime_evaluation",
+      "artifact_type": "runtime_evaluation",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/runtime_evaluation.v1.json",
+      "producer": "ops.aegis.runtime_truth_kernel_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "simulated_paper_rehearsal_receipt",
+      "artifact_type": "manual_execution_receipt",
+      "path": "reports/manual_execution_receipt_v1/{day}/**/manual_execution_receipt.v1.json",
+      "producer": "ops.tools.run_aegis_paper_trade_golden_path_v1",
+      "day_scoped": true,
+      "receipt_type": "SIMULATED_PAPER",
+      "policy": "does_not_enable_manual_capture_or_trading"
+    },
+    {
+      "evidence_id": "market_context_provider_health",
+      "artifact_type": "provider_health",
+      "path": "reports/aegis_market_context_provider_health_v1/{day}/provider_health.v1.json",
+      "producer": "ops.tools.build_aegis_market_context_provider_health_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "market_context_demand",
+      "artifact_type": "market_context_demand",
+      "path": "reports/aegis_market_context_demand_v1/{day}/market_context_demand.v1.json",
+      "producer": "ops.tools.build_aegis_market_context_demand_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "breadth_drop_validation",
+      "artifact_type": "breadth_drop_validation",
+      "path": "reports/aegis_breadth_drop_validation_v1/{day}/breadth_drop_validation.v1.json",
+      "producer": "ops.tools.validate_aegis_breadth_drop_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "vix_drop_validation",
+      "artifact_type": "vix_drop_validation",
+      "path": "reports/aegis_vix_drop_validation_v1/{day}/vix_drop_validation.v1.json",
+      "producer": "ops.tools.validate_aegis_vix_drop_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "vix_source_verification",
+      "artifact_type": "vix_source_verification",
+      "path": "reports/aegis_vix_source_verification_v1/{day}/vix_source_verification.v1.json",
+      "producer": "ops.tools.verify_aegis_vix_source_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "context_readiness_repair",
+      "artifact_type": "context_readiness_repair",
+      "path": "reports/aegis_context_readiness_repair_v1/{day}/context_readiness_repair.v1.json",
+      "producer": "ops.tools.repair_aegis_context_readiness_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "context_requirement_profile",
+      "artifact_type": "context_requirement_profile",
+      "path": "reports/aegis_context_requirement_profile_v1/{day}/context_requirement_profile.v1.json",
+      "producer": "ops.tools.build_aegis_context_requirement_profile_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "market_data_demand",
+      "artifact_type": "market_data_demand",
+      "path": "reports/aegis_market_data_demand_v1/{day}/market_data_demand.v1.json",
+      "producer": "ops.tools.build_aegis_market_data_demand_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "market_data_coverage",
+      "artifact_type": "market_data_coverage",
+      "path": "reports/aegis_market_data_coverage_v1/{day}/market_data_coverage.v1.json",
+      "producer": "ops.tools.build_aegis_market_data_coverage_v1",
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "aegis_paper_position_ledger_v1",
+      "artifact_type": "simulated_paper_position_ledger",
+      "path": "reports/aegis_paper_position_ledger_v1/{day}/paper_position_ledger.v1.json",
+      "producer": "ops.tools.build_aegis_paper_position_ledger_v1",
+      "day_scoped": true,
+      "policy": "paper_only_no_broker_execution_best_open_position_mark_coverage_source_fail_closed_when_missing"
+    },
+    {
+      "evidence_id": "aegis_sleeve_performance_truth_v1",
+      "artifact_type": "canonical_sleeve_performance_truth_read_model",
+      "path": "reports/aegis_sleeve_performance_truth_v1/{day}/sleeve_performance_truth.v1.json",
+      "producer": "ops.tools.build_aegis_sleeve_performance_truth_v1",
+      "day_scoped": true,
+      "policy": "read_model_only_no_runtime_trading_policy_change_no_sleeve_logic_change_no_investable_edge_claim"
+    },
+    {
+      "evidence_id": "paper_position_events",
+      "artifact_type": "simulated_paper_position_events",
+      "path": "reports/aegis_paper_position_events_v1/{day}/paper_position_events.v1.jsonl",
+      "producer": "ops.aegis.paper_position_ledger_v1",
+      "day_scoped": true,
+      "policy": "append_only_paper_only_no_broker_execution"
+    },
+    {
+      "evidence_id": "exit_logic_review",
+      "artifact_type": "human_reviewed_paper_exit_logic_review",
+      "path": "reports/aegis_exit_logic_review_v1/{day}/exit_logic_review.v1.json",
+      "producer": "ops.tools.build_aegis_exit_logic_review_v1",
+      "day_scoped": true,
+      "policy": "review_only_no_auto_exit_no_broker_execution"
+    },
+    {
+      "evidence_id": "exit_recommendations",
+      "artifact_type": "human_reviewed_paper_exit_recommendations",
+      "path": "reports/aegis_exit_recommendations_v1/{day}/exit_recommendations.v1.json",
+      "producer": "ops.tools.build_aegis_exit_recommendations_v1",
+      "day_scoped": true,
+      "policy": "operator_action_required_no_auto_exit_no_broker_execution"
+    },
+    {
+      "evidence_id": "paper_candidates_ready",
+      "artifact_type": "paper_candidate_readiness_gate",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/readiness_dependencies.v1.json",
+      "producer": "ops.aegis.runtime_truth_kernel_v1",
+      "day_scoped": true,
+      "policy": "paper_candidate_readiness_only_no_trade_advice_no_broker_execution"
+    },
+    {
+      "evidence_id": "paper_trade_creation_allowed",
+      "artifact_type": "paper_trade_creation_gate",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/readiness_dependencies.v1.json",
+      "producer": "ops.aegis.runtime_truth_kernel_v1",
+      "day_scoped": true,
+      "policy": "requires_paper_session_and_construction_evidence_no_live_broker_no_autonomous_execution"
+    },
+    {
+      "evidence_id": "paper_trade_ready",
+      "artifact_type": "paper_candidate_creation_readiness_gate",
+      "path": "reports/aegis_runtime_truth_kernel_v1/{day}/readiness_dependencies.v1.json",
+      "producer": "ops.aegis.runtime_truth_kernel_v1",
+      "day_scoped": true,
+      "policy": "separate_from_trade_advice_and_live_trade_readiness"
+    },
+    {
+      "evidence_id": "paper_open_authorization",
+      "artifact_type": "operator_authorization",
+      "path": "reports/paper_open_authorization_v1/{day}/paper_open_authorization.v1.json",
+      "producer": "ops.tools.authorize_aegis_paper_open_v1",
+      "day_scoped": true,
+      "policy": "paper_only_live_broker_submit_false_autonomous_execution_false"
+    },
+    {
+      "evidence_id": "market_data_inputs_for_paper_construction",
+      "artifact_type": "market_data_inputs",
+      "path": "reports/market_data_inputs_v1/{day}/market_data_inputs.v1.json",
+      "producer": "ops.tools.build_aegis_market_data_inputs_v1",
+      "day_scoped": true,
+      "consumer": "ops.aegis.trade_lifecycle.paper_trade_construction_v1"
+    },
+    {
+      "evidence_id": "paper_trade_construction_diagnostics",
+      "artifact_type": "paper_trade_construction",
+      "path": "reports/paper_trade_construction_v1/{day}/paper_trade_construction.v1.json",
+      "producer": "ops.aegis.trade_lifecycle.paper_trade_construction_v1",
+      "day_scoped": true,
+      "diagnostics": "per_symbol_market_data_missing_field_expected_artifact_path_status_and_stale_candidate_review_packet_rejections_when_candidate_contracts_are_newer"
+    },
+    {
+      "evidence_id": "paper_operator_projection",
+      "artifact_type": "aegis_paper_operator_projection",
+      "path": "reports/aegis_paper_operator_projection_v1/{day}/paper_operator_projection.v1.json",
+      "producer": "ops.tools.build_aegis_paper_operator_projection_v1",
+      "day_scoped": true,
+      "policy_effect": "dashboard_projection_only_no_advisory_no_live_no_autonomous_execution"
+    },
+    {
+      "evidence_id": "paper_session_ledger",
+      "artifact_type": "aegis_paper_session_ledger",
+      "path": "reports/aegis_paper_session_ledger_v1/{day}/paper_session_ledger.v1.json",
+      "producer": "ops.aegis.paper_session_ledger_v1",
+      "day_scoped": true,
+      "policy_effect": "canonical_scheduled_paper_session_identity_no_advisory_no_live_no_autonomous_execution"
+    },
+    {
+      "evidence_id": "aegis_sleeve_evidence_certification_v1",
+      "artifact_type": "sleeve_evidence_certification_read_model",
+      "path": "reports/aegis_sleeve_evidence_certification_v1/{day}/sleeve_evidence_certification.v1.json",
+      "producer": "ops.tools.build_aegis_sleeve_evidence_certification_v1",
+      "day_scoped": true,
+      "policy_effect": "read_only_no_trade_advice_no_investable_edge_no_runtime_policy_change"
+    },
+    {
+      "evidence_id": "aegis_outcome_flow_audit_v1",
+      "artifact_type": "outcome_flow_audit_read_model",
+      "path": "reports/aegis_outcome_flow_audit_v1/{day}/outcome_flow_audit.v1.json",
+      "summary_path": "reports/aegis_outcome_flow_audit_v1/{day}/outcome_flow_audit_summary.md",
+      "producer": "ops.tools.build_aegis_outcome_flow_audit_v1",
+      "policy_effect": "read_only_no_trade_recommendations_no_investable_edge_claims_no_sleeve_or_signal_logic_change"
+    },
+    {
+      "artifact_id": "aegis_trend_eq_realized_vs_unrealized_diagnostic_v1",
+      "path": "reports/aegis_trend_eq_realized_vs_unrealized_diagnostic_v1/{day}/trend_eq_realized_vs_unrealized_diagnostic.v1.json",
+      "summary_path": "reports/aegis_trend_eq_realized_vs_unrealized_diagnostic_v1/{day}/trend_eq_realized_vs_unrealized_diagnostic_summary.md",
+      "purpose": "Diagnose Trend EQ realized versus unrealized paper research outcomes without changing sleeve, entry, exit, or signal logic.",
+      "policy_effect": "read_only_diagnostic_no_trade_recommendations_no_investable_edge_claims"
+    },
+    {
+      "evidence_id": "aegis_experience_loop_v1",
+      "artifact_type": "append_only_experience_loop_certification",
+      "path": "reports/aegis_experience_loop_v1/{day}/experience_loop_certification.v1.json",
+      "schema": "constellation_2/aegis_truth/schemas/aegis_experience_loop.v1.schema.json",
+      "producer": "constellation_2.aegis_truth.experience_loop_v1.write_certification",
+      "day_scoped": true,
+      "policy_effect": "read_only_learning_certification_no_generation_discovery_trade_advice_broker_execution_autonomous_execution_sleeve_candidate_paper_position_validation_or_capital_allocation_authority"
+    }
+  ],
+  "ui_surfaces": [
+    {
+      "surface_id": "runtime_truth_status",
+      "route": "/aegis-runtime-truth",
+      "capability_id": "runtime_truth_readiness"
+    }
+  ],
+  "policies": [
+    "Declared != Verified",
+    "Verified != Ready",
+    "Ready != Allowed",
+    "Allowed != Executed",
+    "broker submit/transmit disabled by design",
+    "autonomous execution disabled by design",
+    "SIMULATED_PAPER receipt evidence is rehearsal-only and cannot satisfy real manual capture readiness",
+    "Paper rehearsal proof is separate from broker paper lifecycle proof and live trading remains disabled",
+    "candidate visibility remains available while uncertified context blocks runtime readiness, promotion, and advice",
+    "HUMAN_REVIEWED_PAPER_MODE allows human-reviewed paper packets and simulated paper receipts only",
+    "Paper review may rank and queue candidates while trade advice, broker submit/transmit, and autonomous execution remain disabled",
+    "Context evidence requirements are profile-driven by operating mode; consumers must not hardcode VIX, breadth, or price freshness blockers.",
+    "Market-data demand must include canonical dynamic-universe symbols before refresh.",
+    "Market-data coverage blocks sleeve consumers when required current-session prices are missing or stale.",
+    "Market-data demand and coverage do not enable trade advice, broker execution, or autonomous execution.",
+    "Current-session market-data demand must reject stale cache rows and continue provider fallback per symbol.",
+    "Provider attempts must record normalized causes: PROVIDER_TIMEOUT, PROVIDER_NO_DATA, CACHE_STALE, SYMBOL_UNSUPPORTED, CERTIFIED.",
+    "Portal market-data coverage must group missing or stale symbols by cause and provider.",
+    "Exit recommendations in HUMAN_REVIEWED_PAPER_MODE are evidence only; Record Exit remains operator-confirmed and simulated paper only",
+    "PAPER_CANDIDATES_READY and PAPER_TRADE_CREATION_ALLOWED are derived paper-only readiness nodes; they cannot enable trade advice, broker submit/transmit, autonomous execution, or live trading.",
+    "PAPER_CANDIDATES_READY and PAPER_TRADE_READY are separate from TRADE_ADVICE_ALLOWED, MANUAL_TRADE_CAPTURE_ALLOWED, and LIVE_TRADE_READY.",
+    "Paper candidate readiness may pass while advisory/trade advice, live broker trading, broker submit/transmit, and autonomous execution remain blocked or disabled by design.",
+    "PAPER_TRADE_CREATION_ALLOWED requires paper/session lifecycle and construction evidence and must keep live broker routing disabled.",
+    "paper_trade_construction_v1 must reject candidate_review_packet as an authoritative source when aegis_candidate_contracts_v1 is newer and contains valid candidate contracts; construction then consumes the current paper review queue/current authoritative candidate set without enabling trade advice, broker execution, autonomous execution, or live trading.",
+    "Experience Loop V1 is append-only read-model evidence for attention learning; it cannot change runtime truth gates, create candidates, mutate allocation, advise trades, or enable broker/autonomous/live behavior."
+  ],
+  "freshness_requirements": [
+    {
+      "evidence_id": "runtime_truth_kernel",
+      "max_age_days": 0,
+      "day_scoped": true
+    },
+    {
+      "evidence_id": "runtime_evaluation",
+      "max_age_days": 0,
+      "day_scoped": true
+    }
+  ],
+  "invariants": [
+    "Sleeve input contracts must derive governed allowed symbols from the canonical symbol universe resolver before market data demand, raw signal projection, candidate contracts, or Portal projection consume them.",
+    "HUMAN_REVIEWED_PAPER_MODE treats prior certified EOD VIX as non-blocking when context_requirement_profile.v1.json declares market.volatility.VIX NON_BLOCKING.",
+    "Portal mismatch tables are read-only projections of input_contract_reconciliation.v1.json and cannot relax validation, trade advice, broker execution, autonomous execution, or paper workflow policy.",
+    "Exit recommendation artifacts must not close positions automatically or enable broker/autonomous/live execution",
+    "Candidate diagnostics must not consume stale sleeve input contract market-data hashes; repair-input-contracts must regenerate downstream contracts after market_data.v1.json changes before diagnostics run.",
+    "Every capability listed in the runtime truth kernel CAPABILITIES array must have an explicit graph node before runtime truth policy is applied.",
+    "Runtime truth recovery plans must list explicit root blockers even when missing_or_stale_source_count is zero, so PARTIAL_CONTEXT/BLOCKED is never explained as all-clear.",
+    "Runtime truth evaluation ignores future-dated evidence events when selecting latest evidence for a generated_at timestamp, preventing accidental future evidence from poisoning current-day readiness."
+  ],
+  "evidence": [
+    {
+      "evidence_id": "hash_lineage",
+      "artifact_type": "hash_lineage_read_model",
+      "path": "reports/aegis_hash_lineage_v1/{day}/hash_lineage.v1.json",
+      "producer": "ops.tools.build_aegis_hash_lineage_v1",
+      "day_scoped": true,
+      "policy": "read_model_only_no_runtime_trading_policy_change"
+    }
+  ],
+  "notes": [
+    "Paper position ledger mark selection must choose the same-day market-data source with the best coverage for open paper-position symbols; partial broad/context market data must not mask fuller market_data_inputs_v1 coverage, and missing marks remain fail-closed without changing broker, trading, trade-advice, allocation, order-management, strategy, validation, or safety gates.",
+    "Hash lineage records market-data, data-registry, market-data-inputs, sleeve-contract, candidate-contract, and diagnostics hashes so stale downstream expectations are regenerated rather than bypassed.",
+    "Sleeve Evidence Certification V1 converts existing sleeve mark-to-market and closed-outcome observations into conservative evidence statuses without changing runtime truth gates, sleeve logic, signal logic, allocation, broker execution, or trade advice policy.",
+    "AEGIS_OUTCOME_FLOW_AUDIT_V1 compares paper position ledger, P&L, sleeve performance truth, sleeve evidence certification, exit recommendations, and outcome artifacts to classify evidence accumulation flow without changing UI, sleeve logic, signal logic, trade advice, or investable-edge claims.",
+    "paper_position_ledger_v1 ingests target-day aegis_paper_outcome_auto_closure_v1 AUTO_CLOSED_PAPER_OUTCOME rows only when they match an existing paper position and include exit price plus exit timestamp; unmatched or incomplete closure rows are reported in closure_ingestion_unmatched/blocked, preserving source lineage without changing signal, entry, sleeve, trading, broker, advisory, or safety-gate behavior.",
+    "aegis_paper_outcome_auto_closure_v1 re-emits already-ingested AUTO_CLOSED_PAPER_OUTCOME rows only from paper_position_ledger_v1 closure lineage/source receipts so closure source evidence remains replayable after positions leave the open set; it does not create new closures, change exit logic, or enable trade advice, broker execution, live trading, or autonomous execution.",
+    "AEGIS_TREND_EQ_REALIZED_VS_UNREALIZED_DIAGNOSTIC_V1 is read-only; it does not change UI, signal logic, sleeve logic, entry logic, exit logic, or trading policy.",
+    "AEGIS_EXPERIENCE_LOOP_V1 records the smallest complete Decision to Prediction to Outcome to Regret to Behavior Change loop, including CalibrationRecord, as append-only evidence only."
+  ]
+}

@@ -107,6 +107,244 @@ def test_existing_audit_and_control_packet_commands_still_run(tmp_path: Path, ca
     assert "runtime_invalidations_path:" in out
 
 
+def test_paper_review_is_distinct_from_trade_advice(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path)
+    _write_json(
+        tmp_path / f"reports/aegis_candidate_review_packet_v1/{DAY}/candidate_review_packet.v1.json",
+        {
+            "schema_id": "candidate_review_packet",
+            "schema_version": "v1",
+            "artifact_id": "candidate_review_packet",
+            "day_utc": DAY,
+            "generated_at_utc": NOW,
+            "operating_mode": "HUMAN_REVIEWED_PAPER_MODE",
+            "candidate_count": 1,
+            "review_candidates": [{"candidate_id": "candidate-1", "paper_trade_eligible": True, "live_trade_eligible": False}],
+            "safety": {"paper_only": True},
+        },
+    )
+    _write_json(
+        tmp_path / f"reports/aegis_paper_review_queue_v1/{DAY}/paper_review_queue.v1.json",
+        {
+            "schema_id": "paper_review_queue",
+            "schema_version": "v1",
+            "artifact_id": "paper_review_queue",
+            "day_utc": DAY,
+            "generated_at_utc": NOW,
+            "operating_mode": "HUMAN_REVIEWED_PAPER_MODE",
+            "rows": [{"candidate_id": "candidate-1", "status": "AWAITING_REVIEW", "operator_decision_required": True}],
+            "status_counts": {"AWAITING_REVIEW": 1},
+            "safety": {"paper_only": True},
+        },
+    )
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["PAPER_REVIEW_ALLOWED"]["allowed"] is True
+    assert payload["dependency_graph"]["MANUAL_PAPER_RECEIPT_ALLOWED"]["allowed"] is True
+    assert payload["dependency_graph"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
+    assert payload["broker_submit_required"] is False
+    assert payload["autonomous_execution_allowed"] is False
+
+
+def _write_paper_candidate_evidence(root: Path, *, day_utc: str = DAY, generated_at: str = NOW, count: int = 17) -> None:
+    candidates = [
+        {
+            "candidate_id": f"paper-candidate-{idx}",
+            "symbol": "QQQ",
+            "paper_trade_eligible": True,
+            "live_trade_eligible": False,
+            "operator_review_required": True,
+        }
+        for idx in range(count)
+    ]
+    _write_json(
+        root / f"reports/aegis_candidate_review_packet_v1/{day_utc}/candidate_review_packet.v1.json",
+        {
+            "schema_id": "candidate_review_packet",
+            "schema_version": "v1",
+            "artifact_id": "candidate_review_packet",
+            "day_utc": day_utc,
+            "generated_at_utc": generated_at,
+            "operating_mode": "HUMAN_REVIEWED_PAPER_MODE",
+            "candidate_count": count,
+            "review_candidates": candidates,
+            "safety": {
+                "paper_only": True,
+                "trade_advice_allowed": False,
+                "broker_submit_transmit_allowed": False,
+                "autonomous_execution_allowed": False,
+                "live_trade_eligible": False,
+            },
+        },
+    )
+    _write_json(
+        root / f"reports/aegis_paper_review_queue_v1/{day_utc}/paper_review_queue.v1.json",
+        {
+            "schema_id": "paper_review_queue",
+            "schema_version": "v1",
+            "artifact_id": "paper_review_queue",
+            "day_utc": day_utc,
+            "generated_at_utc": generated_at,
+            "operating_mode": "HUMAN_REVIEWED_PAPER_MODE",
+            "rows": [{**candidate, "status": "AWAITING_REVIEW"} for candidate in candidates],
+            "status_counts": {"AWAITING_REVIEW": count},
+            "safety": {
+                "paper_only": True,
+                "trade_advice_allowed": False,
+                "broker_submit_transmit_allowed": False,
+                "autonomous_execution_allowed": False,
+                "live_trade_eligible": False,
+            },
+        },
+    )
+
+
+def _write_paper_creation_evidence(root: Path, *, day_utc: str = DAY, generated_at: str = NOW, authorized: bool = True) -> None:
+    _write_json(
+        root / f"reports/paper_session_authority_v1/{day_utc}/paper_session_authority.v1.json",
+        {
+            "schema_id": "paper_session_authority",
+            "schema_version": "v1",
+            "day_utc": day_utc,
+            "produced_utc": generated_at,
+            "authority_status": "GRANTED" if authorized else "DENIED",
+            "submission_authorized": authorized,
+            "paper_open_allowed": authorized,
+        },
+    )
+    _write_json(
+        root / f"reports/paper_session_ledger_v1/{day_utc}/paper_session_ledger.v1.json",
+        {
+            "schema_id": "paper_session_ledger",
+            "schema_version": "v1",
+            "day_utc": day_utc,
+            "evaluated_at_utc": generated_at,
+            "submit_lifecycle": {"mode": "SIMULATED_PAPER"},
+            "post_submit_lifecycle": {"receipt_required_after_submit": True},
+        },
+    )
+    _write_json(
+        root / f"reports/paper_trade_construction_v1/{day_utc}/paper_trade_construction.v1.json",
+        {
+            "schema_id": "paper_trade_construction",
+            "schema_version": "v1",
+            "artifact_id": f"paper_trade_construction_v1:{day_utc}:test",
+            "source_day": day_utc,
+            "generated_at_utc": generated_at,
+            "paper_submit_created": authorized,
+            "trade_construction_status": "complete" if authorized else "blocked_missing_market_data",
+            "broker_execution_allowed": False,
+            "live_trading_allowed": False,
+            "order_routing_allowed": False,
+            "constructed_paper_trade_count": 1 if authorized else 0,
+            "constructed_paper_trades": [{"candidate_id": "paper-candidate-1", "symbol": "QQQ", "scope": "paper_only", "broker_execution_allowed": False, "live_trading_allowed": False, "order_routing_allowed": False}] if authorized else [],
+            "market_data_diagnostics": [] if authorized else [{"candidate_id": "paper-candidate-1", "symbol": "QQQ", "missing_field": "market_data.value", "expected_source_artifact": "market_data_inputs_v1", "artifact_path_checked": str(root / f"reports/market_data_inputs_v1/{day_utc}/market_data_inputs.v1.json"), "status": "ABSENT"}],
+        },
+    )
+
+
+def test_paper_creation_without_open_authorization_is_blocked_precisely(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence", "broker_lifecycle_proof"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=False)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+    blockers = payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["missing_or_blocking_artifacts"]
+
+    assert payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is False
+    assert "paper_session_authority:PAPER_OPEN_NOT_AUTHORIZED" in blockers
+
+
+def test_paper_creation_with_missing_market_data_reports_symbol_field_and_path(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence", "broker_lifecycle_proof"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=True)
+    construction_path = tmp_path / f"reports/paper_trade_construction_v1/{DAY}/paper_trade_construction.v1.json"
+    construction = json.loads(construction_path.read_text(encoding="utf-8"))
+    construction["paper_submit_created"] = False
+    construction["trade_construction_status"] = "blocked_missing_market_data"
+    construction["blocker_codes"] = ["MISSING_CURRENT_MARKET_DATA"]
+    construction["constructed_paper_trade_count"] = 0
+    construction["constructed_paper_trades"] = []
+    construction["market_data_diagnostics"] = [{"candidate_id": "paper-candidate-1", "symbol": "QQQ", "missing_field": "market_data.value", "expected_source_artifact": "market_data_inputs_v1", "artifact_path_checked": str(tmp_path / f"reports/market_data_inputs_v1/{DAY}/market_data_inputs.v1.json"), "status": "ABSENT"}]
+    _write_json(construction_path, construction)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+    blockers = payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["missing_or_blocking_artifacts"]
+
+    assert payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is False
+    assert any(item.startswith("paper_trade_construction:MISSING_MARKET_DATA:QQQ:market_data.value:market_data_inputs_v1:ABSENT:") for item in blockers)
+
+
+def test_paper_creation_with_open_authorization_and_complete_market_data_is_allowed(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence", "broker_lifecycle_proof"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=True)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is True
+    assert payload["dependency_graph"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
+    assert payload["dependency_graph"]["BROKER_SUBMIT_TRANSMIT"]["allowed"] is False
+    assert payload["dependency_graph"]["AUTONOMOUS_EXECUTION_ALLOWED"]["allowed"] is False
+
+
+def test_paper_candidates_ready_with_advisory_blocked_and_live_disabled(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence", "broker_lifecycle_proof"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=True)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["PAPER_CANDIDATES_READY"]["allowed"] is True
+    assert payload["dependency_graph"]["PAPER_CANDIDATES_READY"]["candidate_count"] == 17
+    assert payload["dependency_graph"]["PAPER_TRADE_READY"]["allowed"] is True
+    assert payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is True
+    assert payload["dependency_graph"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
+    assert payload["dependency_graph"]["LIVE_TRADE_READY"]["allowed"] is False
+    assert payload["dependency_graph"]["AUTONOMOUS_EXECUTION_ALLOWED"]["allowed"] is False
+
+
+def test_paper_candidates_without_queue_fail_with_precise_blocker(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence", "broker_lifecycle_proof"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _remove_artifact(tmp_path, "paper_review_queue")
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["PAPER_CANDIDATES_READY"]["allowed"] is False
+    assert "paper_review_queue" in payload["dependency_graph"]["PAPER_CANDIDATES_READY"]["missing_or_blocking_artifacts"]
+    assert payload["dependency_graph"]["PAPER_TRADE_READY"]["allowed"] is False
+
+
+def test_advisory_remains_blocked_while_paper_creation_is_allowed(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=True)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["allowed"] is True
+    assert payload["dependency_graph"]["TRADE_ADVICE_ALLOWED"]["allowed"] is False
+    assert "TRADE_ADVICE_ALLOWED" not in payload["dependency_graph"]["PAPER_TRADE_CREATION_ALLOWED"]["depends_on_capabilities"]
+
+
+def test_live_broker_and_autonomous_execution_stay_disabled_in_paper_mode(tmp_path: Path) -> None:
+    _write_all_kernel_artifacts(tmp_path, omit={"manual_trade_packet", "promoted_candidate_evidence"})
+    _write_paper_candidate_evidence(tmp_path, count=17)
+    _write_paper_creation_evidence(tmp_path, authorized=True)
+
+    payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
+
+    assert payload["dependency_graph"]["LIVE_TRADE_READY"]["allowed"] is False
+    assert payload["dependency_graph"]["LIVE_TRADE_READY"]["policy_status"] == "DISABLED_BY_POLICY"
+    assert payload["dependency_graph"]["BROKER_SUBMIT_TRANSMIT"]["allowed"] is False
+    assert payload["dependency_graph"]["BROKER_SUBMIT_TRANSMIT"]["policy_status"] == "DISABLED_BY_POLICY"
+    assert payload["dependency_graph"]["AUTONOMOUS_EXECUTION_ALLOWED"]["allowed"] is False
+    assert payload["dependency_graph"]["AUTONOMOUS_EXECUTION_ALLOWED"]["policy_status"] == "DISABLED_BY_POLICY"
+
+
 def test_no_broker_submit_or_transmit_capability_is_introduced(tmp_path: Path) -> None:
     _write_all_kernel_artifacts(tmp_path)
     payload = build_runtime_truth_kernel_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
@@ -796,6 +1034,7 @@ def _write_all_kernel_artifacts(
         "aegis_lite_operating_status": (f"reports/aegis_lite_operating_status_v1/{day_utc}/aegis_lite_operating_status.v1.json", _artifact("aegis_lite_operating_status", "aegis_lite_operating_status_v1", day_utc=day_utc, generated_at=generated_at, broker_mode="MANUAL_ONLY")),
         "aegis_lite_eod_report": (f"reports/aegis_lite_eod_report_v1/{day_utc}/aegis_lite_eod_report.v1.json", _artifact("aegis_lite_eod_report", "aegis_lite_eod_report_v1", day_utc=day_utc, generated_at=generated_at)),
         "operator_execution_queue": (f"reports/operator_execution_queue_v1/{day_utc}/operator_execution_queue.v1.json", _artifact("operator_execution_queue", "operator_execution_queue_v1", day_utc=day_utc, generated_at=generated_at, execution_queue=[])),
+        "market_data_inputs": (f"reports/market_data_inputs_v1/{day_utc}/market_data_inputs.v1.json", _artifact("market_data_inputs", "market_data_inputs_v1", day_utc=day_utc, generated_at=generated_at, status="CURRENT", broker_execution_allowed=False, autonomous_execution_allowed=False)),
         "manual_trade_packet": (f"reports/manual_trade_packet_v1/{day_utc}/run/manual_trade_packet.v1.json", _artifact("manual_trade_packet", "manual_trade_packet_v1", day_utc=day_utc, generated_at=generated_at, date=day_utc)),
         "manual_execution_receipt": (
             f"reports/manual_execution_receipt_v1/{day_utc}/run/manual_execution_receipt.v1.json",
@@ -901,6 +1140,12 @@ def _artifact_path(root: Path, artifact_id: str, *, day_utc: str = DAY) -> Path:
         "event_market_snapshot": root / f"reports/event_market_snapshot_v1/{day_utc}/event_market_snapshot.v1.json",
         "event_validity_gate": root / f"reports/event_validity_gate_v1/{day_utc}/run/event_validity_gate.v1.json",
         "manual_execution_receipt": root / f"reports/manual_execution_receipt_v1/{day_utc}/run/manual_execution_receipt.v1.json",
+        "candidate_review_packet": root / f"reports/aegis_candidate_review_packet_v1/{day_utc}/candidate_review_packet.v1.json",
+        "paper_review_queue": root / f"reports/aegis_paper_review_queue_v1/{day_utc}/paper_review_queue.v1.json",
+        "market_data_inputs": root / f"reports/market_data_inputs_v1/{day_utc}/market_data_inputs.v1.json",
+        "paper_session_authority": root / f"reports/paper_session_authority_v1/{day_utc}/paper_session_authority.v1.json",
+        "paper_session_ledger": root / f"reports/paper_session_ledger_v1/{day_utc}/paper_session_ledger.v1.json",
+        "paper_trade_construction": root / f"reports/paper_trade_construction_v1/{day_utc}/paper_trade_construction.v1.json",
     }
     return paths[artifact_id]
 
