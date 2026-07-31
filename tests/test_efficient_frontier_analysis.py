@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import src.efficient_frontier_report as discovery_module
+import src.main as main_module
 from src.main import (
     FrontierCandidate,
     _best_challenger,
@@ -12,6 +16,9 @@ from src.main import (
     ultrasafe_benchmark,
 )
 from src.efficient_frontier_report import build_portfolio_discovery_report_markdown
+
+
+FINAL_RANKING_FIXTURE = Path(__file__).parent / "fixtures" / "research_reports" / "final_candidate_ranking_report.json"
 
 
 def _candidate(candidate_id: str, *, cagr: float | None, sharpe: float | None, max_drawdown: float | None) -> FrontierCandidate:
@@ -31,7 +38,8 @@ def _candidate(candidate_id: str, *, cagr: float | None, sharpe: float | None, m
     )
 
 
-def test_ultrasafe_benchmark_included_when_not_present_in_db() -> None:
+def test_ultrasafe_benchmark_included_when_not_present_in_db(monkeypatch) -> None:
+    monkeypatch.setattr(main_module, "FINAL_RANKING_GLOB", str(FINAL_RANKING_FIXTURE))
     markdown, summary = build_efficient_frontier_markdown(top_n=50)
 
     assert "UltraSafe benchmark" in markdown
@@ -94,7 +102,8 @@ def test_known_complete_challenger_is_tradeoff_not_dominator() -> None:
     assert benchmark_relation(challenger, ultrasafe) == "different_tradeoff"
 
 
-def test_portfolio_discovery_report_answers_complement_question() -> None:
+def test_portfolio_discovery_report_answers_complement_question(monkeypatch) -> None:
+    monkeypatch.setattr(discovery_module, "FINAL_RANKING_GLOB", str(FINAL_RANKING_FIXTURE))
     markdown, summary = build_portfolio_discovery_report_markdown(top_n=50)
 
     assert "## Executive Summary" in markdown

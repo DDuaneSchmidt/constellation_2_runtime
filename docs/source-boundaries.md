@@ -10,7 +10,7 @@ The following are committed and must reproduce from a clean checkout:
 - `governance/` registries, contracts, schemas, and policies;
 - `docs/` authored documentation, excluding generated screenshots;
 - package and repository configuration; and
-- explicit fixtures and static application assets.
+- explicit fixtures and static application assets. Generated data required by tests must be copied into a purpose-specific `tests/fixtures/` path and injected explicitly; tests must not depend on ignored `reports/` state.
 
 The top-level `runtime/` directory is a Python source package. It is not runtime state and must remain versioned.
 

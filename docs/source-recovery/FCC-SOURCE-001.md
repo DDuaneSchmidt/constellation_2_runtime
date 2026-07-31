@@ -62,6 +62,10 @@ The mandatory pre-change command `npm run aegis:audit` returned `PASS_AEGIS_PORT
 - `npm run aegis:research-journal-validate`: PASS.
 - `npm run aegis:kernel:test`: 20 passed.
 - `pytest -q tests`: 73 passed.
+- Fresh-clone validation initially exposed four tests coupled to ignored generated `reports/` data. The three required data inputs were preserved as explicit versioned fixtures under `tests/fixtures/research_reports/`, and the tests now inject those fixtures without changing application defaults or business logic.
+- Fresh-clone `pytest -q tests`: 73 passed after the fixture boundary correction.
+- Fresh-clone `npm run aegis:kernel:test`: 20 passed.
+- Fresh-clone Python compile validation: PASS.
 - Python compile validation for `aegis`, `constellation_2`, `ops`, `runtime`, `src`, and `tests`: PASS with bytecode redirected to `/tmp/fcc-source-001-pycache` because legacy ignored `__pycache__` directories include unwritable ownership.
 - Broad historical `pytest -q`: interrupted at 4 percent after 400 passed and 22 failed in 140.17 seconds. Failures were existing application/runtime contract divergences, including retired advisor bridge expectations, sleeve-set drift, evidence-gateway assumptions, AI inventory classification, and candidate diagnostics. They are outside this source-recovery ticket and remain fail-closed; no business logic was changed to conceal them.
 
