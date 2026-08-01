@@ -803,6 +803,38 @@ def _safe_read_json(path: Path) -> Tuple[Optional[Any], Optional[str]]:
         return None, "READ_ERROR"
 
 
+def _release_identity_payload_v1() -> Dict[str, Any]:
+    manifest_path = Path(os.environ.get("AEGIS_RELEASE_MANIFEST", "/app/release-manifest.json"))
+    payload, read_error = _safe_read_json(manifest_path)
+    required = ("release_id", "source_commit", "artifact_sha256", "image_digest")
+    if read_error is not None or not isinstance(payload, dict):
+        return {
+            "schema_version": "aegis-release-identity.v1",
+            "status": "BLOCKED",
+            "reason": read_error or "MANIFEST_NOT_OBJECT",
+        }
+    missing = [key for key in required if not isinstance(payload.get(key), str) or not payload[key].strip()]
+    source_commit = str(payload.get("source_commit") or "").strip()
+    if len(source_commit) != 40 or any(char not in "0123456789abcdef" for char in source_commit):
+        missing.append("source_commit")
+    if missing:
+        return {
+            "schema_version": "aegis-release-identity.v1",
+            "status": "BLOCKED",
+            "reason": "INVALID_RELEASE_MANIFEST",
+            "invalid_or_missing_fields": sorted(set(missing)),
+        }
+    return {
+        "schema_version": "aegis-release-identity.v1",
+        "status": "READY",
+        "release_id": payload["release_id"],
+        "source_commit": source_commit,
+        "artifact_sha256": payload["artifact_sha256"],
+        "image_digest": payload["image_digest"],
+        "build_id": payload.get("build_id"),
+    }
+
+
 def _mtime(path: Path) -> Optional[float]:
     try:
         return path.stat().st_mtime
@@ -9006,6 +9038,12 @@ class OpsHandler(SimpleHTTPRequestHandler):
         started = time.perf_counter()
         parsed = urlparse(self.path)
         path = parsed.path
+        if path in {"/api/release-identity", "/aegis-lite/api/release-identity"}:
+            payload = _release_identity_payload_v1()
+            status_code = HTTPStatus.OK if payload["status"] == "READY" else HTTPStatus.SERVICE_UNAVAILABLE
+            self._send_json(status_code, payload)
+            sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            return
         if path in {"/health", "/healthz"}:
             self._send_json(HTTPStatus.OK, self._health_payload())
             sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
