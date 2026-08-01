@@ -4520,6 +4520,7 @@
     }
   ],
   "implementation_notes": [
+    "Immutable AEGIS Lite deployments resolve source identity from the governed release manifest when Git metadata and the Git executable are intentionally absent from the runtime image; missing or invalid manifest identity remains fail-closed and no trading, broker, candidate, allocation, or safety-gate behavior changes.",
     "Oil Shock Risk Policy Schema Repair V1 adds a schema-conformance proof artifact and audit command for C2_OIL_SHOCK_REVERSAL_V1 without changing strategy behavior, stop-loss thresholds, paper construction, outcome behavior, marks, broker behavior, trade advice, live trading, autonomous execution, or safety gates.",
     "Daily Research Integrity Audit V1 emits aegis_daily_research_integrity_audit_v1 and Command Center renders a compact Daily Integrity section below Today's Research Result; this is read-only visibility and does not change trading, broker behavior, safety gates, candidate logic, paper lifecycle, exit logic, validation rules, or allocation mutation.",
     "Phase 6D Research refinement makes research-only follow-ups, latest finding, and first blocker visible above the fold; active research rows now distinguish no operator action from follow-up review without changing research logic, trading logic, execution policy, candidate generation, canonical artifacts, or safety gates.",

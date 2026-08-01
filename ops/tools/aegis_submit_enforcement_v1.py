@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -37,23 +38,44 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _git_commit() -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return str(proc.stdout or "").strip() if proc.returncode == 0 else ""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        return str(proc.stdout or "").strip()
+    return _immutable_release_commit()
 
 
 def _git_dirty_status() -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "status", "--short"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return "DIRTY" if str(proc.stdout or "").strip() else "CLEAN"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "status", "--short"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        return "DIRTY" if str(proc.stdout or "").strip() else "CLEAN"
+    return "CLEAN" if _immutable_release_commit() else "DIRTY"
+
+
+def _immutable_release_commit() -> str:
+    manifest_path = str(os.environ.get("AEGIS_RELEASE_MANIFEST") or "").strip()
+    if not manifest_path:
+        return ""
+    payload = _read_json(Path(manifest_path))
+    commit = str(payload.get("source_commit") or payload.get("git_commit") or "").strip().lower()
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        return ""
+    return commit
 
 
 def _report_path(truth_root: Path, family: str, day_utc: str, filename: str) -> Path:
